@@ -115,7 +115,7 @@ fn source(body: &str) -> String {
 }
 fn context() -> Context {
     let mut ctx: Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     ctx.amount_units = 1000;
     ctx.token = "HNCXuc5dkQrUimi76UaezxrF3hfEhWDr9BXvWXGyi2qv".into();
     ctx.service_call_input = Some(ServiceCallInput {
@@ -459,8 +459,7 @@ fn authenticated_testnet_asset_is_exact_and_legacy_usdc_semantics_are_unchanged(
         evaluate(&legacy, Profile::Oracle, &context()).outcome,
         "fail"
     );
-    let ctx: Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+    let ctx: Context = serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     assert_eq!(evaluate(&legacy, Profile::Oracle, &ctx).outcome, "pass");
     assert!(compile(&format!("use allowit::prelude::*; pub async fn execute(ctx:&Context)->PolicyResult {{ {CALL}; Ok(()) }}")).is_err());
     let mut forged = policy;
@@ -549,7 +548,7 @@ async fn _execute(ctx: &Context, params: &PolicyParams) -> PolicyResult {
     }
     fn context() -> Context {
         let mut ctx: Context =
-            serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+            serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
         ctx.network = "tempo:localnet".into();
         ctx.token = "pathUSD".into();
         ctx.action = "buy research".into();

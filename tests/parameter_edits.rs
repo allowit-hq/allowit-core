@@ -58,7 +58,7 @@ fn rejected(response: Value) {
 
 fn context(question: &str, lower: u64, upper: u64) -> Context {
     let mut context: Context =
-        serde_json::from_str(include_str!("../../docs/examples/green-context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/green-context.json")).unwrap();
     context.confidence.insert(
         semantic_evidence_key(question),
         ConfidenceInterval {

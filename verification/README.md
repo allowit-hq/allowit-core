@@ -1,8 +1,8 @@
 # Allowit verification
 
-This folder holds verification for `core/`. [`lean/AllowIt.lean`](lean/README.md) is an executable, machine-checked Lean model of feature selection and a small policy decision language. It uses the five core feature identifiers. Its 13 theorems establish only their bounded model: no proof or differential test connects the model to the Rust implementation.
+This folder holds verification for Allowit core. [`lean/AllowIt.lean`](lean/README.md) is an executable, machine-checked Lean model of feature selection and a small policy decision language. It uses the five core feature identifiers. Its 13 theorems establish only their bounded model: no proof or differential test connects the model to the Rust implementation.
 
-The Solana verification set is in [allowit-contracts-solana `verification/`](https://github.com/allowit-hq/allowit-contracts-solana/tree/main/verification): the obligation ledger, the native daily-rule model and its source-bound check, the published-source check, and the refinement, adapter, trace, refusal, isolation and runtime evidence. Those files bind each other by hash, so they moved as one unit.
+The Solana verification set is in [allowit-contracts-solana `verification/` at 7c47ff4](https://github.com/allowit-hq/allowit-contracts-solana/tree/7c47ff42a440fe7820b7e76eb3a17d96ec319edc/verification): the obligation ledger, the native daily-rule model and its source-bound check, the published-source check, and the refinement, adapter, trace, refusal, isolation and runtime evidence. Those files bind each other by hash, so they moved as one unit.
 
 ## Evidence rules
 

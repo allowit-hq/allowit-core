@@ -4,14 +4,14 @@ fn source(body: &str) -> String {
     format!("pub async fn evaluate(ctx: &Context) -> PolicyResult {{ {body} }}")
 }
 fn context() -> Context {
-    serde_json::from_str(include_str!("../../docs/examples/green-context.json")).unwrap()
+    serde_json::from_str(include_str!("../docs/examples/green-context.json")).unwrap()
 }
 
 #[test]
 fn research_category_requires_assessment_regardless_of_caller_label() {
-    let policy = compile(include_str!("../../docs/examples/research.rs")).unwrap();
+    let policy = compile(include_str!("../docs/examples/research.rs")).unwrap();
     let mut ctx: Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     let question =
         "Does this purchase count as research under the user's stated purpose and definitions?";
     for label in ["research", "study", "caller-chosen-label"] {
@@ -69,7 +69,7 @@ fn semantic_request_identifies_exact_question_and_requires_original_intent() {
 }
 #[test]
 fn deterministic_return_gap_cannot_be_overridden_by_a_high_semantic_score() {
-    let p = compile(include_str!("../../docs/examples/green-investments.rs")).unwrap();
+    let p = compile(include_str!("../docs/examples/green-investments.rs")).unwrap();
     let mut ctx = context();
     for question in [
         "Does this transaction count as an investment under the user's stated purpose and definitions?",

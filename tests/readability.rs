@@ -3,7 +3,7 @@ fn source(body: &str) -> String {
     format!("pub async fn evaluate(ctx: &Context) -> PolicyResult {{ {body} }}")
 }
 fn context() -> Context {
-    serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap()
+    serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap()
 }
 
 #[test]

@@ -1,0 +1,67 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/build.sh
+      - run: node tests/test-wasm.mjs
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Feature profiles
+        run: |
+          cargo check --locked --no-default-features --lib
+          cargo check --locked --no-default-features --features compiler --lib
+          cargo check --locked --no-default-features --features typed-workflow --lib
+          cargo check --locked --no-default-features --features std --lib
+          cargo check --locked --no-default-features --features std,oracle-ledger --lib
+          cargo check --locked --no-default-features --features typed-workflow,oracle-ledger --lib
+          cargo check --locked --no-default-features --features oracle-ledger --lib
+          cargo test --locked --no-default-features --features compact-contract-validation --test contract_validation
+          cargo test --locked --features compact-contract-validation --test contract_validation
+          cargo test --locked --no-default-features --test feature_profiles
+          cargo test --locked --no-default-features --features typed-workflow --test typed_host_feature
+          cargo test --locked --no-default-features --features std,typed-workflow
+      - name: Client, service, transport and contract modules
+        run: |
+          cargo test --locked --features client --lib -- client::
+          cargo test --locked --features service,transport --lib -- service::
+          cargo test --locked --features service,transport --test transport_rpc
+          cargo test --locked --features contract --lib -- contract::
+          cargo test --locked --features contract --test contract_binary --test contract_conformance
+          cargo test --locked --features contract-stellar --lib -- contract::
+          cargo test --locked --features contract-stellar --test contract_binary --test contract_conformance
+          cargo check --locked --no-default-features --features contract --lib
+          cargo clippy --locked --all-targets --features client,service,transport,contract -- -D warnings
+          cargo clippy --locked --all-targets --features contract-stellar -- -D warnings
+  verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s verification/tests

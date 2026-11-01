@@ -1,13 +1,13 @@
 extern crate allowit_sdk as allowit;
 
 mod research {
-    include!("../../docs/examples/research.rs");
+    include!("../docs/examples/research.rs");
 }
 mod approval {
-    include!("../../docs/examples/approval.rs");
+    include!("../docs/examples/approval.rs");
 }
 mod green {
-    include!("../../docs/examples/green-investments.rs");
+    include!("../docs/examples/green-investments.rs");
 }
 
 #[test]

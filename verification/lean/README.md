@@ -2,7 +2,7 @@
 
 `AllowIt.lean` is an executable, machine-checked model of feature selection and a small policy decision language. Its production-to-model connection has not been proved or differentially tested. It does not prove the Rust SDK, Go assembler, generated Markdown, chain adapters or compiled/deployed contracts.
 
-The native daily-rule model `NativeDaily.lean`, its source-bound check and the other Solana verification evidence are in [allowit-contracts-solana `verification/`](https://github.com/allowit-hq/allowit-contracts-solana/tree/main/verification). That repository keeps a byte-identical copy of `AllowIt.lean`, because its receipts bind the file by hash.
+The native daily-rule model `NativeDaily.lean`, its source-bound check and the other Solana verification evidence are in [allowit-contracts-solana `verification/` at 7c47ff4](https://github.com/allowit-hq/allowit-contracts-solana/tree/7c47ff42a440fe7820b7e76eb3a17d96ec319edc/verification). That revision keeps a byte-identical copy of `AllowIt.lean`, because its receipts bind the file by hash.
 
 ## Run
 

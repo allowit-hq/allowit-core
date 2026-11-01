@@ -5,7 +5,7 @@ fn source(body: &str) -> String {
     format!("pub async fn evaluate(ctx: &Context) -> PolicyResult {{ {body} }}")
 }
 fn context() -> Context {
-    serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap()
+    serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap()
 }
 fn decision(body: &str, ctx: &Context) -> allowit_sdk::Decision {
     evaluate(&compile(&source(body)).unwrap(), Profile::Oracle, ctx)
@@ -107,7 +107,7 @@ fn repeated_prompts_have_distinct_call_site_keys() {
 }
 #[test]
 fn confidence_threshold_and_missing_or_malformed_evidence() {
-    let p = compile(include_str!("../../docs/examples/approval.rs")).unwrap();
+    let p = compile(include_str!("../docs/examples/approval.rs")).unwrap();
     let mut ctx = context();
     assert_eq!(
         evaluate(&p, Profile::Oracle, &ctx).outcome,

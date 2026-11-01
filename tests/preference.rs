@@ -6,7 +6,7 @@ fn source(approve: bool, deny: bool) -> String {
 }
 fn context(score: u64) -> Context {
     let mut c: Context =
-        serde_json::from_str(include_str!("../../docs/examples/green-context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/green-context.json")).unwrap();
     c.confidence.insert(
         semantic_evidence_key("Avoid hype 🌱"),
         ConfidenceInterval {

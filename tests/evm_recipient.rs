@@ -23,7 +23,7 @@ async fn _execute(ctx: &Context, params: &PolicyParams) -> PolicyResult {{
 }
 fn tempo_context(recipient: &str) -> Context {
     let mut ctx: Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     ctx.network = "tempo:testnet".into();
     ctx.token = "AlphaUSD".into();
     ctx.recipient = recipient.into();
@@ -89,7 +89,7 @@ fn solana_recipients_stay_case_sensitive() {
     );
     let policy = compile(&source).unwrap();
     let mut ctx: Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     ctx.recipient = SOLANA.into();
     assert_eq!(evaluate(&policy, Profile::Oracle, &ctx).outcome, "pass");
     for recipient in [SOLANA.to_ascii_lowercase(), SOLANA.to_ascii_uppercase()] {

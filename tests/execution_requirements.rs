@@ -105,7 +105,7 @@ fn requirements_cannot_be_forged_under_a_valid_source_hash() {
     ))
     .unwrap();
     compiled.execution_requirements.features.clear();
-    let context = serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+    let context = serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     assert_eq!(
         allowit_sdk::evaluate(&compiled, allowit_sdk::Profile::Oracle, &context).code,
         "INVALID_ARTIFACT"

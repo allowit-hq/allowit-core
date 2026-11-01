@@ -159,7 +159,7 @@ assert.equal(invoke({...traceRequest, profile: 'contract', trace: true}).error.c
 assert.equal(invoke({...traceRequest, trace: 'true'}).error.code, 'INVALID_REQUEST');
 console.log('Opt-in oracle workflow traces preserve actual execution, source bindings and contract isolation.');
 
-const serviceSource = fs.readFileSync('core/tests/fixtures/service-call-policy.rs', 'utf8');
+const serviceSource = fs.readFileSync('tests/fixtures/service-call-policy.rs', 'utf8');
 const serviceCompiled = invoke({operation: 'compile', source: serviceSource});
 assert.equal(serviceCompiled.ok, true);
 assert.ok(serviceCompiled.policy.calls.some(call => call.name === 'allowit::service_call'));

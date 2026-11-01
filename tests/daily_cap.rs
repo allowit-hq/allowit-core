@@ -1,6 +1,6 @@
 use allowit_sdk::{Context, Profile, compile, evaluate};
 fn context() -> Context {
-    serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap()
+    serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap()
 }
 #[test]
 fn daily_accounting_is_required_resets_at_midnight_and_rejects_rollback() {

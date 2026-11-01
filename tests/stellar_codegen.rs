@@ -144,7 +144,7 @@ fn native_request_units_are_never_rounded_and_unsupported_xlm_helpers_reject() {
 fn core_pass(source: &str, native: &StellarPolicyContext) -> bool {
     let compiled = allowit_sdk::compile(source).unwrap();
     let mut c: allowit_sdk::Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     c.amount_units = u64::try_from(native.amount / 10).unwrap();
     c.spent_units = u64::try_from(native.spent_total / 10).unwrap();
     c.daily_spent_units = Some(u64::try_from(native.spent_daily / 10).unwrap());
@@ -346,7 +346,7 @@ fn generic_interpreter_accepts_only_trusted_state_and_only_final_map() {
     );
     let p = allowit_sdk::compile(&source).unwrap();
     let mut c: allowit_sdk::Context =
-        serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+        serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     assert_eq!(
         allowit_sdk::evaluate(&p, allowit_sdk::Profile::Oracle, &c).code,
         "POLICY_STATE_REQUIRED"
@@ -424,7 +424,7 @@ fn actual_mixed_and_local_authored_inputs_compile_without_reconstruction() {
 fn registry_compatibility_is_feature_aware_without_rewriting_historical_inputs() {
     let old = source("Ok(())");
     let mut artifact = allowit_sdk::compile(&old).unwrap();
-    let c = serde_json::from_str(include_str!("../../docs/examples/context.json")).unwrap();
+    let c = serde_json::from_str(include_str!("../docs/examples/context.json")).unwrap();
     artifact.registry_version = "1.6.0".into();
     assert_eq!(
         allowit_sdk::evaluate(&artifact, allowit_sdk::Profile::Oracle, &c).outcome,

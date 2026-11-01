@@ -1,6 +1,25 @@
-# Allowit SDK core
+# Allowit core
 
-The `allowit-sdk` package (library `allowit_sdk`) defines the Allowit policy language. It compiles restricted Rust policy source to validated IR and evaluates that IR. The compiler and the evaluator do no I/O. Three feature-gated modules do: `lsp::run_stdio` (`compiler`) serves the language server on stdin and stdout, `client` (`client`) reads environment variables and local files, and `transport` (`transport`) makes blocking HTTP requests. The `engine/` and `cli/` crates in this workspace and the rail repositories depend on it.
+Allowit core defines the Allowit policy language. It compiles restricted Rust policy source to validated IR and evaluates that IR. It also holds the types that the SDK and the rail crates share: client primitives, service contracts, transports and the chain contract artifact.
+
+The package is `allowit-sdk` (library `allowit_sdk`). The compiler and the evaluator do no I/O. Three feature-gated modules do: `lsp::run_stdio` (`compiler`) serves the language server on stdin and stdout, `client` (`client`) reads environment variables and local files, and `transport` (`transport`) makes blocking HTTP requests.
+
+## Repositories
+
+Pins point one way. The rail crates depend on core. The SDK depends on the rail crates and on core. Core depends on no Allowit repository.
+
+| Repository | Depends on core for |
+| --- | --- |
+| [allowit-contracts-solana](https://github.com/allowit-hq/allowit-contracts-solana) | Solana programs and host crates |
+| [allowit-contracts-tempo](https://github.com/allowit-hq/allowit-contracts-tempo) | Tempo host crates |
+| [allowit-contracts-stellar](https://github.com/allowit-hq/allowit-contracts-stellar) | Stellar wallet |
+| [allowit-sdk](https://github.com/allowit-hq/allowit-sdk) | The `allowit` CLI and the engine |
+
+A consumer pins core by full commit:
+
+```toml
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", rev = "<commit>", default-features = false }
+```
 
 ## Modules
 
@@ -35,22 +54,37 @@ The `allowit-sdk` package (library `allowit_sdk`) defines the Allowit policy lan
 
 With no features, the crate is the bare `no_std + alloc` interpreter.
 
-## Binaries
+## Build and test
 
-`allowit-contract-artifact <policy.rs> <intent.txt> [--binary]` writes the contract artifact for a policy to stdout. It needs the `compiler` and `contract` features:
+You need Rust 1.98, the `wasm32-unknown-unknown` target and Node.js.
 
 ```sh
-cargo run --locked -p allowit-sdk --features compiler,contract --bin allowit-contract-artifact -- docs/examples/approval.rs intent.txt
+scripts/build.sh                       # build every target and the Wasm module
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+node tests/test-wasm.mjs               # after scripts/build.sh
+```
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) lists every feature profile that CI checks. The policies and request contexts in [`docs/examples/`](docs/examples/) are test inputs.
+
+`allowit-contract-artifact <policy.rs> <intent.txt> [--binary]` writes the contract artifact for a policy to stdout:
+
+```sh
+cargo run --locked --features compiler,contract --bin allowit-contract-artifact -- docs/examples/approval.rs intent.txt
 ```
 
 ## WebAssembly
 
-Run these commands from the repository root:
-
 ```sh
-rustup target add wasm32-unknown-unknown
-cargo rustc --locked -p allowit-sdk --release --lib --target wasm32-unknown-unknown --crate-type cdylib
-node core/tests/test-wasm.mjs
+cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib
 ```
 
-The module is `target/wasm32-unknown-unknown/release/allowit_sdk.wasm`. It exports `alloc(len)`, `process(ptr, len)` and `dealloc(ptr, len)`.
+The module is `target/wasm32-unknown-unknown/release/allowit_sdk.wasm`. It exports `alloc(len)`, `process(ptr, len)` and `dealloc(ptr, len)`. `process` takes UTF-8 JSON and packs the output pointer and length into one `u64`. Hosts set memory and time limits and discard an instance after any trap.
+
+## Verification
+
+[`verification/`](verification/README.md) holds a machine-checked Lean model of feature selection and a small policy decision language.
+
+## License
+
+Allowit-authored code is released under the [MIT License](LICENSE). Dependencies keep their own terms. The [release workflow](.github/workflows/release.yml) ships the Wasm module with `LICENSE` and `dependency-licenses.html`, which [cargo-about](https://github.com/EmbarkStudios/cargo-about) generates from [`.github/about.toml`](.github/about.toml).
