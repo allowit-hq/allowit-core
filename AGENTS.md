@@ -10,6 +10,10 @@ Core depends on no other Allowit repository. Pins point one way: the rail reposi
 
 The package is `allowit-sdk` (library `allowit_sdk`). Consumers pin this repository by full `rev` and their `scripts/build.sh` tracks its head. A change to a public type changes every consumer; name the affected repositories in the pull request.
 
+## Verification
+
+`verification/` holds only the core Lean model. The Solana verification set, including the obligation ledger and every hash-bound lock and receipt, lives in allowit-contracts-solana `verification/`. Its receipts bind a byte-identical copy of `lean/AllowIt.lean`. Keep the model here in step with that copy, and record any model change in allowit-contracts-solana with a new receipt there.
+
 ## Before pushing
 
 Read `.github/workflows/`. Run the affected commands locally, with their feature flags and selectors:

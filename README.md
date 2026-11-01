@@ -85,6 +85,14 @@ The module is `target/wasm32-unknown-unknown/release/allowit_sdk.wasm`. It expor
 
 [`verification/`](verification/README.md) holds a machine-checked Lean model of feature selection and a small policy decision language.
 
+## History
+
+This repository starts at allowit-sdk commit [67f5d69](https://github.com/allowit-hq/allowit-sdk/commit/67f5d696847992e18131f815ce905713ec3646e1), which created `core/`. The earlier history of the same code stays in allowit-sdk: `src/` and `tests/` at the repository root, and the crates `client-core/`, `services/core/`, `services/transport/` and `contracts/common/`, which became the `client`, `service`, `transport` and `contract` modules. In an allowit-sdk clone, run:
+
+```sh
+git log 67f5d69~1 -- src tests client-core services/core services/transport contracts/common
+```
+
 ## License
 
 Allowit-authored code is released under the [MIT License](LICENSE). Dependencies keep their own terms. The [release workflow](.github/workflows/release.yml) ships the Wasm module with `LICENSE` and `dependency-licenses.html`, which [cargo-about](https://github.com/EmbarkStudios/cargo-about) generates from [`.github/about.toml`](.github/about.toml).
