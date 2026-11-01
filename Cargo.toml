@@ -6,7 +6,6 @@
 name = "allowit-sdk"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
 license = "MIT"
 description = "Allowit restricted Rust policy compiler, evaluator and language server"
 repository = "https://github.com/allowit-hq/allowit-core"
