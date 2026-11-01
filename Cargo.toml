@@ -6,6 +6,7 @@
 name = "allowit-sdk"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.98"
 license = "MIT"
 description = "Allowit restricted Rust policy compiler, evaluator and language server"
 repository = "https://github.com/allowit-hq/allowit-core"
@@ -157,10 +158,21 @@ solana-sha256-hasher = { version = "=2.3.0", default-features = false }
 level = "warn"
 check-cfg = ['cfg(target_os, values("solana"))']
 
-# The release profile of the Wasm module.
+# Every Allowit workspace uses this profile block, so a shared target directory
+# builds each shared crate once. Release builds keep overflow checks, which the
+# portable policy library requires, and the Soroban contract settings; the Wasm
+# targets abort on panic by default.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false
+
 [profile.release]
-lto = true
-opt-level = "s"
 codegen-units = 1
-panic = "abort"
-strip = true
+lto = true
+opt-level = "z"
+overflow-checks = true
+strip = "symbols"

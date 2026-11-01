@@ -6,7 +6,7 @@ The package is `allowit-sdk` (library `allowit_sdk`). The compiler and the evalu
 
 ## Repositories
 
-Pins point one way. The rail crates depend on core. The SDK depends on the rail crates and on core. Core depends on no Allowit repository.
+Dependencies point one way. The rail crates depend on core. The SDK depends on the rail crates and on core. Core depends on no Allowit repository.
 
 | Repository | Depends on core for |
 | --- | --- |
@@ -15,11 +15,15 @@ Pins point one way. The rail crates depend on core. The SDK depends on the rail 
 | [allowit-contracts-stellar](https://github.com/allowit-hq/allowit-contracts-stellar) | Stellar wallet |
 | [allowit-sdk](https://github.com/allowit-hq/allowit-sdk) | The `allowit` CLI and the engine |
 
-A consumer pins core by full commit:
+Releases are annotated git tags `vX.Y.Z`. A consumer names the tag and its minor version:
 
 ```toml
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", rev = "<commit>", default-features = false }
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.1.0", version = "0.1", default-features = false }
 ```
+
+Every Allowit crate in one build names the same core tag, so the build holds one copy of core. Consumers commit `Cargo.lock`, which records the commit of the tag.
+
+To release, set `version` in `Cargo.toml`, merge, then tag the merge commit: `git tag -a vX.Y.Z -m vX.Y.Z <commit> && git push origin vX.Y.Z`.
 
 ## Modules
 
@@ -59,10 +63,9 @@ With no features, the crate is the bare `no_std + alloc` interpreter.
 You need Rust 1.98, the `wasm32-unknown-unknown` target and Node.js.
 
 ```sh
-scripts/build.sh                       # build every target and the Wasm module
+cargo build --all-targets --locked
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
-node tests/test-wasm.mjs               # after scripts/build.sh
 ```
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) lists every feature profile that CI checks. The policies and request contexts in [`docs/examples/`](docs/examples/) are test inputs.
@@ -79,7 +82,7 @@ cargo run --locked --features compiler,contract --bin allowit-contract-artifact 
 cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib
 ```
 
-The module is `target/wasm32-unknown-unknown/release/allowit_sdk.wasm`. It exports `alloc(len)`, `process(ptr, len)` and `dealloc(ptr, len)`. `process` takes UTF-8 JSON and packs the output pointer and length into one `u64`. Hosts set memory and time limits and discard an instance after any trap.
+`node tests/test-wasm.mjs` tests the module, which is `target/wasm32-unknown-unknown/release/allowit_sdk.wasm`. The module embeds the package version, so each release has its own module hash. It exports `alloc(len)`, `process(ptr, len)` and `dealloc(ptr, len)`. `process` takes UTF-8 JSON and packs the output pointer and length into one `u64`. Hosts set memory and time limits and discard an instance after any trap.
 
 ## Verification
 
