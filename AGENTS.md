@@ -2,7 +2,7 @@
 
 ## Artifact storage
 
-Keep code, required build/test inputs and concise API/usage documentation here. Keep plans, reviews, evidence and recordings in the canonical Allowit knowledge project's `.agents/artifacts/`. Preserve original owner inputs in its `.agents/1-sources/`. Do not commit those artifacts in this implementation repository or its feature branches.
+Keep code, required build/test inputs and concise API/usage documentation here. Keep plans in the canonical Allowit knowledge project's `.agents/4-plans/`. Keep reviews, evidence and recordings in its `.agents/artifacts/`. Preserve original owner inputs in its `.agents/1-sources/`. Do not commit those artifacts in this implementation repository or its feature branches.
 
 ## Dependencies and packages
 
