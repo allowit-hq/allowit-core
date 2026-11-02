@@ -43,7 +43,10 @@ It rejects source constructs outside the portable allowlist. It grants no public
 authority. Stellar binds that shape to its native wallet tier. The server enforces trusted admission.
 
 `scripts/policy_source.py` provides the corresponding Python gate and direct-rustc host compile.
-Resolve it and `crates/allowit` from the same released Core Cargo checkout.
+The `policy_source` module embeds that helper, its terms and the portable source bytes from the
+selected dependency release. SDK engine can unpack them into a private directory for its bounded
+build process. The portable package exports its own bytes only in the `std` profile.
+Source-based build hosts can also resolve both files from the same verified Core release.
 Do not substitute a sibling checkout or a helper selected through an environment variable.
 The source gate and host compile are separate required checks before trusted publication.
 

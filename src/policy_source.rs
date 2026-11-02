@@ -3,6 +3,17 @@
 //! These checks do not compile, publish or admit a policy. The host build gate must also
 //! compile admitted source against the same released portable library.
 
+/// Exact portable sources and terms from the selected dependency release.
+pub use allowit::{
+    SOURCE_CORE_RS as PORTABLE_CORE_RS, SOURCE_LIB_RS as PORTABLE_LIB_RS,
+    SOURCE_TERMS as PORTABLE_TERMS,
+};
+
+/// The Python gate and host-compile helper from this package's released inputs.
+pub const PYTHON_HELPER: &str = include_str!("../scripts/policy_source.py");
+/// The original helper terms. Embedding the helper grants no additional license.
+pub const PYTHON_HELPER_TERMS: &str = include_str!("../scripts/LICENSE");
+
 type Result<T> = std::result::Result<T, String>;
 
 fn param_keys() -> [&'static str; allowit::RULES.len()] {
@@ -29,8 +40,8 @@ pub struct SourceShape {
 /// `policy_source.py` accepts: one self-contained file, `allowit` only as the path root, no file
 /// or environment macros, no `#[path]`, `cfg_attr` or raw pointers, the macro, attribute and
 /// identifier allowlists and one `pub fn execute(ctx: &AllowitContext) -> allowit::Result`.
-/// The std-only compile (`policy_source.py` `host_compile`) needs `rustc` and stays in the server
-/// build gate; a source that is not canonical-only needs that compiled evaluator for full host
+/// The std-only compile (`policy_source.py` `host_compile`) needs `rustc` in the host build gate.
+/// A source that is not canonical-only needs that compiled evaluator for full host
 /// evaluation. `tests/policy_source.rs` replays vectors that the Python gate produced.
 pub fn source_shape(source: &str) -> Result<SourceShape> {
     let code = gate::checked_code(source)?;

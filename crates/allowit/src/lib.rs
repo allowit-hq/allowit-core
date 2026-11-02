@@ -783,6 +783,16 @@ pub use soroban::*;
 #[cfg(feature = "std")]
 pub use host::*;
 
+/// Exact crate-root source for a host build against this release.
+#[cfg(feature = "std")]
+pub const SOURCE_LIB_RS: &str = include_str!("lib.rs");
+/// Exact shared rule source for a host build against this release.
+#[cfg(feature = "std")]
+pub const SOURCE_CORE_RS: &str = include_str!("core.rs");
+/// The portable package's declared terms. Embedding its source grants no additional license.
+#[cfg(feature = "std")]
+pub const SOURCE_TERMS: &str = "UNLICENSED";
+
 #[cfg(all(test, feature = "soroban"))]
 mod tests;
 
