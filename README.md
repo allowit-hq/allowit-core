@@ -13,7 +13,11 @@ Dependencies point one way. The rail crates depend on core. The SDK depends on t
 | [allowit-contracts-solana](https://github.com/allowit-hq/allowit-contracts-solana) | Solana programs and host crates |
 | [allowit-contracts-tempo](https://github.com/allowit-hq/allowit-contracts-tempo) | Tempo host crates |
 | [allowit-contracts-stellar](https://github.com/allowit-hq/allowit-contracts-stellar) | Stellar wallet |
-| [allowit-sdk](https://github.com/allowit-hq/allowit-sdk) | The `allowit` CLI and the engine |
+| [allowit-sdk](https://github.com/allowit-hq/allowit-sdk) | SDK engine workflows shared by CLI and server callers, and the `allowit` CLI |
+
+SDK engine composes reusable offchain communication and execution workflows for both CLI and server callers.
+Rail cores and vendor adapters can use core's host-only `client`, `service` and `transport` primitives directly.
+The compiler, evaluator and contract profiles remain independent of host network and filesystem I/O.
 
 Releases are annotated git tags `vX.Y.Z`. A consumer names the tag and its minor version:
 
@@ -39,7 +43,7 @@ To release, set `version` in `Cargo.toml`, merge, then tag the merge commit: `gi
 | `spending` | `oracle-ledger` | Purchase-tier ledger support |
 | `client` | `client` | Client configuration, errors, journals, output and private local storage |
 | `service` | `service` | Rail-agnostic service operation contracts that vendor crates implement |
-| `transport` | `transport` | Bounded blocking HTTP and JSON-RPC transports for service adapters |
+| `transport` | `transport` | Bounded blocking HTTP and JSON-RPC transports for host workflows, rail clients and vendor adapters |
 | `contract` | `contract` | The chain contract artifact, mandate, execution state and binary IR transport that the rail contracts share |
 
 ## Features
