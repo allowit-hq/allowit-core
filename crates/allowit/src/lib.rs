@@ -1,6 +1,6 @@
 #![no_std]
-//! Canonical Allowit policy rules. Host evaluators and `AllowitCustomPolicy` can compile one
-//! authored policy file verbatim:
+//! Canonical Allowit policy rules for host evaluation. Rails own native bindings and must
+//! validate authored policies against their execution profile:
 //!
 //! ```ignore
 //! use allowit::prelude::*;
@@ -34,100 +34,49 @@
 //! `let cap: i128 = allowit::param(ctx, "swap_cap");`. They panic when the key is unset
 //! (`MissingParam`) or the value has another type or range (`InvalidParam`). A panic, also from an
 //! unset `ctx.params[key]`, `panic!`, `assert!`, `unreachable!` or an integer overflow, is a hard
-//! stop: the run denies and its writes are discarded. Onchain the contract call aborts, with the
-//! `AllowitError` code for a failed read. On the host `evaluate` catches the panic and returns that
-//! error or `Panicked`.
+//! stop: the run denies and its writes are discarded. `evaluate` catches the panic and returns
+//! the failed-read error or `Panicked`. Rails must enforce their native abort and rollback behavior.
 //!
-//! After approval, the wallet and the server run the same `post_flight`: it rolls the UTC day
-//! over, counts the call, adds spent and gross amounts, marks unpriced operations, then applies
-//! the policy's own `set_state` writes, and denies a result whose standard keys do not decode or
-//! that holds more than `MAX_STATE_KEYS` keys or `MAX_STATE_BYTES` encoded bytes. Simple and
-//! Common run only the canonical prefix onchain and store only standard keys, so their
-//! `post_flight` denies any policy write with `Unsupported`, on the host as onchain. The server
-//! runs a policy through `evaluate`, which first checks the request's args and, for a standard
-//! wallet, its params as the wallet does, and discards the writes of a denied run. The
-//! standard contract runs the leading canonical calls, supplied by the owner as `rules`, through
-//! `preflight`, which skips absent params.
+//! After approval, `post_flight` rolls the UTC day over, counts the call, adds spending and
+//! gross amounts, then applies policy state writes. It rejects invalid standard state and
+//! results beyond `MAX_STATE_KEYS` or `MAX_STATE_BYTES`. The standard tier rejects policy writes.
+//! `evaluate` checks request arguments and standard-tier parameters before executing a policy.
+//! Denied runs discard their writes. `preflight` runs one canonical rule and skips absent params.
 //!
 //! Portable authored code uses rule calls, `ctx.params[key]`, `contains`, `param`, `arg`,
 //! `get_state` and `set_state`, typed scalar fields and enum comparisons.
-//! A host source-admission profile selects only names, paths and methods that give the same
-//! result on both backends.
+//! Source admission selects only portable names, paths and methods.
 //!
-//! Types and rule logic are written once in `core.rs` and compiled per backend. Each backend binds
-//! `Address`, `AllowitEnv`, `Map`, `String`, `Symbol` and `Vec`, and defines `AllowitParams`.
-//! Feature `soroban` (default) uses host values, contract types and the Soroban `Env`, decodes the
-//! params once per run so that indexing returns a reference, and buffers policy writes in contract
-//! temporary storage until `post_flight`. Feature `std` uses text addresses, heap maps, heap
-//! lists that iterate by clone like the onchain `Vec`, and a host `AllowitEnv` that buffers policy
-//! writes. The selected backend backs the crate root, which authored policy names.
-//!
-//! The server-only enrichment functions (`price`, `fetch`, `internet_search`,
-//! `marketplace_search`, `request_screening`, `systemone`, `clear_systemone_context`) exist only
-//! in the host backend. A Custom policy that calls one does not compile onchain.
-//!
-//! The offchain server depends on `allowit = { default-features = false, features = ["std"] }`
-//! and must not unify `soroban`: enabling both is a compile error. The server must also build
-//! with `overflow-checks = true`, as the contract release profile does, so that integer overflow
-//! in authored code panics and denies on both backends instead of wrapping on the host.
-//!
-//! Package `allowit` owns the shared rules and their explicit host/Soroban value bindings.
-//! `core.rs` names general operations. Each rail maps native operations onto `AllowitOperation`
-//! and supplies authenticated facts; custody, native codecs and transport stay outside this package.
+//! Types and rules use chain-neutral Rust values. Rails supply authenticated request facts and
+//! implement native contract bindings outside this package. The `std` feature is enabled by default.
+//! Host evaluation buffers state writes and discards them when a policy denies or panics.
+//! Build hosts must enable `overflow-checks = true` so arithmetic overflow also denies.
 //!
 //! ```
 //! use allowit::prelude::*;
-//! /// Control for the test below: the same policy without the server-only call compiles onchain.
+//! /// Limit lifetime spending with a portable rule.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
 //!     allowit::lifetime_spending_limit(ctx, &ctx.params[allowit::LIFETIME_SPENDING_LIMIT])?;
 //!     Ok(())
 //! }
 //! ```
 //!
-#![cfg_attr(
-    feature = "soroban",
-    doc = r#"
-```compile_fail,E0425
-use allowit::prelude::*;
-/// A policy that calls a host-only function does not build onchain.
-pub fn execute(ctx: &AllowitContext) -> allowit::Result {
-    allowit::clear_systemone_context(ctx)?;
-    Ok(())
-}
-```
-"#
-)]
-#![cfg_attr(
-    feature = "std",
-    doc = r#"
-The host profile exposes enrichment stubs. They return `Unsupported` in this package.
-
-```
-use allowit::prelude::*;
-/// Host-only APIs have a host signature; they grant no payment authority.
-pub fn execute(ctx: &AllowitContext) -> allowit::Result {
-    allowit::clear_systemone_context(ctx)?;
-    Ok(())
-}
-```
-"#
-)]
+//! Host enrichment functions return `Unsupported` until a server implements them.
 //!
 //! A policy never re-enters the wallet. `reentry_transfer` exists only on rails that implement
-//! it; neither backend here has it, so a policy that calls it does not compile:
+//! it; this package has no such function, so a policy that calls it does not compile:
 //!
 //! ```compile_fail,E0425
 //! use allowit::prelude::*;
-//! /// A policy that re-enters the wallet does not build onchain.
+//! /// A policy that re-enters the wallet does not build.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
 //!     allowit::reentry_transfer(ctx, 1)?;
 //!     Ok(())
 //! }
 //! ```
 //!
-//! A `for` loop over a list binds owned values on both backends, also when the list borrows from
-//! `ctx.params[key]`: the host list iterates by clone, as the onchain `Vec` does. The
-//! `scripts/tests` std-only compile checks the same loops.
+//! A `for` loop over a borrowed list binds owned clones, including lists in `ctx.params[key]`.
+//! The source-admission compile checks the same loops.
 //!
 //! ```
 //! use allowit::prelude::*;
@@ -153,7 +102,7 @@ pub fn execute(ctx: &AllowitContext) -> allowit::Result {
 //!
 //! ```compile_fail,E0614
 //! use allowit::prelude::*;
-//! /// A loop item is no reference, so a dereference does not build on either backend.
+//! /// A loop item is owned, so a dereference does not compile.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
 //!     let wanted = AllowitValue::Addr(ctx.request.recipient.clone());
 //!     if let AllowitValue::List(items) = &ctx.params["vendors"] {
@@ -171,220 +120,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-#[cfg(not(any(feature = "soroban", feature = "std")))]
-compile_error!("Enable feature `soroban` or `std`");
-
-#[cfg(all(feature = "soroban", feature = "std"))]
-compile_error!(
-    "Features `soroban` and `std` select different crate-root types; use `default-features = false`"
-);
-
-/// Onchain backend. Params, state, request facts and errors are Soroban contract types.
-#[cfg(feature = "soroban")]
-pub mod soroban {
-    pub use soroban_sdk::{Address, String, Vec};
-    use soroban_sdk::{Env as AllowitEnv, Map, Symbol};
-    /// Make a `core.rs` value type a Soroban contract type.
-    macro_rules! value {
-        ($item:item) => {
-            #[soroban_sdk::contracttype]
-            $item
-        };
-    }
-    /// Make the `core.rs` error enum a Soroban contract error.
-    macro_rules! error {
-        ($item:item) => {
-            #[soroban_sdk::contracterror]
-            $item
-        };
-    }
-    /// Make `AllowitArgs` a Soroban contract type with a public map, which the wallet builds from
-    /// the request args.
-    macro_rules! args {
-        ($(#[$meta:meta])* $name:ident($($map:tt)*)) => {
-            #[soroban_sdk::contracttype]
-            $(#[$meta])*
-            pub struct $name(
-                /// The key => value map.
-                pub $($map)*,
-            );
-        };
-    }
-    include!("core.rs");
-
-    /// The owner's params, read by key: `ctx.params[allowit::DESTINATIONS]`. A Soroban map
-    /// decodes a value on every read, so `new` decodes the at most `MAX_PARAMS` entries once per
-    /// run and indexing returns a reference to the decoded value.
-    #[derive(Clone)]
-    pub struct AllowitParams {
-        env: AllowitEnv,
-        map: AllowitMap,
-        entries: [Option<(Symbol, AllowitValue)>; MAX_PARAMS as usize],
-    }
-
-    impl AllowitParams {
-        /// The params of `map`, decoded. More than `MAX_PARAMS` entries or an entry that does
-        /// not decode is `InvalidParam`.
-        pub fn new(env: &AllowitEnv, map: AllowitMap) -> Result<Self> {
-            if count(&map) > MAX_PARAMS {
-                return Err(AllowitError::InvalidParam);
-            }
-            let mut entries = core::array::from_fn(|_| None);
-            for (slot, entry) in entries.iter_mut().zip(map.try_iter()) {
-                *slot = Some(entry.map_err(|_| AllowitError::InvalidParam)?);
-            }
-            Ok(Self {
-                env: env.clone(),
-                map,
-                entries,
-            })
-        }
-
-        /// The key => value map that the wallet stores.
-        pub fn map(&self) -> &AllowitMap {
-            &self.map
-        }
-    }
-
-    /// The decoded value of `key` in `params`, or `None` when it is unset or no map can hold the
-    /// key.
-    fn find<'a>(params: &'a AllowitParams, key: &str) -> Option<&'a AllowitValue> {
-        if !key_ok(key) {
-            return None;
-        }
-        let key = Symbol::new(&params.env, key);
-        let mut entries = params.entries.iter().flatten();
-        entries.find(|(k, _)| *k == key).map(|(_, value)| value)
-    }
-
-    /// Abort the whole contract call with `MissingParam` for unset param `key`.
-    fn missing(params: &AllowitParams, key: &str) -> ! {
-        fail(&params.env, AllowitError::MissingParam, key)
-    }
-
-    /// Temporary-storage key of the running operation's policy writes. `post_flight` removes it,
-    /// and a failed operation rolls it back, so it never outlives the transaction.
-    const WRITES: Symbol = soroban_sdk::symbol_short!("allowit_w");
-
-    /// The value of `key` in `map`, or `None` when it is absent or no map can hold the key.
-    fn lookup(map: &AllowitMap, key: &str) -> Option<AllowitValue> {
-        key_ok(key)
-            .then(|| map.get(Symbol::new(map.env(), key)))
-            .flatten()
-    }
-
-    /// Set `key` to `value` in `map`. An invalid key is `InvalidParam`.
-    fn insert(map: &mut AllowitMap, key: &str, value: AllowitValue) -> Result {
-        if !key_ok(key) {
-            return Err(AllowitError::InvalidParam);
-        }
-        let key = Symbol::new(map.env(), key);
-        map.set(key, value);
-        Ok(())
-    }
-
-    /// The number of entries in `map`.
-    fn count(map: &AllowitMap) -> u32 {
-        map.len()
-    }
-
-    /// The byte length of a text value.
-    fn text_len(text: &String) -> u32 {
-        text.len()
-    }
-
-    /// The bytes of a text value, copied into `buf`, or `None` beyond `MAX_TEXT` bytes.
-    fn text_bytes<'a>(text: &'a String, buf: &'a mut [u8; MAX_TEXT as usize]) -> Option<&'a [u8]> {
-        let bytes = buf.get_mut(..text.len() as usize)?;
-        text.copy_into_slice(bytes);
-        Some(bytes)
-    }
-
-    /// The text of an address: its StrKey.
-    fn address_text(address: &Address) -> String {
-        address.to_string()
-    }
-
-    /// Abort the whole contract call with contract error `error`. Every write of the call rolls back.
-    fn fail(env: &AllowitEnv, error: AllowitError, _key: &str) -> ! {
-        env.panic_with_error(error)
-    }
-
-    /// Run the policy. A panic aborts the whole contract call, which rolls back every write.
-    fn guarded(_env: &AllowitEnv, run: impl FnOnce() -> Result) -> Result {
-        run()
-    }
-
-    /// Read a `List` of `Addr` values as addresses; any other value is `InvalidParam`.
-    impl TryFrom<AllowitValue> for Vec<Address> {
-        /// A value of another type.
-        type Error = AllowitError;
-        /// The addresses of a `List` of `Addr`.
-        fn try_from(value: AllowitValue) -> Result<Self> {
-            let AllowitValue::List(items) = value else {
-                return Err(AllowitError::InvalidParam);
-            };
-            let mut addresses = Vec::new(items.env());
-            each_item(&items, |item| {
-                addresses.push_back(Address::try_from(item)?);
-                Ok(())
-            })?;
-            Ok(addresses)
-        }
-    }
-
-    /// Run `check` on each value of `map`. An empty key or a value that does not decode is
-    /// `InvalidParam`. A `Symbol` already holds at most 32 ASCII letters, digits or underscores,
-    /// so an empty key is the only one that the host rejects and a `Symbol` admits.
-    fn each_value(map: &AllowitMap, mut check: impl FnMut(AllowitValue) -> Result) -> Result {
-        let empty = Symbol::new(map.env(), "");
-        for entry in map.try_iter() {
-            let (key, value) = entry.map_err(|_| AllowitError::InvalidParam)?;
-            if key == empty {
-                return Err(AllowitError::InvalidParam);
-            }
-            check(value)?;
-        }
-        Ok(())
-    }
-
-    /// Run `check` on each item of a list. An item that does not decode is `InvalidParam`.
-    fn each_item(
-        items: &Vec<AllowitValue>,
-        mut check: impl FnMut(AllowitValue) -> Result,
-    ) -> Result {
-        for item in items.try_iter() {
-            check(item.map_err(|_| AllowitError::InvalidParam)?)?;
-        }
-        Ok(())
-    }
-
-    /// Buffer one policy write for `post_flight`.
-    fn record(env: &AllowitEnv, key: &str, value: AllowitValue) -> Result {
-        let store = env.storage().temporary();
-        let mut writes = store.get(&WRITES).unwrap_or_else(|| Map::new(env));
-        insert(&mut writes, key, value)?;
-        store.set(&WRITES, &writes);
-        Ok(())
-    }
-
-    /// Remove and return the buffered policy writes.
-    fn take_writes(env: &AllowitEnv) -> AllowitMap {
-        let store = env.storage().temporary();
-        let writes: AllowitMap = store.get(&WRITES).unwrap_or_else(|| Map::new(env));
-        if !writes.is_empty() {
-            store.remove(&WRITES);
-        }
-        writes
-    }
-
-    /// Apply `writes` over `state`.
-    fn merge(state: &mut AllowitMap, writes: AllowitMap) {
-        for (key, value) in writes.iter() {
-            state.set(key, value);
-        }
-    }
-}
+#[cfg(not(feature = "std"))]
+compile_error!("The portable policy evaluator requires feature `std`");
 
 /// Host backend for the offchain server and SDK evaluator. Addresses are text that the rail
 /// supplies.
@@ -396,9 +133,8 @@ pub mod host {
     use std::sync::{Arc, Mutex, MutexGuard};
 
     /// Exact account or contract identity, held as the text that its rail supplies. It compares
-    /// only for equality. The onchain backend orders addresses by type, so accounts sort before
-    /// contracts, while text would sort by its characters; `Address` therefore has no order on the
-    /// host, and authored code that orders addresses fails the std-only compile.
+    /// only for equality. Rails own native address validation and ordering. Portable authored
+    /// code cannot order addresses.
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct Address(String);
 
@@ -414,10 +150,9 @@ pub mod host {
         }
     }
 
-    /// Host list. Like the onchain `Vec`, iterating a borrowed list yields owned clones, so
-    /// `for item in items` binds an owned `AllowitValue` on both backends, also when `items`
-    /// borrows from `ctx.params[key]`. It has no `Deref` to a slice, so authored code that needs a
-    /// slice fails the std-only compile as it fails onchain. The server reads it with `as_slice`.
+    /// Portable list. Iterating a borrowed list yields owned clones, including a list borrowed
+    /// from `ctx.params[key]`. Authored code cannot dereference the list to a slice.
+    /// Host integration can read a slice with `as_slice`.
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct Vec<T>(alloc::vec::Vec<T>);
 
@@ -454,7 +189,7 @@ pub mod host {
     }
 
     impl<'a, T: Clone> IntoIterator for &'a Vec<T> {
-        /// A clone of an item, as the onchain `Vec` decodes one.
+        /// A clone of an item.
         type Item = T;
         /// Clones of the items in order.
         type IntoIter = core::iter::Cloned<core::slice::Iter<'a, T>>;
@@ -464,7 +199,7 @@ pub mod host {
         }
     }
 
-    /// Host map: keys are text checked like onchain map keys.
+    /// Portable map with bounded text keys.
     type Map<K, V> = BTreeMap<K, V>;
     /// Host map key.
     type Symbol = String;
@@ -528,7 +263,7 @@ pub mod host {
     /// The owner's params, read by key: `ctx.params[allowit::DESTINATIONS]`. The map stays
     /// private to this crate, so the std-only compile of authored policy rejects any read other
     /// than indexing, `contains` and `param`. The server converts with `From`. It derives only
-    /// `Clone`, as the Soroban type does, so the std-only compile also rejects comparison.
+    /// `Clone`, so authored policies cannot compare entire parameter maps.
     #[derive(Clone)]
     pub struct AllowitParams(pub(crate) AllowitMap);
 
@@ -640,7 +375,7 @@ pub mod host {
         }
     }
 
-    /// Run `check` on each value of `map`. A key that no backend map holds is `InvalidParam`.
+    /// Run `check` on each value of `map`. An invalid portable key is `InvalidParam`.
     fn each_value(map: &AllowitMap, mut check: impl FnMut(AllowitValue) -> Result) -> Result {
         for (key, value) in map {
             if !key_ok(key) {
@@ -673,7 +408,7 @@ pub mod host {
 
     /// Server-only enrichment. Each function takes its owner-written request, returns its passing
     /// constraint or an `AllowitError`, and is an API stub that the offchain server fills; here it
-    /// is `Unsupported`. The onchain backend has none of them, so onchain policy cannot call one.
+    /// is `Unsupported`. Rails determine which APIs their native execution profiles admit.
     pub mod server {
         use super::{Address, AllowitContext, AllowitError, AllowitValue, Result};
 
@@ -777,9 +512,6 @@ pub mod host {
     pub use server::*;
 }
 
-#[cfg(feature = "soroban")]
-pub use soroban::*;
-
 #[cfg(feature = "std")]
 pub use host::*;
 
@@ -793,8 +525,8 @@ pub const SOURCE_CORE_RS: &str = include_str!("core.rs");
 #[cfg(feature = "std")]
 pub const SOURCE_TERMS: &str = "UNLICENSED";
 
-#[cfg(all(test, feature = "soroban"))]
-mod tests;
-
 #[cfg(all(test, feature = "std"))]
 mod host_tests;
+
+#[cfg(all(test, feature = "std"))]
+mod tests;

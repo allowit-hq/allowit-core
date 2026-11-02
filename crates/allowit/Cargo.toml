@@ -4,20 +4,12 @@ version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license = "UNLICENSED"
-description = "Allowit portable policy library for Soroban contracts and host evaluators"
+description = "Allowit portable policy library with chain-neutral types and host evaluation"
 
 [lib]
 crate-type = ["rlib"]
 
 [features]
-default = ["soroban"]
-# Onchain backend: Soroban host values, contract types and contract errors.
-soroban = ["dep:soroban-sdk"]
-# Host backend for the offchain server and SDK evaluator: heap strings and vectors.
+default = ["std"]
+# Chain-neutral host evaluation with buffered state writes.
 std = []
-
-[dependencies]
-soroban-sdk = { workspace = true, optional = true }
-
-[dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
