@@ -17,52 +17,47 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --all-targets --locked
-      - run: cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib
-      - run: node tests/test-wasm.mjs
+      - run: cargo build --locked --workspace --all-targets
+      - run: cargo check --locked -p allowit-sdk --no-default-features --lib
+      - name: Install pinned Stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/stellar.tar.gz
+          echo 'c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462  /tmp/stellar.tar.gz' | sha256sum -c -
+          mkdir /tmp/stellar-cli
+          tar -xzf /tmp/stellar.tar.gz -C /tmp/stellar-cli
+          echo /tmp/stellar-cli >> "$GITHUB_PATH"
+      - run: stellar contract build --locked --package allowit
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m unittest discover -s scripts/tests
       - run: cargo fmt --all --check
-      - run: cargo test --locked
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - name: Feature profiles
-        run: |
-          cargo check --locked --no-default-features --lib
-          cargo check --locked --no-default-features --features compiler --lib
-          cargo check --locked --no-default-features --features typed-workflow --lib
-          cargo check --locked --no-default-features --features std --lib
-          cargo check --locked --no-default-features --features std,oracle-ledger --lib
-          cargo check --locked --no-default-features --features typed-workflow,oracle-ledger --lib
-          cargo check --locked --no-default-features --features oracle-ledger --lib
-          cargo test --locked --no-default-features --features compact-contract-validation --test contract_validation
-          cargo test --locked --features compact-contract-validation --test contract_validation
-          cargo test --locked --no-default-features --test feature_profiles
-          cargo test --locked --no-default-features --features typed-workflow --test typed_host_feature
-          cargo test --locked --no-default-features --features std,typed-workflow
-      - name: Client, service, transport and contract modules
-        run: |
-          cargo test --locked --features client --lib -- client::
-          cargo test --locked --features service,transport --lib -- service::
-          cargo test --locked --features service,transport --test transport_rpc
-          cargo test --locked --features contract --lib -- contract::
-          cargo test --locked --features contract --test contract_binary --test contract_conformance
-          cargo test --locked --features contract-stellar --lib -- contract::
-          cargo test --locked --features contract-stellar --test contract_binary --test contract_conformance
-          cargo check --locked --no-default-features --features contract --lib
-          cargo clippy --locked --all-targets --features client,service,transport,contract -- -D warnings
-          cargo clippy --locked --all-targets --features contract-stellar -- -D warnings
+      - run: rustfmt --edition 2024 --check crates/allowit/src/core.rs
+      - run: cargo test --locked -p allowit-sdk --features client,service,transport,policy-source
+      - run: cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source -- -D warnings
   verification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m unittest discover -s verification/tests
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Soroban rules and contract-profile doctests
+        run: cargo test --locked -p allowit
+      - name: Host policy rules and write isolation
+        run: cargo test --locked -p allowit --no-default-features --features std
+      - run: cargo clippy --locked -p allowit --all-targets -- -D warnings
+      - run: cargo clippy --locked -p allowit --no-default-features --features std --all-targets -- -D warnings

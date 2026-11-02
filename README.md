@@ -1,105 +1,102 @@
 # Allowit core
 
-Allowit core defines the Allowit policy language. It compiles restricted Rust policy source to validated IR and evaluates that IR. It also holds the types that the SDK and the rail crates share: client primitives, service contracts, transports and the chain contract artifact.
+Allowit core contains portable policy rules and reusable host primitives.
+The shared SDK engine composes those primitives for both CLI and server hosts.
+Rail libraries own native requests, codecs, signing and finality.
+The server adds its exclusive policy authority and private state.
 
-The package is `allowit-sdk` (library `allowit_sdk`). The compiler and the evaluator do no I/O. Three feature-gated modules do: `lsp::run_stdio` (`compiler`) serves the language server on stdin and stdout, `client` (`client`) reads environment variables and local files, and `transport` (`transport`) makes blocking HTTP requests.
+## Packages
 
-## Repositories
+| Package | Library | Responsibility | License |
+| --- | --- | --- | --- |
+| `allowit` | `allowit` | Deterministic policy types, nine rules, evaluation and accounting | `UNLICENSED` |
+| `allowit-sdk` | `allowit_sdk` | Generic owner capabilities, private storage, configuration, source checks and bounded transport | MIT |
 
-Dependencies point one way. The rail crates depend on core. The SDK depends on the rail crates and on core. Core depends on no Allowit repository.
+Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
+admitted package profiles directly. Importing a library grants no signing or payment authority.
 
-| Repository | Depends on core for |
+`allowit` selects exactly one backend:
+
+- Default `soroban` binds policy values to Soroban types for contracts.
+- `std`, with default features disabled, binds the same rule logic to host values.
+
+Both profiles compile the same rule definitions. Denials discard policy writes.
+The contract profile excludes host network and filesystem capabilities.
+Custody, native transaction encoding and native receipt checks remain in the rail library.
+
+`allowit-sdk` defaults to `std`. Its `admin` capabilities and exact-byte `digest` also build without
+`std`. Host-only features expose these modules:
+
+| Feature | Modules |
 | --- | --- |
-| [allowit-contracts-solana](https://github.com/allowit-hq/allowit-contracts-solana) | Solana programs and host crates |
-| [allowit-contracts-tempo](https://github.com/allowit-hq/allowit-contracts-tempo) | Tempo host crates |
-| [allowit-contracts-stellar](https://github.com/allowit-hq/allowit-contracts-stellar) | Stellar wallet |
-| [allowit-sdk](https://github.com/allowit-hq/allowit-sdk) | SDK engine workflows shared by CLI and server callers, and the `allowit` CLI |
+| `client` | Private atomic storage, configuration, errors, journals and output |
+| `service` | Protocol-neutral RPC operation contracts |
+| `transport` | Bounded blocking HTTP/JSON-RPC. Enables `service` |
+| `policy-source` | Portable authored-source allowlist and shape checks. Selects the portable `std` backend |
 
-SDK engine composes reusable offchain communication and execution workflows for both CLI and server callers.
-Rail cores and vendor adapters can use core's host-only `client`, `service` and `transport` primitives directly.
-The compiler, evaluator and contract profiles remain independent of host network and filesystem I/O.
+RPC endpoints require HTTPS or loopback HTTP, without URL credentials or fragments.
+Transport performs one attempt. The calling workflow chooses recovery using the original signed
+operation. A failed response does not establish transaction failure.
 
-Releases are annotated git tags `vX.Y.Z`. A consumer names the tag and its minor version:
+The host-only `policy_source::source_shape` derives the canonical prefix and detects state writes.
+It rejects source constructs outside the portable allowlist. It grants no publication or admission
+authority. Stellar binds that shape to its native wallet tier. The server enforces trusted admission.
+
+`scripts/policy_source.py` provides the corresponding Python gate and direct-rustc host compile.
+The `policy_source` module embeds that helper, its terms and the portable source bytes from the
+selected dependency release. SDK engine can unpack them into a private directory for its bounded
+build process. The portable package exports its own bytes only in the `std` profile.
+Source-based build hosts can also resolve both files from the same verified Core release.
+Do not substitute a sibling checkout or a helper selected through an environment variable.
+The source gate and host compile are separate required checks before trusted publication.
+
+## Dependencies and releases
+
+Every package in this repository releases the same annotated tag `vX.Y.Z`.
+Consumers name that tag and its minor version, and commit `Cargo.lock`:
 
 ```toml
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.1.0", version = "0.1", default-features = false }
+allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.2.0", version = "0.2", default-features = false, features = ["std"] }
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.2.0", version = "0.2", default-features = false, features = ["client", "transport"] }
 ```
 
-Every Allowit crate in one build names the same core tag, so the build holds one copy of core. Consumers commit `Cargo.lock`, which records the commit of the tag.
+All Allowit packages in one build name the same core tag.
+Contracts select the portable package's default Soroban profile separately from host builds.
+Do not combine its `std` and `soroban` features.
 
-To release, set `version` in `Cargo.toml`, merge, then tag the merge commit: `git tag -a vX.Y.Z -m vX.Y.Z <commit> && git push origin vX.Y.Z`.
-
-## Modules
-
-| Module | Feature | Contents |
-| --- | --- | --- |
-| crate root | | Policy types, IR validation, `evaluate_ir`, `process_value`, `process_json` and `registry` |
-| `prelude` | | The names that policy source imports with `use allowit::prelude::*;` |
-| `lsp` | `compiler` | The stdio language server (`lsp::run_stdio`). `compile` and `evaluate` at the crate root need the same feature. |
-| `typed_workflow` | | Typed workflow records for hosts and services |
-| `admin` | | Owner operations that a bound vendor implementation performs |
-| `engine` | | The source type-checking facade for the shared onchain engine guards |
-| `v1` | `std` | The versioned source facade that policy crates compile against |
-| `spending` | `oracle-ledger` | Purchase-tier ledger support |
-| `client` | `client` | Client configuration, errors, journals, output and private local storage |
-| `service` | `service` | Rail-agnostic service operation contracts that vendor crates implement |
-| `transport` | `transport` | Bounded blocking HTTP and JSON-RPC transports for host workflows, rail clients and vendor adapters |
-| `contract` | `contract` | The chain contract artifact, mandate, execution state and binary IR transport that the rail contracts share |
-
-## Features
-
-| Feature | Purpose |
-| --- | --- |
-| `std`, `compiler`, `oracle-ledger` | The defaults |
-| `typed-workflow` | Typed workflow records. `compiler` enables it. |
-| `compact-contract-validation` | Error codes instead of diagnostics for `no_std` contracts |
-| `client` | The `client` module. Enables `std`. |
-| `service` | The `service` module. Enables `std`. |
-| `transport` | The `transport` module. Enables `service`. |
-| `contract` | The `contract` module. It builds without `std`. |
-| `integer-json` | Integer-only JSON for contract artifacts. Enables `contract`. |
-| `contract-stellar` | The Stellar chain profile: `integer-json` and `compact-contract-validation` |
-
-With no features, the crate is the bare `no_std + alloc` interpreter.
+Set the workspace version, merge the reviewed release, then annotate the merge commit with that tag.
+Never move an existing tag. Registry publication is a separate operation.
 
 ## Build and test
 
-You need Rust 1.98, the `wasm32-unknown-unknown` target and Node.js.
+Use Rust 1.98 with `wasm32v1-none`, rustfmt and Clippy, plus Stellar CLI 28.1.0.
 
 ```sh
-cargo build --all-targets --locked
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
+cargo build --locked --workspace --all-targets
+cargo fmt --all --check
+cargo test --locked -p allowit-sdk --features client,service,transport,policy-source
+cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source -- -D warnings
+cargo test --locked -p allowit
+cargo test --locked -p allowit --no-default-features --features std
+stellar contract build --locked --package allowit
+python3 -m unittest discover -s scripts/tests
 ```
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) lists every feature profile that CI checks. The policies and request contexts in [`docs/examples/`](docs/examples/) are test inputs.
+[CI](.github/workflows/ci.yml) also checks both portable profiles with Clippy and the minimal host package.
+The policy library links into its caller. The Stellar CLI checks its no_std contract profile through
+the official Soroban build pipeline. It does not export an IR-interpreter Wasm ABI.
 
-`allowit-contract-artifact <policy.rs> <intent.txt> [--binary]` writes the contract artifact for a policy to stdout:
+## Source and terms
 
-```sh
-cargo run --locked --features compiler,contract --bin allowit-contract-artifact -- docs/examples/approval.rs intent.txt
-```
+The portable package originates in [the Stellar policy library][portable-source].
+The retired compiler and bounded legacy model remain in [core's original source][legacy-source].
 
-## WebAssembly
+The host package, including the Rust source gate from Stellar's MIT host crate, uses the
+[MIT License](LICENSE). The portable package declares `UNLICENSED` in
+[its manifest](crates/allowit/Cargo.toml). The copied Python helper and corpus generator retain their
+original undeclared terms under [scripts/LICENSE](scripts/LICENSE).
+The original corpus and portable fixture retain their terms under [tests/fixtures/LICENSE](tests/fixtures/LICENSE).
+Dependencies retain their own terms.
 
-```sh
-cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib
-```
-
-`node tests/test-wasm.mjs` tests the module, which is `target/wasm32-unknown-unknown/release/allowit_sdk.wasm`. The module embeds the package version, so each release has its own module hash. It exports `alloc(len)`, `process(ptr, len)` and `dealloc(ptr, len)`. `process` takes UTF-8 JSON and packs the output pointer and length into one `u64`. Hosts set memory and time limits and discard an instance after any trap.
-
-## Verification
-
-[`verification/`](verification/README.md) holds a machine-checked Lean model of feature selection and a small policy decision language.
-
-## History
-
-This repository starts at allowit-sdk commit [67f5d69](https://github.com/allowit-hq/allowit-sdk/commit/67f5d696847992e18131f815ce905713ec3646e1), which created `core/`. The earlier history of the same code stays in allowit-sdk: `src/` and `tests/` at the repository root, and the crates `client-core/`, `services/core/`, `services/transport/` and `contracts/common/`, which became the `client`, `service`, `transport` and `contract` modules. In an allowit-sdk clone, run:
-
-```sh
-git log 67f5d69~1 -- src tests client-core services/core services/transport contracts/common
-```
-
-## License
-
-Allowit-authored code is released under the [MIT License](LICENSE). Dependencies keep their own terms. The [release workflow](.github/workflows/release.yml) ships the Wasm module with `LICENSE` and `dependency-licenses.html`, which [cargo-about](https://github.com/EmbarkStudios/cargo-about) generates from [`.github/about.toml`](.github/about.toml).
+[portable-source]: https://github.com/allowit-hq/allowit-contracts-stellar/tree/d0ae9be9e3d7a51e9ac4a1008ba207937aef36a2/crates/allowit
+[legacy-source]: https://github.com/allowit-hq/allowit-core/tree/64ec4e989b878b13995c139832a5901e92b020fd

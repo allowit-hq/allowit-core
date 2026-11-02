@@ -2,27 +2,32 @@
 
 ## Artifact storage
 
-Keep code, required build and test inputs and concise API and usage documentation in this repository. Plans, design reports, reviews, run evidence, demo recordings and screenshots belong in the main project repository under `.agents/artifacts/`. Never commit them here or in a feature branch. Link to the canonical artifact instead.
+Keep code, required build/test inputs and concise API/usage documentation here. Keep plans, reviews, evidence and recordings in the canonical Allowit knowledge project's `.agents/artifacts/`. Preserve original owner inputs in its `.agents/1-sources/`. Do not commit those artifacts in this implementation repository or its feature branches.
 
-## Dependencies
+## Dependencies and packages
 
-Core depends on no other Allowit repository. Dependencies point one way: the rail repositories (allowit-contracts-solana, allowit-contracts-tempo, allowit-contracts-stellar) depend on core, and allowit-sdk depends on the rail crates and on core. Never add a dependency on those repositories or a `[patch]` section.
+Core depends on no other Allowit repository. Rails depend on core. The shared SDK engine depends on core and rails. Never add a dependency on another Allowit repository or a cross-repository path dependency or `[patch]` section.
 
-The package is `allowit-sdk` (library `allowit_sdk`). Consumers name a release tag `vX.Y.Z` and the minor version (`tag = "v0.1.0", version = "0.1"`). The README states the release steps. A breaking change to a public type needs a new minor version before 1.0; name the affected repositories in the pull request. Never move or delete a pushed tag.
+The workspace contains `allowit-sdk` (library `allowit_sdk`) for generic host primitives and `allowit` for portable policy rules. Native request models, signing, custody and rail semantics belong to their rail repository. Core owns the portable source allowlist and its Python helper. Rail libraries bind source shape to native wallet tiers. Server owns trusted publication and admission. SDK engine owns shared execution workflows for CLI and server. Resolve the Python helper and portable library from the same released Core source. Preserve the copied helper and fixture terms. Keep the portable package's declared `UNLICENSED` terms separate from the host package's MIT terms. Do not relicense either package implicitly.
 
-## Verification
+Every package releases one workspace version. Consumers name a release tag `vX.Y.Z` and its minor version. Breaking public API changes need a new minor version before 1.0. Name affected repositories in the pull request. Never move or delete a pushed tag. Preserve owner approval of each new public head, independent reviews, deployment restrictions and subscription authentication.
 
-`verification/` holds only the core Lean model. The Solana verification set, including the obligation ledger and every hash-bound lock and receipt, lives in allowit-contracts-solana `verification/`. Its receipts bind a byte-identical copy of `lean/AllowIt.lean`. Keep the model here in step with that copy, and record any model change in allowit-contracts-solana with a new receipt there.
+## Validation profiles
 
-## Before pushing
+The portable package selects exactly one backend: default `soroban`, or `std` with default features disabled. Never unify both. Host transport and filesystem dependencies must remain absent from the portable contract build. Preserve overflow checks and policy denial/write-discard semantics.
 
-Read `.github/workflows/`. Run the affected commands locally, with their feature flags and selectors:
+Read `.github/workflows/` before implementation. Use the pinned Rust toolchain and the workflow's pinned Stellar CLI. Before pushing, run the affected checks locally with their exact package, target, feature and locked selectors:
 
-- `cargo build --all-targets --locked` and the Wasm command in the README
+- `cargo build --locked --workspace --all-targets`
 - `cargo fmt --all --check`
-- `cargo test --locked`, and the feature-profile commands in `ci.yml` for a change behind a feature
-- `cargo clippy --locked --all-targets -- -D warnings`
-- `node tests/test-wasm.mjs` after the Wasm build
-- `python3 -m unittest discover -s verification/tests` for a change in `verification/`
+- `cargo test --locked -p allowit-sdk --features client,service,transport,policy-source`
+- `cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source -- -D warnings`
+- `cargo check --locked -p allowit-sdk --no-default-features --lib`
+- `cargo test --locked -p allowit`
+- `cargo test --locked -p allowit --no-default-features --features std`
+- `cargo clippy --locked -p allowit --all-targets -- -D warnings`
+- `cargo clippy --locked -p allowit --no-default-features --features std --all-targets -- -D warnings`
+- `stellar contract build --locked --package allowit`
+- `python3 -m unittest discover -s scripts/tests`
 
-Resolve failures before pushing. Preserve existing reviews and deployment restrictions.
+Run loopback transport tests in an execution context that permits local sockets. A restricted bind or compiler-cache failure is not a test pass. Preserve the source graph and feature exclusions when adapting CI. Resolve actual warnings and failures before publishing. Do not weaken remaining validation when retiring obsolete compiler/IR/Wasm or legacy DSL model targets. The old formal model did not connect to the Rust implementation. Its immutable prior sources and Solana receipts remain unchanged.

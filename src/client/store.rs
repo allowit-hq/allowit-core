@@ -42,7 +42,7 @@ mod platform {
     }
 
     fn storage_error() -> Error {
-        Error::config("Private proof storage is unsafe or unreadable; retain the original journal")
+        Error::config("Private proof storage is unsafe or unreadable. Retain the original journal.")
     }
     fn file_private(info: &Metadata) -> bool {
         info.is_file()
@@ -127,7 +127,7 @@ mod platform {
     }
     fn record_name(request_id: &str) -> Result<CString> {
         if request_id.is_empty() || request_id.len() > 100 {
-            return Err(Error::config("Invalid Tempo journal request ID"));
+            return Err(Error::config("Invalid journal request ID"));
         }
         CString::new(format!(
             "request-{:x}.json",
@@ -287,7 +287,7 @@ mod platform {
                     return Err(storage_error());
                 }
                 self.directory.sync_all().map_err(|_| Error::uncertain(
-                    "Tempo journal durability is uncertain; retain this request ID and the original proof",
+                    "Journal durability is uncertain. Retain this request ID and the original proof.",
                 ))
             })();
             if result.is_err() {
@@ -351,7 +351,7 @@ mod platform {
                 }
                 if names.len() == MAX_ENTRIES {
                     return Err(Error::config(
-                        "Tempo journal has too many entries; retain its original proofs",
+                        "Journal has too many entries. Retain its original proofs.",
                     ));
                 }
                 if !is_record_name(name.to_bytes()) && !name.to_bytes().starts_with(b".tmp-") {
@@ -404,8 +404,10 @@ mod platform {
                     .unwrap()
                     .as_nanos();
                 let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-                let path = std::env::temp_dir().join(format!(
-                    "allowit-tempo-store-{}-{stamp}-{sequence}",
+                // macOS exposes its temporary directory through /var, a symlink.
+                // Resolve this trusted test root; Store still rejects aliases in its input.
+                let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
+                    "allowit-store-{}-{stamp}-{sequence}",
                     std::process::id()
                 ));
                 fs::create_dir(&path).unwrap();
@@ -600,7 +602,7 @@ mod platform {
     pub struct Store;
     fn unsupported() -> Error {
         Error::unsupported(
-            "Tempo proof journals require a supported local POSIX filesystem; on Windows use WSL Linux storage, not /mnt/c or /mnt/d",
+            "Private proof journals require a supported local POSIX filesystem. On Windows use WSL Linux storage, not /mnt/c or /mnt/d.",
         )
     }
     impl Store {
@@ -623,7 +625,7 @@ mod platform {
         #[test]
         fn unsupported_platform_creates_no_directory() {
             let directory = std::env::temp_dir()
-                .join(format!("allowit-tempo-unsupported-{}", std::process::id()));
+                .join(format!("allowit-store-unsupported-{}", std::process::id()));
             assert!(!directory.exists());
             assert!(Store::open(&directory).is_err());
             assert!(!directory.exists());

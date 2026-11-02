@@ -72,21 +72,27 @@ pub struct RpcClient {
 }
 pub use crate::service::rpc::Operation;
 
+fn endpoint(value: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(value).map_err(|_| Error::new(ErrorKind::Configuration))?;
+    let local_http = url.scheme() == "http"
+        && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if (url.scheme() != "https" && !local_http)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(Error::new(ErrorKind::Configuration));
+    }
+    Ok(url)
+}
+
 impl RpcClient {
     pub fn accept_success_statuses(mut self) -> Self {
         self.accept_any_success = true;
         self
     }
     pub fn for_endpoint(&self, endpoint: &str) -> Result<Self> {
-        let url =
-            reqwest::Url::parse(endpoint).map_err(|_| Error::new(ErrorKind::Configuration))?;
-        if !matches!(url.scheme(), "http" | "https")
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.fragment().is_some()
-        {
-            return Err(Error::new(ErrorKind::Configuration));
-        }
+        let url = self::endpoint(endpoint)?;
         Ok(Self {
             client: self.client.clone(),
             endpoint: url,
@@ -106,13 +112,8 @@ impl RpcClient {
         )
     }
     pub fn with_options(endpoint: &str, options: Options) -> Result<Self> {
-        let url =
-            reqwest::Url::parse(endpoint).map_err(|_| Error::new(ErrorKind::Configuration))?;
-        if !matches!(url.scheme(), "http" | "https")
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.fragment().is_some()
-            || options.timeout.is_zero()
+        let url = self::endpoint(endpoint)?;
+        if options.timeout.is_zero()
             || options.max_response_bytes == 0
             || options.max_response_bytes.checked_add(1).is_none()
             || options.connect_timeout.is_some_and(|v| v.is_zero())
@@ -233,10 +234,20 @@ impl RpcClient {
         }
         let body: Value =
             serde_json::from_slice(&bytes).map_err(|_| contextual(ErrorKind::Json, None))?;
-        if validation == EnvelopeValidation::StrictIdentity
-            && (body["jsonrpc"] != "2.0" || body["id"] != json!(id))
-        {
-            return Err(contextual(ErrorKind::Envelope, None));
+        if validation == EnvelopeValidation::StrictIdentity {
+            let result = body.get("result");
+            let error = body.get("error");
+            if body["jsonrpc"] != "2.0"
+                || body["id"] != json!(id)
+                || result.is_some() == error.is_some()
+                || error.is_some_and(|value| {
+                    !value.is_object()
+                        || value["code"].as_i64().is_none()
+                        || !value["message"].is_string()
+                })
+            {
+                return Err(contextual(ErrorKind::Envelope, None));
+            }
         }
         if body.get("error").is_some_and(|value| !value.is_null()) {
             let mut error = contextual(ErrorKind::Refused, body["error"]["code"].as_i64());

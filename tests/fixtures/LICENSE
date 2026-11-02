@@ -1,0 +1,3 @@
+portable-policy.rs originates in the Stellar custom-policy package, which declares UNLICENSED.
+policy-source-vectors.json retains its original undeclared terms from the Stellar source corpus.
+The repository root MIT License does not grant a license to these copied files.

@@ -124,6 +124,54 @@ fn strict_identity_and_legacy_null_semantics_are_preserved() {
 }
 
 #[test]
+fn strict_envelope_rejects_simultaneous_result_and_error() {
+    for body in [
+        json!({"jsonrpc":"2.0","id":7,"result":{"accepted":true},"error":null}),
+        json!({"jsonrpc":"2.0","id":7,"result":null,"error":{"code":-1,"message":"refused"}}),
+        json!({"jsonrpc":"2.0","id":7,"error":null}),
+        json!({"jsonrpc":"2.0","id":7,"error":{"message":"missing code"}}),
+        json!({"jsonrpc":"2.0","id":7,"error":{"code":-1,"message":42}}),
+        json!({"jsonrpc":"2.0","id":7}),
+    ] {
+        let (url, server) = server(200, body, Duration::ZERO, "");
+        let result = RpcClient::new(&url, Duration::from_secs(1), 1024)
+            .unwrap()
+            .call_with_id(
+                "sendTransaction",
+                &json!({"transaction":"original-packet"}),
+                7,
+                EnvelopeValidation::StrictIdentity,
+                None,
+            );
+        let request = server.join().unwrap();
+        assert_eq!(request["params"]["transaction"], "original-packet");
+        assert_eq!(result.unwrap_err().kind, ErrorKind::Envelope);
+    }
+    // A native simulation denial is result data, not a JSON-RPC envelope error.
+    let native = json!({"error":"policy denial","minResourceFee":"1200","events":["native-event"]});
+    let (url, server) = server(
+        200,
+        json!({"jsonrpc":"2.0","id":7,"result":native}),
+        Duration::ZERO,
+        "",
+    );
+    assert_eq!(
+        RpcClient::new(&url, Duration::from_secs(1), 1024)
+            .unwrap()
+            .call_with_id(
+                "simulateTransaction",
+                &json!({}),
+                7,
+                EnvelopeValidation::StrictIdentity,
+                None,
+            )
+            .unwrap(),
+        native,
+    );
+    server.join().unwrap();
+}
+
+#[test]
 fn retry_metadata_has_no_upstream_body_or_credential_and_never_resubmits() {
     let (url, server) = server(
         429,
@@ -228,6 +276,40 @@ fn endpoint_rebinding_preserves_the_new_origin_and_response_policy() {
     );
     first.join().unwrap();
     second.join().unwrap();
+    for endpoint in [
+        "http://localhost/rpc",
+        "http://127.0.0.1/rpc",
+        "http://[::1]/rpc",
+    ] {
+        assert!(RpcClient::new(endpoint, Duration::from_secs(1), 1024).is_ok());
+    }
+    let rpc = RpcClient::new(
+        "https://rpc.example.invalid/path",
+        Duration::from_secs(1),
+        1024,
+    )
+    .unwrap();
+    for endpoint in [
+        "http://rpc.example.invalid/path",
+        "http://localhost.example.invalid/rpc",
+        "https://user:secret@rpc.example.invalid/rpc",
+        "https://rpc.example.invalid/rpc#private",
+    ] {
+        assert_eq!(
+            RpcClient::new(endpoint, Duration::from_secs(1), 1024)
+                .err()
+                .expect("insecure endpoint")
+                .kind,
+            ErrorKind::Configuration,
+        );
+        assert_eq!(
+            rpc.for_endpoint(endpoint)
+                .err()
+                .expect("insecure rebind")
+                .kind,
+            ErrorKind::Configuration
+        );
+    }
 }
 
 #[test]
