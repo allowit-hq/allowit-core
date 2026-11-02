@@ -5,6 +5,29 @@ The shared SDK engine composes those primitives for both CLI and server hosts.
 Rail libraries own native requests, codecs, signing and finality.
 The server adds its exclusive policy authority and private state.
 
+## Architecture
+
+SDK core owns common types, policy rules, primitives and TypeScript interfaces.
+SDK engine, vendor packages and shared web components depend on these common contracts.
+
+```mermaid
+flowchart TB
+    UI["[allowit-engine]<br/>npm @allowit/ui<br/>Shared policy web components"]
+    Engine["[allowit-sdk]<br/>crate @allowit/sdk/engine<br/>All other shared logic"]
+    Vendor["crate + npm @allowit/vendor/*<br/>Native contracts · signing · chain semantics<br/>SVG graphics · web components"]
+    Core["[allowit-core]<br/>crate + npm @allowit/sdk/core<br/>Common types · policy rules · primitives<br/>TypeScript interfaces"]
+
+    UI -->|npm| Core
+    UI -->|npm| Vendor
+    Engine -->|crate| Vendor
+    Engine -->|crate| Core
+    Vendor -->|crate + npm| Core
+```
+
+Solid arrows are dependencies. Dashed arrows are runtime calls / connections.
+This view follows the [canonical responsibility diagram][responsibility-model].
+Use the [Cargo manifest](Cargo.toml) for Rust build package names.
+
 ## Packages
 
 | Package | Library | Responsibility | License |
@@ -100,3 +123,5 @@ Dependencies retain their own terms.
 
 [portable-source]: https://github.com/allowit-hq/allowit-contracts-stellar/tree/d0ae9be9e3d7a51e9ac4a1008ba207937aef36a2/crates/allowit
 [legacy-source]: https://github.com/allowit-hq/allowit-core/tree/64ec4e989b878b13995c139832a5901e92b020fd
+
+[responsibility-model]: https://github.com/allowit-hq/allowit-project/blob/main/wiki/allowit/architecture.md#dependency-direction
