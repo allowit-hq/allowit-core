@@ -3,3 +3,8 @@
 .DS_Store
 __pycache__/
 *.py[cod]
+
+**/test_snapshots/
+
+# Disposable Python bytecode.
+__pycache__/

@@ -40,7 +40,7 @@ pub fn clean(mut s: String, token: &str) -> String {
         .collect()
 }
 pub fn json(v: &Value) -> String {
-    // MPP enables serde_json/preserve_order. Keep the established CLI output
+    // Dependencies can enable serde_json/preserve_order. Keep client output
     // ordering while leaving typed request and identity bytes unchanged.
     let mut v = v.clone();
     v.sort_all_objects();

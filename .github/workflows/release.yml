@@ -6,29 +6,32 @@ on:
 permissions:
   contents: read
 jobs:
-  wasm:
+  policy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
-      - name: Check that the tag matches the package version
+      - name: Check that the tag matches both package versions
         if: startsWith(github.ref, 'refs/tags/')
-        run: test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline | sed 's/.*[#@]//')"
-      - run: cargo rustc --locked --release --lib --target wasm32-unknown-unknown --crate-type cdylib
-      - run: node tests/test-wasm.mjs
-      - run: cargo install --locked cargo-about --version 0.9.2 --features cli
-      # The notices cover the crates that the module links: core with its
-      # default features, for wasm32-unknown-unknown (.github/about.toml).
-      - name: Generate the dependency notices
         run: |
-          mkdir -p target/sdk-distribution
-          cargo about generate --locked -c .github/about.toml -o target/sdk-distribution/dependency-licenses.html .github/about.hbs
-          cp target/wasm32-unknown-unknown/release/allowit_sdk.wasm LICENSE target/sdk-distribution/
-      - uses: actions/upload-artifact@v4
+          test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline -p allowit-sdk | sed 's/.*[#@]//')"
+          test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline -p allowit | sed 's/.*[#@]//')"
+      - run: cargo test --locked -p allowit
+      - run: cargo test --locked -p allowit --no-default-features --features std
+      - uses: actions/setup-python@v5
         with:
-          name: allowit-sdk-wasm
-          path: target/sdk-distribution/
+          python-version: "3.12"
+      - run: cargo test --locked -p allowit-sdk --features policy-source
+      - run: python3 -m unittest discover -s scripts/tests
+      - name: Install pinned Stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/stellar.tar.gz
+          echo 'c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462  /tmp/stellar.tar.gz' | sha256sum -c -
+          mkdir /tmp/stellar-cli
+          tar -xzf /tmp/stellar.tar.gz -C /tmp/stellar-cli
+          echo /tmp/stellar-cli >> "$GITHUB_PATH"
+      - run: stellar contract build --locked --package allowit
