@@ -1,21 +1,21 @@
-// Shared types and rules, included once per backend. The including module supplies `Address`,
+// Shared types and rules. The including module supplies `Address`,
 // `AllowitEnv`, `Map`, `String`, `Symbol` and `Vec`, the owner's params `AllowitParams`, the type
 // macros `value!`, `error!` and `args!`, the map primitives `lookup`, `insert`, `count`,
 // `text_len`, `text_bytes`, `each_value`, `each_item`, `address_text`, `record`, `take_writes` and
 // `merge`, the params primitives `find` and `missing`, and the panic primitives `fail` and
-// `guarded`. Field types keep those names so contract specs name the backend's native types.
+// `guarded`. Rails own their native type bindings.
 
 /// UTC day length in seconds.
 pub const DAY: u64 = 86_400;
 
-/// The contract types, named at the crate root.
+/// Portable policy types, named at the crate root.
 pub use types::*;
 
-/// Contract types. Kept apart from `Result` so generated code sees the standard prelude.
+/// Policy types. Kept apart from `Result` so type definitions see the standard prelude.
 /// `AllowitRule` variants keep the snake-case names of their functions and param keys.
 #[allow(non_camel_case_types)]
 mod types {
-    /// Backend types that the contract types hold.
+    /// Portable value types.
     use super::{Address, AllowitEnv, AllowitMap, AllowitParams, Map, String, Symbol, Vec};
 
     value! {
@@ -139,7 +139,7 @@ mod types {
     /// Complete rule input, supplied by the wallet or server. Plain data without methods.
     #[derive(Clone)]
     pub struct AllowitContext {
-        /// The backend's environment.
+        /// The policy evaluation environment.
         pub env: AllowitEnv,
         /// The owner's constructor params, set at install and changed by owner-signed update.
         /// Policy reads them by key: `ctx.params[allowit::DESTINATIONS]`.
@@ -203,7 +203,7 @@ pub type Result<T = ()> = core::result::Result<T, AllowitError>;
 
 /// Names used by authored policy.
 pub mod prelude {
-    /// The types that `use allowit::prelude::*` imports. `String` and `Vec` are the backend
+    /// The types that `use allowit::prelude::*` imports. `String` and `Vec` are the portable
     /// types that `param` and `arg` read text and lists as.
     pub use super::{
         Address, AllowitContext, AllowitError, AllowitOperation, AllowitRequest, AllowitValue,

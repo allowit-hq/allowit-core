@@ -15,14 +15,10 @@ The server adds its exclusive policy authority and private state.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly. Importing a library grants no signing or payment authority.
 
-`allowit` selects exactly one backend:
-
-- Default `soroban` binds policy values to Soroban types for contracts.
-- `std`, with default features disabled, binds the same rule logic to host values.
-
-Both profiles compile the same rule definitions. Denials discard policy writes.
-The contract profile excludes host network and filesystem capabilities.
-Custody, native transaction encoding and native receipt checks remain in the rail library.
+`allowit` defaults to its `std` evaluator and uses chain-neutral Rust values.
+Denials and panics discard policy writes. The crate has no rail SDK dependency.
+Rails own native contract types, storage bindings and execution profiles, along with custody,
+native transaction encoding and native receipt checks.
 
 `allowit-sdk` defaults to `std`. Its `admin` capabilities and exact-byte `digest` also build without
 `std`. Host-only features expose these modules:
@@ -53,23 +49,28 @@ The source gate and host compile are separate required checks before trusted pub
 ## Dependencies and releases
 
 Every package in this repository releases the same annotated tag `vX.Y.Z`.
-Consumers name that tag and its minor version, and commit `Cargo.lock`:
+Consumers name a published tag and its minor version, and commit `Cargo.lock`.
+For a version 0.3.0 release, the dependency declarations are:
 
 ```toml
-allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.2.0", version = "0.2", default-features = false, features = ["std"] }
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.2.0", version = "0.2", default-features = false, features = ["client", "transport"] }
+allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.0", version = "0.3", default-features = false, features = ["std"] }
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.0", version = "0.3", default-features = false, features = ["client", "transport"] }
 ```
 
 All Allowit packages in one build name the same core tag.
-Contracts select the portable package's default Soroban profile separately from host builds.
-Do not combine its `std` and `soroban` features.
+Version 0.3 removes the `soroban` feature and the `allowit::soroban` module.
+`allowit-contracts-stellar` must provide its native binding before adopting this release.
+Existing consumers pinned to version 0.2 retain their immutable source and contract behavior.
+Host consumers can retain `default-features = false, features = ["std"]`.
+The shared `allowit-sdk` package still supports its minimal `no_std` profile.
+The policy evaluator requires `std` for panic containment and synchronized write buffers.
 
 Set the workspace version, merge the reviewed release, then annotate the merge commit with that tag.
 Never move an existing tag. Registry publication is a separate operation.
 
 ## Build and test
 
-Use Rust 1.98 with `wasm32v1-none`, rustfmt and Clippy, plus Stellar CLI 28.1.0.
+Use Rust 1.98 with rustfmt and Clippy.
 
 ```sh
 cargo build --locked --workspace --all-targets
@@ -78,13 +79,12 @@ cargo test --locked -p allowit-sdk --features client,service,transport,policy-so
 cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source -- -D warnings
 cargo test --locked -p allowit
 cargo test --locked -p allowit --no-default-features --features std
-stellar contract build --locked --package allowit
 python3 -m unittest discover -s scripts/tests
 ```
 
-[CI](.github/workflows/ci.yml) also checks both portable profiles with Clippy and the minimal host package.
-The policy library links into its caller. The Stellar CLI checks its no_std contract profile through
-the official Soroban build pipeline. It does not export an IR-interpreter Wasm ABI.
+[CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy
+and the minimal host package. The policy library links into its caller.
+Each rail validates its native contract build in its own repository.
 
 ## Source and terms
 

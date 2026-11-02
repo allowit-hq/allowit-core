@@ -12,8 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
-        with:
-          targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
       - name: Check that the tag matches both package versions
         if: startsWith(github.ref, 'refs/tags/')
@@ -27,11 +25,3 @@ jobs:
           python-version: "3.12"
       - run: cargo test --locked -p allowit-sdk --features policy-source
       - run: python3 -m unittest discover -s scripts/tests
-      - name: Install pinned Stellar CLI
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/stellar.tar.gz
-          echo 'c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462  /tmp/stellar.tar.gz' | sha256sum -c -
-          mkdir /tmp/stellar-cli
-          tar -xzf /tmp/stellar.tar.gz -C /tmp/stellar-cli
-          echo /tmp/stellar-cli >> "$GITHUB_PATH"
-      - run: stellar contract build --locked --package allowit

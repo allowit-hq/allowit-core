@@ -14,9 +14,9 @@ Every package releases one workspace version. Consumers name a release tag `vX.Y
 
 ## Validation profiles
 
-The portable package selects exactly one backend: default `soroban`, or `std` with default features disabled. Never unify both. Host transport and filesystem dependencies must remain absent from the portable contract build. Preserve overflow checks and policy denial/write-discard semantics.
+The portable policy evaluator defaults to `std` and uses chain-neutral Rust types. Rail SDKs, contract macros and native storage belong in rail repositories. Keep transport and filesystem dependencies out of the policy package. Preserve overflow checks and policy denial/write-discard semantics. The shared host package retains its minimal `no_std` profile.
 
-Read `.github/workflows/` before implementation. Use the pinned Rust toolchain and the workflow's pinned Stellar CLI. Before pushing, run the affected checks locally with their exact package, target, feature and locked selectors:
+Read `.github/workflows/` before implementation. Use the pinned Rust toolchain. Before pushing, run the affected checks locally with their exact package, target, feature and locked selectors:
 
 - `cargo build --locked --workspace --all-targets`
 - `cargo fmt --all --check`
@@ -27,7 +27,6 @@ Read `.github/workflows/` before implementation. Use the pinned Rust toolchain a
 - `cargo test --locked -p allowit --no-default-features --features std`
 - `cargo clippy --locked -p allowit --all-targets -- -D warnings`
 - `cargo clippy --locked -p allowit --no-default-features --features std --all-targets -- -D warnings`
-- `stellar contract build --locked --package allowit`
 - `python3 -m unittest discover -s scripts/tests`
 
 Run loopback transport tests in an execution context that permits local sockets. A restricted bind or compiler-cache failure is not a test pass. Preserve the source graph and feature exclusions when adapting CI. Resolve actual warnings and failures before publishing. Do not weaken remaining validation when retiring obsolete compiler/IR/Wasm or legacy DSL model targets. The old formal model did not connect to the Rust implementation. Its immutable prior sources and Solana receipts remain unchanged.
