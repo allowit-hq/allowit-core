@@ -1,0 +1,25 @@
+name: Presentation interfaces
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  presentation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: cargo build --locked --example policy_wire --features policy-source
+      - run: pnpm check
+      - run: pnpm test

@@ -1,0 +1,32 @@
+{
+  "name": "@allowit/sdk",
+  "version": "0.3.1",
+  "type": "module",
+  "description": "Common Allowit policy values and canonical function metadata",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/allowit-hq/allowit-core.git"
+  },
+  "exports": {
+    "./core": {
+      "types": "./typescript/core.d.ts",
+      "default": "./typescript/core.js"
+    }
+  },
+  "files": [
+    "typescript/core.js",
+    "typescript/core.d.ts",
+    "typescript/canonical-functions.json",
+    "LICENSE"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate-presentation.mjs",
+    "check": "node scripts/generate-presentation.mjs --check",
+    "test": "node --test tests/presentation/package.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

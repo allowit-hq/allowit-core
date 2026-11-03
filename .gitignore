@@ -8,3 +8,5 @@ __pycache__/
 
 # Disposable Python bytecode.
 __pycache__/
+
+node_modules/

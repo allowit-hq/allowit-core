@@ -4,7 +4,7 @@ default-members = ["."]
 resolver = "2"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 repository = "https://github.com/allowit-hq/allowit-core"
 
@@ -28,12 +28,20 @@ required-features = ["transport"]
 name = "policy_source"
 required-features = ["policy-source"]
 
+[[test]]
+name = "presentation"
+required-features = ["policy-source"]
+
+[[example]]
+name = "policy_wire"
+required-features = ["policy-source"]
+
 [features]
 default = ["std"]
 std = ["serde/std", "serde_json/std", "sha2/std"]
 client = ["std", "dep:libc", "dep:url"]
 service = ["std"]
-policy-source = ["std", "dep:allowit"]
+policy-source = ["std", "dep:allowit", "serde/derive"]
 transport = ["service", "dep:reqwest"]
 
 [dependencies]
