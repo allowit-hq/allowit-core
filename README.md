@@ -30,7 +30,9 @@ flowchart TB
 | --- | --- | --- | --- |
 | `allowit` | `allowit` | Deterministic policy types, nine rules, evaluation and accounting | `UNLICENSED` |
 | `allowit-sdk` | `allowit_sdk` | Generic owner capabilities, private storage, configuration, source checks and bounded transport | MIT |
+| npm `@allowit/sdk` | `@allowit/sdk/core` | Common wire types and canonical function metadata for frontends | MIT |
 
+[Dependency checks](scripts/check_core_boundaries.py) reject declared and locked native rail dependencies, including hidden optional or target declarations.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly. Importing a library grants no signing or payment authority.
 
@@ -65,15 +67,40 @@ Source-based build hosts can also resolve both files from the same verified Core
 Do not substitute a sibling checkout or a helper selected through an environment variable.
 The source gate and host compile are separate required checks before trusted publication.
 
+## Common policy interfaces
+
+Rust callers enable `policy-source` and use `allowit_sdk::policy`.
+`PolicyValue` is a JSON wrapper around the existing portable value.
+Its five tags are `Int`, `Bool`, `Str`, `Addr` and `List`. Integers use canonical decimal strings.
+Address text remains opaque. Native adapters check native identities.
+This codec does not replace parameter, source, installation or authority validation.
+
+JavaScript and TypeScript callers import `@allowit/sdk/core`:
+
+```ts
+import { canonicalFunctions, type PolicyValue } from "@allowit/sdk/core";
+const limit: PolicyValue = { Int: "9007199254740993" };
+```
+
+[Function metadata](typescript/canonical-functions.json) supplies common descriptions, second-argument shapes and semantic types.
+Amount metadata assumes no asset, decimals or price normalization. Hosts and native adapters supply verified unit context.
+Registry order does not prescribe source order. SDK engine derives source bindings and workflow projections.
+The exported metadata hash identifies the exact JSON bytes shared by Rust and JavaScript.
+
+Use `pnpm install --frozen-lockfile --ignore-scripts` for its development tools.
+Run `pnpm generate` after changing the registry. `pnpm check` detects stale generated exports.
+`pnpm test` checks a packed public consumer and the Rust/JavaScript integer roundtrip.
+The npm archive contains interfaces, metadata, runtime exports and MIT terms. It excludes portable guest source.
+
 ## Dependencies and releases
 
 Every package in this repository releases the same annotated tag `vX.Y.Z`.
 Consumers name a published tag and its minor version, and commit `Cargo.lock`.
-For a version 0.3.0 release, the dependency declarations are:
+For a version 0.3.1 release, the dependency declarations are:
 
 ```toml
-allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.0", version = "0.3", default-features = false, features = ["std"] }
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.0", version = "0.3", default-features = false, features = ["client", "transport"] }
+allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false, features = ["std"] }
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false, features = ["client", "transport"] }
 ```
 
 All Allowit packages in one build name the same core tag.

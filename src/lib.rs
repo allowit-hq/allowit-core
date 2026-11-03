@@ -7,6 +7,8 @@ pub mod admin;
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "policy-source")]
+pub mod policy;
+#[cfg(feature = "policy-source")]
 pub mod policy_source;
 #[cfg(feature = "service")]
 pub mod service;
