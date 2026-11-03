@@ -6,6 +6,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -95,6 +96,78 @@ class CoreBoundaryTests(unittest.TestCase):
                 entry.size = len(payload)
                 archive.addfile(entry, io.BytesIO(payload))
             self.assertTrue(boundary.check_root(root))
+
+    def test_workspace_inspection_does_not_execute_hooks_and_rejects_unknown_yaml(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text(PACKAGE)
+            (root / "package.json").write_text('{"name":"safe-wrapper","version":"1.0.0"}')
+            (root / ".pnpmfile.cjs").write_text(
+                "require('node:fs').writeFileSync(require('node:path').join(__dirname,'hook-ran'),'yes'); module.exports={};"
+            )
+            workspace = root / "pnpm-workspace.yaml"
+            workspace.write_text("packages:\n  - '.'\n")
+            self.assertEqual(boundary.check_root(root), [])
+            self.assertFalse((root / "hook-ran").exists())
+            (root / "packages/native").mkdir(parents=True)
+            (root / "packages/native/package.json").write_text('{"name":"@solana/kit"}')
+            workspace.write_text("packages:\n  - 'packages/*'\n")
+            self.assertTrue(boundary.check_root(root))
+            workspace.write_text("packages: []\ncatalog:\n  bridge: 'npm:@solana/kit@1'\n")
+            self.assertTrue(boundary.check_root(root))
+            self.assertFalse((root / "hook-ran").exists())
+
+    def test_safe_archive_name_does_not_hide_nested_dependency_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text(PACKAGE)
+            (root / "package.json").write_text('{"dependencies":{"bridge":"file:wrapper.tgz"}}')
+            for declaration, rejected in [
+                ({"dependencies": {"bridge": "npm:@noble/ed25519@2"}}, False),
+                ({"dependencies": {"bridge": "npm:@stellar/stellar-sdk@1"}}, True),
+                ({"pnpm": {"overrides": {"tool": {"bridge": "npm:@solana/kit@1"}}}}, True),
+                ({"dependencies": {"bridge": "file:uninspectable.tgz"}}, True),
+            ]:
+                with self.subTest(declaration=declaration):
+                    payload = json.dumps({"name": "safe-wrapper", **declaration}).encode()
+                    with tarfile.open(root / "wrapper.tgz", "w:gz") as archive:
+                        entry = tarfile.TarInfo("package/package.json")
+                        entry.size = len(payload)
+                        archive.addfile(entry, io.BytesIO(payload))
+                    self.assertEqual(bool(boundary.check_root(root)), rejected)
+
+    def test_external_metadata_symlinks_are_rejected_before_open(self):
+        documents = {
+            "Cargo.toml": PACKAGE,
+            "Cargo.lock": "version=4\n",
+            "package.json": "{}",
+            "pnpm-workspace.yaml": "packages:\n  - '.'\n",
+            "member/Cargo.toml": PACKAGE,
+            "wrapper.tgz": "not read",
+        }
+        for filename, text in documents.items():
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "core"
+                root.mkdir()
+                (root / "Cargo.toml").write_text(PACKAGE + '[dependencies]\nbridge={path="member"}\n' if filename.startswith("member/") else PACKAGE)
+                if filename == "wrapper.tgz":
+                    (root / "package.json").write_text('{"dependencies":{"bridge":"file:wrapper.tgz"}}')
+                external = Path(directory) / "external"
+                external.write_text(text)
+                target = root / filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.unlink(missing_ok=True)
+                target.symlink_to(external)
+                opened = []
+                original = Path.open
+                def observe(path, *args, **kwargs):
+                    if path.resolve() == external.resolve():
+                        opened.append(filename)
+                    return original(path, *args, **kwargs)
+                with patch.object(Path, "open", observe), patch.object(boundary.tarfile, "open", side_effect=AssertionError("archive must not open")):
+                    errors = boundary.check_root(root)
+                self.assertTrue(any("escapes Core" in error for error in errors))
+                self.assertEqual(opened, [])
 
     def test_generic_primitives_and_unreferenced_fixture_manifests_remain_allowed(self):
         with tempfile.TemporaryDirectory() as directory:

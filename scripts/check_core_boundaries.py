@@ -3,7 +3,6 @@
 import json
 import re
 import sys
-import subprocess
 import tarfile
 import tomllib
 from pathlib import Path
@@ -23,6 +22,7 @@ NPM_NAMES = {"ethers", "web3", "viem", "@coral-xyz/anchor", "@project-serum/anch
              "@allowit/agent", "@allowit/server", "@allowit/cli", "@allowit/sdk-engine"}
 DEP_TABLES = ("dependencies", "build-dependencies", "dev-dependencies")
 NPM_TABLES = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+MAX_METADATA_BYTES = 2 * 1024 * 1024
 
 
 def safe(value):
@@ -85,9 +85,21 @@ def check_root(root):
             problem(manifest, item, "local dependency or member escapes Core")
             return None
 
+    def text_file(manifest):
+        path = inside(manifest, manifest, "manifest")
+        if path is None:
+            return None
+        with path.open("rb") as stream:
+            data = stream.read(MAX_METADATA_BYTES + 1)
+        if len(data) > MAX_METADATA_BYTES:
+            raise ValueError("metadata exceeds size limit")
+        return data.decode("utf-8")
+
     def read(manifest, kind):
         try:
-            text = manifest.read_text(encoding="utf-8")
+            text = text_file(manifest)
+            if text is None:
+                return {}
             result = tomllib.loads(text) if kind == "toml" else json.loads(text)
             if not isinstance(result, dict):
                 raise ValueError("manifest must be an object")
@@ -163,7 +175,7 @@ def check_root(root):
             if native_rust(package["name"]) or native_repository(package.get("source", "")):
                 problem(lock, package["name"], "locked native or vendor package cannot enter Core")
 
-    def npm_source(manifest, alias, source):
+    def npm_source(manifest, alias, source, archived=False):
         if not isinstance(source, str):
             problem(manifest, alias, "invalid npm dependency declaration")
             return
@@ -182,71 +194,131 @@ def check_root(root):
         if source.startswith("catalog:"):
             problem(manifest, alias, "catalog alias requires an inspectable package identity")
         if source.startswith(("file:", "link:", ".", "/")):
+            if archived:
+                problem(manifest, alias, "archive-local dependencies cannot be inspected")
+                return
             local = source.split(":", 1)[1] if source.startswith(("file:", "link:")) else source
             target = inside(manifest.parent / local, manifest, alias)
             if target and target.is_file():
                 try:
+                    # Read one regular metadata entry. Never extract or execute archive content.
+                    target = inside(target, manifest, alias)
+                    if target is None:
+                        return
                     with tarfile.open(target) as archive:
-                        info = json.load(archive.extractfile("package/package.json"))
-                    if native_npm(info.get("name", "")):
-                        problem(manifest, alias, "resolved archive is a native rail package")
+                        entry = archive.getmember("package/package.json")
+                        if not entry.isfile() or entry.size > MAX_METADATA_BYTES:
+                            raise ValueError("invalid archive metadata entry")
+                        info = json.loads(archive.extractfile(entry).read(MAX_METADATA_BYTES + 1))
+                    if not isinstance(info, dict):
+                        raise ValueError("archive manifest must be an object")
+                    npm_document(manifest, info, archived=True)
                 except (OSError, ValueError, KeyError, tarfile.TarError):
                     problem(manifest, alias, "cannot inspect local npm archive identity")
             elif target:
                 npm_manifest(target / "package.json")
 
-    def npm_overrides(manifest, overrides):
+    def npm_overrides(manifest, overrides, archived):
         for alias, source in overrides.items():
             if isinstance(source, dict):
-                npm_source(manifest, alias, "0")
-                npm_overrides(manifest, source)
+                npm_source(manifest, alias, "0", archived)
+                npm_overrides(manifest, source, archived)
             else:
-                npm_source(manifest, alias, source)
+                npm_source(manifest, alias, source, archived)
 
     def npm_manifest(manifest):
         manifest = inside(manifest, manifest, "package")
         if manifest is None or manifest in seen_npm:
             return
         seen_npm.add(manifest)
-        doc = read(manifest, "json")
+        npm_document(manifest, read(manifest, "json"))
+
+    def npm_document(manifest, doc, archived=False):
         if native_npm(doc.get("name", "")):
             problem(manifest, "package", "resolved package is a native rail package")
         for table in NPM_TABLES:
             for alias, source in doc.get(table, {}).items():
-                npm_source(manifest, alias, source)
-        npm_overrides(manifest, doc.get("overrides", {}))
+                npm_source(manifest, alias, source, archived)
+        for table in ("overrides", "resolutions"):
+            npm_overrides(manifest, doc.get(table, {}), archived)
+        for table in ("bundledDependencies", "bundleDependencies"):
+            for alias in doc.get(table, []) if isinstance(doc.get(table, []), list) else []:
+                npm_source(manifest, alias, "0", archived)
         pnpm = doc.get("pnpm", {})
-        npm_overrides(manifest, pnpm.get("overrides", {}))
+        npm_overrides(manifest, pnpm.get("overrides", {}), archived)
         for selector, extension in pnpm.get("packageExtensions", {}).items():
-            npm_source(manifest, selector, "0")
+            npm_source(manifest, selector, "0", archived)
             for table in NPM_TABLES:
                 for alias, source in extension.get(table, {}).items():
-                    npm_source(manifest, alias, source)
+                    npm_source(manifest, alias, source, archived)
         members = doc.get("workspaces", [])
         if isinstance(members, dict):
             members = members.get("packages", [])
-        for pattern in members:
-            for member in manifest.parent.glob(pattern):
-                if "node_modules" not in member.parts and (member / "package.json").is_file():
-                    npm_manifest(member / "package.json")
+        if archived and members:
+            problem(manifest, "workspaces", "archive workspace members cannot be inspected")
+        elif members:
+            npm_members(manifest, members)
+
+    def npm_members(manifest, patterns):
+        if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+            problem(manifest, "workspaces", "workspace packages must be a list of paths")
+            return
+        included, excluded = set(), set()
+        for pattern in patterns:
+            exclude = pattern.startswith("!")
+            pattern = pattern.removeprefix("!")
+            if (not pattern or "**" in pattern or Path(pattern).is_absolute() or ".." in Path(pattern).parts
+                    or not re.fullmatch(r"[A-Za-z0-9_@./*?\[\]-]+", pattern)):
+                problem(manifest, "workspaces", "unsupported workspace path pattern")
+                continue
+            matches = [manifest.parent] if pattern == "." else manifest.parent.glob(pattern)
+            for member in matches:
+                member = inside(member, manifest, "workspace member")
+                if member is not None and "node_modules" not in member.parts:
+                    (excluded if exclude else included).add(member)
+        for member in sorted(included - excluded):
+            path = inside(member / "package.json", manifest, "workspace member")
+            if path is not None and path.is_file():
+                npm_manifest(path)
+
+    def pnpm_packages(manifest):
+        # Accept only a static packages list. Other YAML requires explicit guard support.
+        try:
+            text = text_file(manifest)
+            if text is None:
+                return
+            packages, header = [], False
+            for line in text.splitlines():
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                if line == "packages:" and not header:
+                    header = True
+                    continue
+                match = re.fullmatch(r" +-[ ]+(.+)", line) if header else None
+                if match is None:
+                    raise ValueError("unsupported workspace YAML")
+                value = match[1]
+                if value.startswith('"'):
+                    value = json.loads(value)
+                elif value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1].replace("''", "'")
+                elif value.startswith(("*", "!", "&")):
+                    raise ValueError("YAML aliases and tags are unsupported")
+                if not isinstance(value, str):
+                    raise ValueError("workspace path must be a string")
+                packages.append(value)
+            if not header:
+                raise ValueError("workspace packages list is required")
+            npm_members(manifest, packages)
+        except (OSError, ValueError):
+            problem(manifest, "workspace", "unsupported pnpm workspace metadata")
 
     package = root / "package.json"
     if package.exists():
         npm_manifest(package)
     pnpm_workspace = root / "pnpm-workspace.yaml"
     if pnpm_workspace.exists():
-        try:
-            result = subprocess.run(
-                ["pnpm", "list", "--recursive", "--depth", "-1", "--json"], cwd=root,
-                capture_output=True, text=True, timeout=30, check=True,
-            )
-            for item in json.loads(result.stdout):
-                npm_manifest(Path(item["path"]) / "package.json")
-            # Catalog aliases need their resolved identities, not their display keys.
-            if any(line.strip().startswith(("catalog:", "catalogs:")) for line in pnpm_workspace.read_text().splitlines()):
-                problem(pnpm_workspace, "catalog", "catalog sources need explicit dependency identities for inspection")
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-            problem(pnpm_workspace, "workspace", "cannot inspect declared pnpm package paths")
+        pnpm_packages(pnpm_workspace)
     return sorted(set(errors))
 
 

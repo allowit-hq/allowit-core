@@ -126,11 +126,16 @@ cargo clippy --locked -p allowit-sdk --all-targets --features client,service,tra
 cargo test --locked -p allowit
 cargo test --locked -p allowit --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
+python3 scripts/check_core_boundaries.py
 ```
 
 [CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy
 and the minimal host package. The policy library links into its caller.
-Each rail validates its native contract build in its own repository.
+Each rail checks its native contract build in its own repository.
+
+The dependency guard checks Cargo declarations, the lockfile and declared npm manifests without running package-manager hooks.
+It rejects local metadata paths outside Core. Local npm archives receive the same dependency checks as package manifests.
+Pnpm workspace files support a static `packages` list with relative paths and shallow globs. Unsupported YAML produces an error.
 
 ## Source and terms
 
