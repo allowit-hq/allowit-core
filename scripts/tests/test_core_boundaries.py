@@ -66,7 +66,7 @@ class CoreBoundaryTests(unittest.TestCase):
             self.assertNotIn(secret, str(errors))
             self.assertNotIn(url, str(errors))
 
-    def test_npm_aliases_optional_declarations_workspaces_and_archive_identity(self):
+    def test_npm_aliases_optional_declarations_workspaces_and_local_package_identity(self):
         manifests = [
             {"dependencies": {"bridge": "npm:@stellar/stellar-sdk@1"}},
             {"optionalDependencies": {"bridge": "npm:ethers@6"}},
@@ -89,13 +89,10 @@ class CoreBoundaryTests(unittest.TestCase):
             (root / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}))
             (root / "packages/adapter/package.json").write_text(json.dumps({"name": "@solana/kit"}))
             self.assertTrue(boundary.check_root(root))
-            (root / "package.json").write_text(json.dumps({"dependencies": {"bridge": "file:adapter.tgz"}}))
-            with tarfile.open(root / "adapter.tgz", "w:gz") as archive:
-                payload = json.dumps({"name": "@stellar/stellar-sdk"}).encode()
-                entry = tarfile.TarInfo("package/package.json")
-                entry.size = len(payload)
-                archive.addfile(entry, io.BytesIO(payload))
+            (root / "package.json").write_text(json.dumps({"dependencies": {"bridge": "file:packages/adapter"}}))
             self.assertTrue(boundary.check_root(root))
+            (root / "packages/adapter/package.json").write_text('{"name":"safe-adapter"}')
+            self.assertEqual(boundary.check_root(root), [])
 
     def test_workspace_inspection_does_not_execute_hooks_and_rejects_unknown_yaml(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -117,24 +114,29 @@ class CoreBoundaryTests(unittest.TestCase):
             self.assertTrue(boundary.check_root(root))
             self.assertFalse((root / "hook-ran").exists())
 
-    def test_safe_archive_name_does_not_hide_nested_dependency_sources(self):
+    def test_archives_disguised_files_and_opaque_remote_sources_are_rejected_unopened(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "Cargo.toml").write_text(PACKAGE)
-            (root / "package.json").write_text('{"dependencies":{"bridge":"file:wrapper.tgz"}}')
-            for declaration, rejected in [
-                ({"dependencies": {"bridge": "npm:@noble/ed25519@2"}}, False),
-                ({"dependencies": {"bridge": "npm:@stellar/stellar-sdk@1"}}, True),
-                ({"pnpm": {"overrides": {"tool": {"bridge": "npm:@solana/kit@1"}}}}, True),
-                ({"dependencies": {"bridge": "file:uninspectable.tgz"}}, True),
-            ]:
-                with self.subTest(declaration=declaration):
-                    payload = json.dumps({"name": "safe-wrapper", **declaration}).encode()
-                    with tarfile.open(root / "wrapper.tgz", "w:gz") as archive:
-                        entry = tarfile.TarInfo("package/package.json")
-                        entry.size = len(payload)
-                        archive.addfile(entry, io.BytesIO(payload))
-                    self.assertEqual(bool(boundary.check_root(root)), rejected)
+            # Both names normalize to one extracted path. The guard must not parse this archive.
+            with tarfile.open(root / "wrapper.tgz", "w:gz") as archive:
+                for path, name in [("package/package.json", "safe-wrapper"),
+                                   ("package/./package.json", "@stellar/stellar-sdk")]:
+                    payload = json.dumps({"name": name}).encode()
+                    entry = tarfile.TarInfo(path)
+                    entry.size = len(payload)
+                    archive.addfile(entry, io.BytesIO(payload))
+            (root / "wrapper.bin").write_bytes((root / "wrapper.tgz").read_bytes())
+            for source in ["file:wrapper.tgz", "file:wrapper.bin", "wrapper.tgz",
+                           "https://example.invalid/wrapper.tgz", "git+https://example.invalid/wrapper.git"]:
+                with self.subTest(source=source):
+                    (root / "package.json").write_text(json.dumps({"dependencies": {"bridge": source}}))
+                    original = Path.open
+                    def observe(path, *args, **kwargs):
+                        self.assertNotIn(path.name, {"wrapper.tgz", "wrapper.bin"})
+                        return original(path, *args, **kwargs)
+                    with patch.object(Path, "open", observe):
+                        self.assertTrue(boundary.check_root(root))
 
     def test_external_metadata_symlinks_are_rejected_before_open(self):
         documents = {
@@ -164,7 +166,7 @@ class CoreBoundaryTests(unittest.TestCase):
                     if path.resolve() == external.resolve():
                         opened.append(filename)
                     return original(path, *args, **kwargs)
-                with patch.object(Path, "open", observe), patch.object(boundary.tarfile, "open", side_effect=AssertionError("archive must not open")):
+                with patch.object(Path, "open", observe):
                     errors = boundary.check_root(root)
                 self.assertTrue(any("escapes Core" in error for error in errors))
                 self.assertEqual(opened, [])

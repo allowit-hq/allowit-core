@@ -3,7 +3,6 @@
 import json
 import re
 import sys
-import tarfile
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -89,6 +88,8 @@ def check_root(root):
         path = inside(manifest, manifest, "manifest")
         if path is None:
             return None
+        if not path.is_file():
+            raise ValueError("metadata must be a regular file")
         with path.open("rb") as stream:
             data = stream.read(MAX_METADATA_BYTES + 1)
         if len(data) > MAX_METADATA_BYTES:
@@ -175,7 +176,7 @@ def check_root(root):
             if native_rust(package["name"]) or native_repository(package.get("source", "")):
                 problem(lock, package["name"], "locked native or vendor package cannot enter Core")
 
-    def npm_source(manifest, alias, source, archived=False):
+    def npm_source(manifest, alias, source):
         if not isinstance(source, str):
             problem(manifest, alias, "invalid npm dependency declaration")
             return
@@ -189,42 +190,28 @@ def check_root(root):
                 problem(manifest, alias, "cannot inspect npm alias identity")
                 return
             actual = match[1]
+            source = source[len("npm:") + len(actual):].removeprefix("@") or "*"
         if native_npm(actual) or native_repository(source):
             problem(manifest, alias, "native or vendor npm package cannot enter Core")
-        if source.startswith("catalog:"):
-            problem(manifest, alias, "catalog alias requires an inspectable package identity")
         if source.startswith(("file:", "link:", ".", "/")):
-            if archived:
-                problem(manifest, alias, "archive-local dependencies cannot be inspected")
-                return
             local = source.split(":", 1)[1] if source.startswith(("file:", "link:")) else source
             target = inside(manifest.parent / local, manifest, alias)
-            if target and target.is_file():
-                try:
-                    # Read one regular metadata entry. Never extract or execute archive content.
-                    target = inside(target, manifest, alias)
-                    if target is None:
-                        return
-                    with tarfile.open(target) as archive:
-                        entry = archive.getmember("package/package.json")
-                        if not entry.isfile() or entry.size > MAX_METADATA_BYTES:
-                            raise ValueError("invalid archive metadata entry")
-                        info = json.loads(archive.extractfile(entry).read(MAX_METADATA_BYTES + 1))
-                    if not isinstance(info, dict):
-                        raise ValueError("archive manifest must be an object")
-                    npm_document(manifest, info, archived=True)
-                except (OSError, ValueError, KeyError, tarfile.TarError):
-                    problem(manifest, alias, "cannot inspect local npm archive identity")
-            elif target:
-                npm_manifest(target / "package.json")
+            if target is not None:
+                if target.is_dir():
+                    npm_manifest(target / "package.json")
+                else:
+                    problem(manifest, alias, "local npm dependencies must be directories with package manifests")
+        elif (not re.fullmatch(r"[A-Za-z0-9*.^~<>=|+ -]+", source)
+              or source.lower().endswith((".tgz", ".tar.gz", ".tar", ".zip"))):
+            problem(manifest, alias, "opaque npm dependency sources are not permitted")
 
-    def npm_overrides(manifest, overrides, archived):
+    def npm_overrides(manifest, overrides):
         for alias, source in overrides.items():
             if isinstance(source, dict):
-                npm_source(manifest, alias, "0", archived)
-                npm_overrides(manifest, source, archived)
+                npm_source(manifest, alias, "0")
+                npm_overrides(manifest, source)
             else:
-                npm_source(manifest, alias, source, archived)
+                npm_source(manifest, alias, source)
 
     def npm_manifest(manifest):
         manifest = inside(manifest, manifest, "package")
@@ -233,30 +220,28 @@ def check_root(root):
         seen_npm.add(manifest)
         npm_document(manifest, read(manifest, "json"))
 
-    def npm_document(manifest, doc, archived=False):
+    def npm_document(manifest, doc):
         if native_npm(doc.get("name", "")):
             problem(manifest, "package", "resolved package is a native rail package")
         for table in NPM_TABLES:
             for alias, source in doc.get(table, {}).items():
-                npm_source(manifest, alias, source, archived)
+                npm_source(manifest, alias, source)
         for table in ("overrides", "resolutions"):
-            npm_overrides(manifest, doc.get(table, {}), archived)
+            npm_overrides(manifest, doc.get(table, {}))
         for table in ("bundledDependencies", "bundleDependencies"):
             for alias in doc.get(table, []) if isinstance(doc.get(table, []), list) else []:
-                npm_source(manifest, alias, "0", archived)
+                npm_source(manifest, alias, "0")
         pnpm = doc.get("pnpm", {})
-        npm_overrides(manifest, pnpm.get("overrides", {}), archived)
+        npm_overrides(manifest, pnpm.get("overrides", {}))
         for selector, extension in pnpm.get("packageExtensions", {}).items():
-            npm_source(manifest, selector, "0", archived)
+            npm_source(manifest, selector, "0")
             for table in NPM_TABLES:
                 for alias, source in extension.get(table, {}).items():
-                    npm_source(manifest, alias, source, archived)
+                    npm_source(manifest, alias, source)
         members = doc.get("workspaces", [])
         if isinstance(members, dict):
             members = members.get("packages", [])
-        if archived and members:
-            problem(manifest, "workspaces", "archive workspace members cannot be inspected")
-        elif members:
+        if members:
             npm_members(manifest, members)
 
     def npm_members(manifest, patterns):

@@ -134,7 +134,8 @@ and the minimal host package. The policy library links into its caller.
 Each rail checks its native contract build in its own repository.
 
 The dependency guard checks Cargo declarations, the lockfile and declared npm manifests without running package-manager hooks.
-It rejects local metadata paths outside Core. Local npm archives receive the same dependency checks as package manifests.
+It rejects local metadata paths outside Core. Local npm dependencies must be directories with regular package manifests.
+Npm archives and opaque remote sources are not permitted.
 Pnpm workspace files support a static `packages` list with relative paths and shallow globs. Unsupported YAML produces an error.
 
 ## Source and terms
