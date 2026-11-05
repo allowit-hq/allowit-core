@@ -15,7 +15,7 @@ flowchart TB
     UI["[allowit-engine]<br/>npm @allowit/ui<br/>Shared policy web components"]
     Engine["[allowit-sdk]<br/>crate @allowit/sdk/engine<br/>All other shared logic"]
     Vendor["crate + npm @allowit/vendor/*<br/>Native contracts · signing · chain semantics<br/>SVG graphics · web components"]
-    Core["[allowit-core]<br/>crate + npm @allowit/sdk/core<br/>Common types · policy rules · primitives<br/>TypeScript interfaces"]
+    Core["[allowit-core]<br/>crate + npm @allowit/core<br/>Common types · policy rules · primitives<br/>TypeScript interfaces"]
 
     UI -->|npm| Core
     Engine -->|crate| Core
@@ -30,7 +30,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | `allowit` | `allowit` | Deterministic policy types, nine rules, evaluation and accounting | `UNLICENSED` |
 | `allowit-sdk` | `allowit_sdk` | Generic owner capabilities, private storage, configuration, source checks and bounded transport | MIT |
-| npm `@allowit/sdk` | `@allowit/sdk/core` | Common wire types and canonical function metadata for frontends | MIT |
+| npm `@allowit/core` | `@allowit/core` | Common wire types and canonical function metadata for frontends | MIT |
 
 [Dependency checks](scripts/check_core_boundaries.py) reject declared and locked native rail dependencies, including hidden optional or target declarations.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
@@ -75,10 +75,10 @@ Its five tags are `Int`, `Bool`, `Str`, `Addr` and `List`. Integers use canonica
 Address text remains opaque. Native adapters check native identities.
 This codec does not replace parameter, source, installation or authority validation.
 
-JavaScript and TypeScript callers import `@allowit/sdk/core`:
+JavaScript and TypeScript callers import `@allowit/core`.
 
 ```ts
-import { canonicalFunctions, type PolicyValue } from "@allowit/sdk/core";
+import { canonicalFunctions, type PolicyValue } from "@allowit/core";
 const limit: PolicyValue = { Int: "9007199254740993" };
 ```
 

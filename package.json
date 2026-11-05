@@ -1,5 +1,5 @@
 {
-  "name": "@allowit/sdk",
+  "name": "@allowit/core",
   "version": "0.3.1",
   "type": "module",
   "description": "Common Allowit policy values and canonical function metadata",
@@ -9,6 +9,10 @@
     "url": "https://github.com/allowit-hq/allowit-core.git"
   },
   "exports": {
+    ".": {
+      "types": "./typescript/core.d.ts",
+      "default": "./typescript/core.js"
+    },
     "./core": {
       "types": "./typescript/core.d.ts",
       "default": "./typescript/core.js"
