@@ -42,7 +42,7 @@ std = ["serde/std", "serde_json/std", "sha2/std"]
 client = ["std", "dep:libc", "dep:url"]
 service = ["std"]
 policy-source = ["std", "dep:allowit", "serde/derive"]
-vendor = ["client", "transport", "policy-source", "dep:zeroize", "dep:time", "dep:serde_json_canonicalizer", "serde_json/raw_value"]
+vendor = ["client", "transport", "policy-source", "dep:zeroize", "dep:time", "dep:serde_json_canonicalizer", "serde_json/raw_value", "serde_json/arbitrary_precision"]
 transport = ["service", "dep:reqwest"]
 
 [dependencies]

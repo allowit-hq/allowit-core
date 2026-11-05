@@ -97,7 +97,9 @@ pub fn decimal_units(text: &str, decimals: u8) -> Result<u128> {
             quoted(text)
         )));
     }
-    let scale = 10u128.pow(u32::from(decimals));
+    let scale = 10u128
+        .checked_pow(u32::from(decimals))
+        .ok_or_else(|| Error::usage(format!("{} is too large", quoted(text))))?;
     let whole: u128 = whole.parse().map_err(|_| invalid())?;
     let fraction: u128 = if fraction.is_empty() {
         0
@@ -110,4 +112,16 @@ pub fn decimal_units(text: &str, decimals: u8) -> Result<u128> {
         .checked_mul(scale)
         .and_then(|w| w.checked_add(fraction))
         .ok_or_else(|| Error::usage(format!("{} is too large", quoted(text))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unsupported_decimal_scales_return_an_error() {
+        assert_eq!(decimal_units("1", 38).unwrap(), 10u128.pow(38));
+        for decimals in [39, 255] {
+            assert!(decimal_units("1", decimals).is_err());
+        }
+    }
 }

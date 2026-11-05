@@ -219,8 +219,13 @@ impl RequestPacket {
 impl PartialEq for RequestPacket {
     fn eq(&self, other: &Self) -> bool {
         self.network() == other.network()
-            && serde_json::from_slice::<serde_json::Value>(self.bytes()).ok()
-                == serde_json::from_slice::<serde_json::Value>(other.bytes()).ok()
+            && match (
+                serde_json::from_slice::<serde_json::Value>(self.bytes()),
+                serde_json::from_slice::<serde_json::Value>(other.bytes()),
+            ) {
+                (Ok(left), Ok(right)) => left == right,
+                _ => false,
+            }
     }
 }
 
@@ -511,5 +516,34 @@ mod tests {
             .operation_id()
             .unwrap()
         );
+    }
+    fn request_document(raw: &str) -> RequestPacket {
+        RequestPacket(Packet::from_raw(
+            "example:test",
+            RawValue::from_string(raw.into()).unwrap(),
+            &PROVIDER,
+        ))
+    }
+    #[test]
+    fn request_equality_preserves_large_integer_identity() {
+        for (left, right) in [
+            ("18446744073709551616", "18446744073709551617"),
+            ("-9223372036854775809", "-9223372036854775810"),
+        ] {
+            assert_ne!(
+                request_document(&format!("{{\"amount\":{left}}}")),
+                request_document(&format!("{{\"amount\":{right}}}"))
+            );
+        }
+        assert_eq!(
+            request_document(r#"{ "amount": 1, "id": "a" }"#),
+            request_document(r#"{"id":"a","amount":1}"#)
+        );
+    }
+    #[test]
+    fn request_equality_never_equates_parse_failures() {
+        let nested = format!("{}0{}", "[".repeat(150), "]".repeat(150));
+        let other = format!("{}1{}", "[".repeat(150), "]".repeat(150));
+        assert_ne!(request_document(&nested), request_document(&other));
     }
 }
