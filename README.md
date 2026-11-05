@@ -133,8 +133,8 @@ Use Rust 1.98 with rustfmt and Clippy.
 ```sh
 cargo build --locked --workspace --all-targets
 cargo fmt --all --check
-cargo test --locked -p allowit-sdk --features client,service,transport,policy-source
-cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source -- -D warnings
+cargo test --locked -p allowit-sdk --features client,service,transport,policy-source,vendor
+cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source,vendor -- -D warnings
 cargo test --locked -p allowit
 cargo test --locked -p allowit --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
