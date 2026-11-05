@@ -42,6 +42,7 @@ std = ["serde/std", "serde_json/std", "sha2/std"]
 client = ["std", "dep:libc", "dep:url"]
 service = ["std"]
 policy-source = ["std", "dep:allowit", "serde/derive"]
+vendor = ["client", "transport", "policy-source", "dep:zeroize", "dep:time", "dep:serde_json_canonicalizer", "serde_json/raw_value"]
 transport = ["service", "dep:reqwest"]
 
 [dependencies]
@@ -52,6 +53,10 @@ sha2 = { version = "0.10.9", default-features = false }
 libc = { version = "0.2.190", optional = true }
 url = { version = "2.5.7", optional = true }
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+
+zeroize = { version = "1.8", optional = true }
+time = { version = "0.3", features = ["parsing", "formatting"], optional = true }
+serde_json_canonicalizer = { version = "0.3", optional = true }
 
 [profile.dev]
 debug = "line-tables-only"

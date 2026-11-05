@@ -14,6 +14,8 @@ pub mod policy_source;
 pub mod service;
 #[cfg(feature = "transport")]
 pub mod transport;
+#[cfg(feature = "vendor")]
+pub mod vendor;
 
 /// SHA-256 of the exact bytes, as lowercase hexadecimal text.
 pub fn digest(bytes: &[u8]) -> alloc::string::String {

@@ -50,6 +50,18 @@ native transaction encoding and native receipt checks.
 | `service` | Protocol-neutral RPC operation contracts |
 | `transport` | Bounded blocking HTTP/JSON-RPC. Enables `service` |
 | `policy-source` | Portable authored-source allowlist and shape checks. Selects the portable `std` backend |
+| `vendor` | Host provider traits, common inputs, opaque native packets, signer capabilities and bounded client helpers |
+
+The optional `vendor` feature exposes `allowit_sdk::vendor` for rail libraries and the SDK engine.
+It enables the existing host client, transport and source features. It does not affect minimal builds.
+Native packets retain their exact JSON bytes and carry an opaque in-memory capability plus their
+provider's validation callbacks. SDK consumers restore records through their selected native adapter.
+Core does not decode native packets or select a rail. Native signature rules remain in rail libraries.
+
+The shared owner-session helper bounds HTTP authentication and keeps its cookie private.
+The shared input helper bounds file ingress and JSON decoding. These helpers let native clients keep
+the same constructors and input APIs without depending on the SDK engine.
+The SDK engine retains profile caches, routing, execution orchestration and restart recovery.
 
 RPC endpoints require HTTPS or loopback HTTP, without URL credentials or fragments.
 Transport performs one attempt. The calling workflow chooses recovery using the original signed
