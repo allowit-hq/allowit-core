@@ -32,7 +32,7 @@ pub struct Challenge {
     pub id: String,
     pub message: String,
     pub address: String,
-    origin: String,
+    pub origin: String,
     pub expires_at: String,
 }
 #[derive(Deserialize)]

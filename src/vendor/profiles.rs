@@ -27,7 +27,6 @@ pub trait ProfileBinding: Send + Sync {
 }
 pub struct Profile {
     pub description: Description,
-    pub version: String,
     pub backend: String,
     pub binding: Box<dyn ProfileBinding>,
     pub descriptor: Box<serde_json::value::RawValue>,

@@ -242,7 +242,7 @@ impl OwnerPacket {
         self.0.provider.owner_info(&self.0)
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PacketInfo {
     pub operation_id: [u8; 32],
     pub transaction_hash: [u8; 32],
