@@ -20,26 +20,55 @@ pub struct GeneratedDraft {
 use super::error::{Error, Result};
 impl GenerateRequest {
     pub fn validate(&self) -> Result<()> {
-        if !(5..=3000).contains(&self.prompt.len()) {
-            return Err(Error::usage("Describe the policy in 5–3000 UTF-8 bytes"));
-        }
-        if self.profile.is_empty()
-            || self.profile.len() > 128
-            || !self
-                .profile
+        self.validate_with_network(|_| Ok(()))
+    }
+    pub fn validate_with_network(
+        &self,
+        validate_network: impl FnOnce(&str) -> Result<()>,
+    ) -> Result<()> {
+        validate_fields(
+            &self.prompt,
+            &self.network,
+            &self.profile,
+            &self.target,
+            validate_network,
+        )
+    }
+}
+
+/// Validate common fields in order, with network admission supplied by the selected host.
+pub fn validate_fields(
+    prompt: &str,
+    network: &str,
+    profile: &str,
+    target: &Target,
+    validate_network: impl FnOnce(&str) -> Result<()>,
+) -> Result<()> {
+    if !(5..=3000).contains(&prompt.len()) {
+        return Err(Error::usage("Describe the policy in 5–3000 UTF-8 bytes"));
+    }
+    validate_network(network)?;
+    if profile.is_empty()
+        || profile.len() > 128
+        || !profile
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+    {
+        return Err(Error::usage("Select an advertised wallet profile"));
+    }
+    if let Target::Installation(id) = target
+        && (id.len() != 64
+            || !id
                 .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-        {
-            return Err(Error::usage("Select an advertised wallet profile"));
-        }
-        if let Target::Installation(id) = &self.target
-            && (id.len() != 64
-                || !id
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
-        {
-            return Err(Error::config("Invalid lowercase installation identity"));
-        }
-        Ok(())
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    {
+        return Err(Error::config("Invalid lowercase installation identity"));
+    }
+    Ok(())
+}
+
+impl<'a> From<&'a GenerateRequest> for std::borrow::Cow<'a, GenerateRequest> {
+    fn from(request: &'a GenerateRequest) -> Self {
+        Self::Borrowed(request)
     }
 }
