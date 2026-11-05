@@ -1,14 +1,15 @@
 //! Owner capability inputs. Keys remain caller-owned.
 use super::wallet::Signer;
 use crate::client::error::Result;
-use std::path::Path;
+use crate::client::store::Store;
 pub struct Context<'a> {
     pub network: &'a str,
     pub backend: &'a str,
     pub authority: &'a crate::vendor::config::ServerAuthority,
     pub origin: &'a str,
     pub rpc_url: &'a str,
-    pub root: &'a Path,
+    /// Open caller-owned storage after the native preflight checks succeed.
+    pub store: &'a dyn Fn() -> Result<Store>,
     pub signer: &'a dyn Signer,
     pub clock: &'a dyn Fn() -> Result<u64>,
 }

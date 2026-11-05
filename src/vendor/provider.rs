@@ -184,7 +184,7 @@ pub trait OwnerProvider {
     ) -> super::error::Result<serde_json::Value>;
     fn status(
         &self,
-        root: &std::path::Path,
+        store: &crate::client::store::Store,
         network: &str,
         rpc: &str,
         id: &str,
