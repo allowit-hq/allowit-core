@@ -1,5 +1,5 @@
-import type { PolicyValue, PolicyValues, CanonicalFunctionName } from '@allowit/sdk/core';
-import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/sdk/core';
+import type { PolicyValue, PolicyValues, CanonicalFunctionName } from '@allowit/core';
+import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
 const address: PolicyValue = { Addr: '0xabc123' };

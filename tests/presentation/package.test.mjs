@@ -27,7 +27,7 @@ test('Rust wire values survive a JavaScript roundtrip without integer rounding',
   assert.equal(packet.metadataHash, canonicalFunctionMetadataHash);
 });
 
-test('the packed public subpath has usable types and contains no guest source', async () => {
+test('the packed public entry points have usable types and contain no guest source', async () => {
   const scratch = await mkdtemp(join(tmpdir(), 'allowit-core-package-'));
   try {
     run('pnpm', ['--config.verify-deps-before-run=false', 'check']);
@@ -39,14 +39,14 @@ test('the packed public subpath has usable types and contains no guest source', 
       'package/LICENSE', 'package/README.md', 'package/package.json',
       'package/typescript/canonical-functions.json', 'package/typescript/core.d.ts', 'package/typescript/core.js',
     ].sort());
-    const packageDir = join(scratch, 'node_modules', '@allowit', 'sdk');
+    const packageDir = join(scratch, 'node_modules', '@allowit', 'core');
     await mkdir(packageDir, { recursive: true });
     run('tar', ['-xzf', tarball, '--strip-components=1', '-C', packageDir]);
     await writeFile(join(scratch, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
     await cp(join(root, 'tests/presentation/consumer.ts'), join(scratch, 'consumer.ts'));
     const tsc = process.env.ALLOWIT_TEST_TSC ?? join(root, 'node_modules/typescript/bin/tsc');
     run(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', join(scratch, 'consumer.ts')], { cwd: scratch });
-    await writeFile(join(scratch, 'consumer.mjs'), `import { canonicalFunctions, canonicalFunctionsSource, canonicalFunctionMetadataHash } from '@allowit/sdk/core';\nconsole.log(JSON.stringify({ names: canonicalFunctions.map(item => item.name), source: canonicalFunctionsSource, hash: canonicalFunctionMetadataHash }));\n`);
+    await writeFile(join(scratch, 'consumer.mjs'), `import assert from 'node:assert/strict';\nimport { canonicalFunctions, canonicalFunctionsSource, canonicalFunctionMetadataHash } from '@allowit/core';\nimport { canonicalFunctions as alias } from '@allowit/core/core';\nassert.strictEqual(canonicalFunctions, alias);\nconsole.log(JSON.stringify({ names: canonicalFunctions.map(item => item.name), source: canonicalFunctionsSource, hash: canonicalFunctionMetadataHash }));\n`);
     const actual = JSON.parse(run(process.execPath, [join(scratch, 'consumer.mjs')], { cwd: scratch }));
     const source = await readFile(join(root, 'typescript/canonical-functions.json'), 'utf8');
     assert.equal(actual.source, source);
