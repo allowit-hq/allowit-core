@@ -44,7 +44,29 @@ pub struct SourceShape {
 /// A source that is not canonical-only needs that compiled evaluator for full host
 /// evaluation. `tests/policy_source.rs` replays vectors that the Python gate produced.
 pub fn source_shape(source: &str) -> Result<SourceShape> {
-    let code = gate::checked_code(source)?;
+    source_shape_for(source, None)
+}
+
+/// Check server policy source against a trusted registry of direct host calls.
+///
+/// Each pair names an exact namespace and operation. Pass only the operations linked by the
+/// selected host build. Policy source, owner params, and request args cannot extend this list.
+/// Server policy source is limited to 16000 bytes. Other source checks still apply.
+/// Run the verified guest compiler and bind the source hash
+/// and registry identity separately before execution. Use [`source_shape`] for portable builds.
+pub fn source_shape_with_host_calls(
+    source: &str,
+    host_calls: &[(&str, &str)],
+) -> Result<SourceShape> {
+    if source.len() > 16_000 {
+        return Err("Server policy source exceeds 16000 bytes".into());
+    }
+    gate::check_host_calls(host_calls)?;
+    source_shape_for(source, Some(host_calls))
+}
+
+fn source_shape_for(source: &str, host_calls: Option<&[(&str, &str)]>) -> Result<SourceShape> {
+    let code = gate::checked_code(source, host_calls)?;
     let (prefix, canonical_only) = gate::standard_prefix(&code)?;
     Ok(SourceShape {
         prefix,
@@ -430,8 +452,43 @@ pub(crate) mod gate {
         }
         k
     }
+    pub(super) fn check_host_calls(host_calls: &[(&str, &str)]) -> Result<()> {
+        if host_calls.len() > 128 {
+            return Err("The policy host call list exceeds 128 operations".into());
+        }
+        let mut seen = HashSet::new();
+        let identifier = |value: &str| {
+            let mut bytes = value.bytes();
+            value.len() <= 64
+                && !keyword(value)
+                && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+                && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        };
+        for &(namespace, operation) in host_calls {
+            let valid_namespace = if namespace == "allowit" {
+                SERVER_FUNCTIONS.contains(&operation)
+            } else {
+                operation != "allowit"
+                    && !matches!(namespace, "core" | "std" | "alloc")
+                    && !lists().primitives.contains(namespace)
+                    && !NOT_PORTABLE.contains(&namespace)
+            };
+            if !valid_namespace
+                || !identifier(namespace)
+                || !identifier(operation)
+                || !seen.insert((namespace, operation))
+            {
+                return Err("Invalid or duplicate policy host call registration".into());
+            }
+        }
+        Ok(())
+    }
+
     /// The structural part of `checked_code`; returns the lexed code.
-    pub(crate) fn checked_code(source: &str) -> Result<String> {
+    pub(super) fn checked_code(
+        source: &str,
+        host_calls: Option<&[(&str, &str)]>,
+    ) -> Result<String> {
         let src: Vec<char> = source.chars().collect();
         // `^\s*(//!|/\*!|#\s*!\s*\[)` in multiline mode.
         for start in
@@ -452,11 +509,23 @@ pub(crate) mod gate {
         }
         let (code, strings) = rust_code(source)?;
         let chars: Vec<char> = code.chars().collect();
-        for (start, end) in words(&chars, &["allowit"]) {
-            if !trimmed_after(&chars, end).starts_with("::")
-                || trimmed_before(&chars, start).ends_with("::")
+        let mut roots = vec!["allowit"];
+        roots.extend(host_calls.unwrap_or_default().iter().map(|&(root, _)| root));
+        roots.sort_unstable();
+        roots.dedup();
+        for (start, end) in words(&chars, &roots) {
+            let name: String = chars[start..end].iter().collect();
+            let before = trimmed_before(&chars, start);
+            // The complete path and field or method still pass the ordinary allowlist.
+            if name != "allowit"
+                && (before.ends_with("::") || before.ends_with('.') && !before.ends_with(".."))
             {
-                return Err("Policy source must use `allowit` only as the path root `allowit::`; it must not rebind it".into());
+                continue;
+            }
+            if !trimmed_after(&chars, end).starts_with("::") || before.ends_with("::") {
+                return Err(format!(
+                    "Policy source must use `{name}` only as the path root `{name}::`; it must not rebind it"
+                ));
             }
         }
         for (start, end) in words(
@@ -521,7 +590,7 @@ pub(crate) mod gate {
             );
         }
         macros_and_attributes(&chars)?;
-        portable(&code, &strings)?;
+        portable(&code, &strings, host_calls)?;
         Ok(code)
     }
     // The rest of `policy_source.py` `portable` and `allowlisted`: the code-level allowlist.
@@ -1014,7 +1083,7 @@ pub(crate) mod gate {
         Ok((names, end + 1))
     }
     /// `allowlisted`: every identifier, path, method, field and literal is on the allowlist.
-    fn allowlisted(code: &str) -> Result<()> {
+    fn allowlisted(code: &str, host_calls: Option<&[(&str, &str)]>) -> Result<()> {
         if !code.is_ascii() {
             return Err(reject("a non-ASCII identifier"));
         }
@@ -1134,9 +1203,24 @@ pub(crate) mod gate {
             let turbofish = tok(j) == "::" && tok(j + 1) == "<";
             if segments.len() > 1 || turbofish {
                 let path = segments.join("::");
-                if !lists.paths.contains(&path) {
+                let pair =
+                    (segments.len() == 2).then(|| (segments[0].as_str(), segments[1].as_str()));
+                let registered = host_calls
+                    .zip(pair)
+                    .is_some_and(|(calls, pair)| calls.contains(&pair));
+                let inactive = host_calls.is_some()
+                    && pair.is_some_and(|(namespace, name)| {
+                        namespace == "allowit" && SERVER_FUNCTIONS.contains(&name)
+                    })
+                    && !registered;
+                if inactive || !(registered || lists.paths.contains(&path)) {
                     return Err(reject(&format!(
                         "the path `{path}`, which is not on the portable allowlist"
+                    )));
+                }
+                if registered && (turbofish || tok(j) != "(") {
+                    return Err(reject(&format!(
+                        "the host function `{path}` without a direct call"
                     )));
                 }
                 let call = if turbofish {
@@ -1360,7 +1444,11 @@ pub(crate) mod gate {
         })
     }
     /// `portable` after its macro and attribute checks, then `allowlisted`.
-    pub(crate) fn portable(code: &str, strings: &HashMap<usize, String>) -> Result<()> {
+    fn portable(
+        code: &str,
+        strings: &HashMap<usize, String>,
+        host_calls: Option<&[(&str, &str)]>,
+    ) -> Result<()> {
         // Every non-ASCII code character rejects in `allowlisted`; checking first keeps the
         // byte and character offsets equal below.
         if !code.is_ascii() {
@@ -1413,7 +1501,7 @@ pub(crate) mod gate {
                 ));
             }
         }
-        allowlisted(code)
+        allowlisted(code, host_calls)
     }
     /// Match `\bpub\s+fn\s+execute\s*\(\s*ctx\s*:\s*&\s*AllowitContext\s*\)\s*->\s*allowit\s*::\s*Result(?:\s*<\s*\(\s*\)\s*>)?\s*\{`
     /// at `k`; the index after `{`.

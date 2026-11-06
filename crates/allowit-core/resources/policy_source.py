@@ -285,7 +285,7 @@ def declared(tokens):
     return names
 
 
-def allowlisted(code):
+def allowlisted(code, host_paths=None):
     """Raise ValueError unless every identifier, path, method, field and literal of `code` is on the
     allowlist. Comments and literals are already removed."""
     if not code.isascii():
@@ -353,8 +353,13 @@ def allowlisted(code):
         turbofish = tokens[j:j + 2] == ["::", "<"]
         if len(segments) > 1 or turbofish:
             path = "::".join(segments)
-            if path not in PATHS:
+            registered = host_paths is not None and path in host_paths
+            inactive = (host_paths is not None and len(segments) == 2 and segments[0] == "allowit"
+                        and segments[1] in SERVER_FUNCTIONS and not registered)
+            if inactive or not (registered or path in PATHS):
                 reject("the path `{}`, which is not on the portable allowlist".format(path))
+            if registered and (turbofish or tokens[j:j + 1] != ["("]):
+                reject("the host function `{}` without a direct call".format(path))
             call = after_generics(tokens, j + 1) if turbofish else j
             if path in FUNCTION_PATHS | CONSTRUCTORS and tokens[call:call + 1] != ["("]:
                 reject("the function `{}` as a value, whose address differs between the backends".format(path))
@@ -392,7 +397,7 @@ def macro_args(tokens, i):
     return groups
 
 
-def portable(code, strings):
+def portable(code, strings, host_paths=None):
     """Raise ValueError for macros, attributes, context patterns, backend map access, message
     placeholders and indexing that could behave differently in `AllowitCustomPolicy` and on the host,
     then apply the allowlist. `strings` maps the offset of each string literal's `0` to its value."""
@@ -429,7 +434,7 @@ def portable(code, strings):
                              or IDENT.fullmatch(before) and before not in RUST_KEYWORDS) \
                 and not (before == INDEXED_FIELD and k > 1 and tokens[k - 2] == "."):
             reject("indexing other than `ctx.params[key]`, whose index is a pointer-width `usize`")
-    allowlisted(code)
+    allowlisted(code, host_paths)
 
 
 def rust_code(source):
@@ -473,16 +478,50 @@ def rust_code(source):
     return "".join(out), strings
 
 
-def checked_code(source):
-    """Return the code of one self-contained policy file that binds `allowit` only to the canonical
-    crate. Reject inner attributes and doc comments, which the including module cannot accept."""
+def check_host_calls(host_calls):
+    """Validate trusted (namespace, operation) pairs before admitting their call paths."""
+    if len(host_calls) > 128:
+        raise ValueError("The policy host call list exceeds 128 operations")
+    seen = set()
+    for pair in host_calls:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise ValueError("Invalid or duplicate policy host call registration")
+        namespace, operation = pair
+        if any(not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name)
+               or name in RUST_KEYWORDS for name in pair):
+            raise ValueError("Invalid or duplicate policy host call registration")
+        valid_namespace = (operation in SERVER_FUNCTIONS if namespace == "allowit"
+                           else operation != "allowit"
+                           and namespace not in {"core", "std", "alloc"} | PRIMITIVES | NOT_PORTABLE)
+        if not valid_namespace or (namespace, operation) in seen:
+            raise ValueError("Invalid or duplicate policy host call registration")
+        seen.add((namespace, operation))
+    return seen
+
+
+def checked_code(source, *, host_calls=None):
+    """Return one self-contained policy's checked code. A trusted host may allow exact calls.
+
+    Keep host_calls at None for the portable/contract profile. In server mode, pass the trusted
+    registry pairs, including any allowed built-in server operations. Never use authored data.
+    """
+    if host_calls is not None and len(source.encode("utf-8")) > 16_000:
+        raise ValueError("Server policy source exceeds 16000 bytes")
+    bindings = check_host_calls(host_calls) if host_calls is not None else None
+    roots = sorted({"allowit"} | {namespace for namespace, _ in bindings or ()})
+    root_pattern = ALLOWIT_NAME if roots == ["allowit"] else re.compile(r"\b(?:" + "|".join(roots) + r")\b")
+    host_paths = None if bindings is None else {"::".join(pair) for pair in bindings}
     if re.search(r"^\s*(//!|/\*!|#\s*!\s*\[)", source, re.M):
         raise ValueError("Policy source must not use inner attributes or inner doc comments")
     code, strings = rust_code(source)
-    for found in ALLOWIT_NAME.finditer(code):
+    for found in root_pattern.finditer(code):
         before, after = code[:found.start()].rstrip(), code[found.end():].lstrip()
+        name = found[0]
+        # The complete path and the field or method still have to pass the ordinary allowlist.
+        if name != "allowit" and (before.endswith("::") or before.endswith(".") and not before.endswith("..")):
+            continue
         if not after.startswith("::") or before.endswith("::"):
-            raise ValueError("Policy source must use `allowit` only as the path root `allowit::`; it must not rebind it")
+            raise ValueError(f"Policy source must use `{name}` only as the path root `{name}::`; it must not rebind it")
     for found in MACRO_NAMES.finditer(code):
         before, after = code[:found.start()].rstrip(), code[found.end():].lstrip()
         field = before.endswith(".") and not before.endswith("..")
@@ -494,15 +533,15 @@ def checked_code(source):
     for pattern, name in OUTSIDE:
         if pattern.search(code):
             raise ValueError("Policy source must be one self-contained file; it uses " + name)
-    portable(code, strings)
+    portable(code, strings, host_paths)
     return code
 
 
-def standard_prefix(source):
+def standard_prefix(source, *, host_calls=None):
     """Return the standard prefix of authored policy source: the consecutive leading statements of
     `execute` of the exact form `allowit::<rule>(ctx, &ctx.params[allowit::<RULE>])?;`, each rule
     with its own canonical key. Any other statement ends it; a rule may still read any key there."""
-    text = checked_code(source)
+    text = checked_code(source, host_calls=host_calls)
     found = list(EXECUTE.finditer(text))
     if len(found) != 1 or len(re.findall(r"\bexecute\b", text)) != 1:
         raise ValueError("Policy source must define pub fn execute(ctx: &AllowitContext) -> allowit::Result once")
@@ -515,10 +554,10 @@ def standard_prefix(source):
     return rules
 
 
-def writes_state(source):
+def writes_state(source, *, host_calls=None):
     """True when authored policy source calls `allowit::set_state`, a write that Simple and Common
     cannot store: they run only the canonical prefix onchain, so the server denies every write."""
-    return bool(SET_STATE.search(checked_code(source)))
+    return bool(SET_STATE.search(checked_code(source, host_calls=host_calls)))
 
 
 @functools.lru_cache(maxsize=None)

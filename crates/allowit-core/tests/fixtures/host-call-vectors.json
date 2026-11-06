@@ -1,0 +1,92 @@
+[
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "vendor::quote(ctx, \"{}\")?;",
+    "accepted": true
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "r#vendor /* gap */ :: r#quote(ctx, \"{}\")?;",
+    "accepted": true
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "vendor::settle(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "unknown::quote(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "let vendor = 0; vendor::quote(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "fn r#vendor() {} vendor::quote(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "use vendor::quote; quote(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "let callback = vendor::quote;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "vendor::quote::<i128>(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "core::vendor::quote(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "let label = \"vendor is data\"; /* let vendor = 0; */ vendor::quote(ctx, label)?;",
+    "accepted": true
+  },
+  {
+    "calls": [["allowit", "price"]],
+    "body": "allowit::price(ctx, &allowit::AllowitPrice { from: ctx.request.asset.clone(), to: ctx.request.recipient.clone(), amount: ctx.request.amount, price: 1, slip: 1 })?;",
+    "accepted": true
+  },
+  {
+    "calls": [["vendor", "quote"]],
+    "body": "allowit::price(ctx, &allowit::AllowitPrice { from: ctx.request.asset.clone(), to: ctx.request.recipient.clone(), amount: ctx.request.amount, price: 1, slip: 1 })?;",
+    "accepted": false
+  },
+  {
+    "calls": [["std", "open"]],
+    "body": "std::open(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["allowit", "open"]],
+    "body": "allowit::open(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["i128", "max"]],
+    "body": "i128::max(1, 2);",
+    "accepted": false
+  },
+  {
+    "calls": [["r#vendor", "quote"]],
+    "body": "r#vendor::quote(ctx, \"{}\")?;",
+    "accepted": false
+  },
+  {
+    "calls": [["vendor", "quote"], ["vendor", "quote"]],
+    "body": "vendor::quote(ctx, \"{}\")?;",
+    "accepted": false
+  }
+]
