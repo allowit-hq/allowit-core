@@ -1,0 +1,20 @@
+//! Optional host contracts for native providers. This module owns no rail implementation.
+pub use crate::client::error;
+pub mod authoring;
+pub mod config;
+pub mod execution;
+pub mod generation;
+pub mod input;
+mod input_asset;
+pub mod owner;
+pub mod owner_session;
+pub mod profiles;
+mod provider;
+pub mod request;
+pub mod request_proof;
+pub mod routing;
+pub mod runtime;
+pub mod typed_request;
+pub mod wallet;
+pub use provider::{OwnerProvider, RuntimeProvider};
+pub use wallet::{KeyProvider, PrivateSigner};
