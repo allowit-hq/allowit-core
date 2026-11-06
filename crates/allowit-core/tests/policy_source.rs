@@ -1,5 +1,5 @@
 //! Rust and Python must reject the same nonportable source and derive the same prefix.
-use allowit_sdk::policy_source::source_shape;
+use allowit_core::policy_source::source_shape;
 use serde_json::Value;
 
 const CANONICAL: &str = include_str!("fixtures/portable-policy.rs");
@@ -47,7 +47,7 @@ fn source_gate_matches_policy_source_py() {
 
 #[test]
 fn packaged_resources_compile_and_reject_against_their_own_portable_library() {
-    use allowit_sdk::policy_source::{
+    use allowit_core::policy_source::{
         PORTABLE_CORE_RS, PORTABLE_LIB_RS, PORTABLE_TERMS, PYTHON_HELPER, PYTHON_HELPER_TERMS,
     };
     use std::{fs, process::Command, time::SystemTime};
@@ -74,15 +74,15 @@ fn packaged_resources_compile_and_reject_against_their_own_portable_library() {
         }
     }
     let _cleanup = RemoveDirectory(directory.clone());
-    for subdirectory in ["scripts", "crates/allowit/src"] {
+    for subdirectory in ["scripts", "crates/allowit-core/src/portable"] {
         fs::create_dir_all(directory.join(subdirectory)).unwrap();
     }
     for (path, bytes) in [
         ("scripts/policy_source.py", PYTHON_HELPER),
         ("scripts/LICENSE", PYTHON_HELPER_TERMS),
-        ("crates/allowit/src/lib.rs", PORTABLE_LIB_RS),
-        ("crates/allowit/src/core.rs", PORTABLE_CORE_RS),
-        ("crates/allowit/LICENSE", PORTABLE_TERMS),
+        ("crates/allowit-core/src/portable/lib.rs", PORTABLE_LIB_RS),
+        ("crates/allowit-core/src/portable/core.rs", PORTABLE_CORE_RS),
+        ("crates/allowit-core/src/portable/LICENSE", PORTABLE_TERMS),
         ("policy.rs", CANONICAL),
     ] {
         fs::write(directory.join(path), bytes).unwrap();

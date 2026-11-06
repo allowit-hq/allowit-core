@@ -19,7 +19,7 @@ class PolicySourceTests(unittest.TestCase):
         self.assertEqual(vectors.GATE_FILE.read_text(), vectors.dump(vectors.gate_vectors()))
 
     def test_host_compile_uses_the_portable_std_backend(self):
-        policy_source.host_compile(ROOT / "tests/fixtures/portable-policy.rs")
+        policy_source.host_compile(ROOT / "crates/allowit-core/tests/fixtures/portable-policy.rs")
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "policy.rs"
             path.write_text(vectors.CANONICAL.replace("ctx: &AllowitContext", "ctx: &mut AllowitContext"))

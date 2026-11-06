@@ -83,7 +83,14 @@ export declare const canonicalFunctionRegistry: CanonicalFunctionRegistry;
 /** Registry order is not authored source or workflow order. */
 export declare const canonicalFunctions: readonly CanonicalFunctionDescriptor[];
 `;
-for (const [path, output] of [['typescript/core.js', javascript], ['typescript/core.d.ts', declarations]]) {
+const helper = await readFile(new URL('scripts/policy_source.py', root), 'utf8');
+const helperTerms = await readFile(new URL('scripts/LICENSE', root), 'utf8');
+for (const [path, output] of [
+  ['typescript/core.js', javascript], ['typescript/core.d.ts', declarations],
+  ['crates/allowit-core/resources/canonical-functions.json', source],
+  ['crates/allowit-core/resources/policy_source.py', helper],
+  ['crates/allowit-core/resources/policy-source-LICENSE', helperTerms],
+]) {
   const target = new URL(path, root);
   if (process.argv.includes('--check')) {
     if (await readFile(target, 'utf8') !== output) throw new Error(`${path} differs from its registry input`);

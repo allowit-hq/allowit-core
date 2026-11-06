@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "coreVersion": "0.4.0",
+  "integerRange": {
+    "min": "-170141183460469231731687303715884105728",
+    "max": "170141183460469231731687303715884105727"
+  },
+  "functions": [
+    {
+      "name": "payment_limit",
+      "path": "allowit::payment_limit",
+      "label": "Per operation",
+      "description": "Limit the gross amount of one operation.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "amount",
+        "storageTypes": [
+          "Int"
+        ],
+        "itemType": null,
+        "integerRange": {
+          "min": "0",
+          "max": "170141183460469231731687303715884105727"
+        },
+        "requiresAmountContext": true
+      },
+      "result": {
+        "kind": "integer",
+        "description": "Remaining gross-amount headroom after the operation."
+      }
+    },
+    {
+      "name": "lifetime_spending_limit",
+      "path": "allowit::lifetime_spending_limit",
+      "label": "Lifetime spending",
+      "description": "Limit cumulative irreversible expenses. Unpriced expenses return an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "amount",
+        "storageTypes": [
+          "Int"
+        ],
+        "itemType": null,
+        "integerRange": {
+          "min": "0",
+          "max": "170141183460469231731687303715884105727"
+        },
+        "requiresAmountContext": true
+      },
+      "result": {
+        "kind": "integer",
+        "description": "Remaining lifetime expense headroom after the operation."
+      }
+    },
+    {
+      "name": "daily_spending_limit",
+      "path": "allowit::daily_spending_limit",
+      "label": "Daily spending",
+      "description": "Limit irreversible expenses on the request’s UTC day. Unpriced expenses return an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "amount",
+        "storageTypes": [
+          "Int"
+        ],
+        "itemType": null,
+        "integerRange": {
+          "min": "0",
+          "max": "170141183460469231731687303715884105727"
+        },
+        "requiresAmountContext": true
+      },
+      "result": {
+        "kind": "integer",
+        "description": "Remaining expense headroom on that UTC day."
+      }
+    },
+    {
+      "name": "daily_volume_limit",
+      "path": "allowit::daily_volume_limit",
+      "label": "Daily volume",
+      "description": "Limit gross amounts plus attributable gas on the request’s UTC day. Unpriced expenses return an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "amount",
+        "storageTypes": [
+          "Int"
+        ],
+        "itemType": null,
+        "integerRange": {
+          "min": "0",
+          "max": "170141183460469231731687303715884105727"
+        },
+        "requiresAmountContext": true
+      },
+      "result": {
+        "kind": "integer",
+        "description": "Remaining gross-volume headroom on that UTC day."
+      }
+    },
+    {
+      "name": "call_limit",
+      "path": "allowit::call_limit",
+      "label": "Operation count",
+      "description": "Limit successful operations, including earlier operations when this check was absent. A zero limit returns an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "count",
+        "storageTypes": [
+          "Int"
+        ],
+        "itemType": null,
+        "integerRange": {
+          "min": "0",
+          "max": "18446744073709551615"
+        },
+        "requiresAmountContext": false
+      },
+      "result": {
+        "kind": "integer",
+        "description": "Successful operations remaining after this operation."
+      }
+    },
+    {
+      "name": "destinations",
+      "path": "allowit::destinations",
+      "label": "Destinations",
+      "description": "Require an exact permitted destination. An empty list returns an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "addresses",
+        "storageTypes": [
+          "List"
+        ],
+        "itemType": "Addr",
+        "integerRange": null,
+        "requiresAmountContext": false
+      },
+      "result": {
+        "kind": "address",
+        "description": "The matched destination."
+      }
+    },
+    {
+      "name": "tokens",
+      "path": "allowit::tokens",
+      "label": "Assets",
+      "description": "Require the underlying asset and, for swaps, the other token. An empty list returns an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "assets",
+        "storageTypes": [
+          "List"
+        ],
+        "itemType": "Addr",
+        "integerRange": null,
+        "requiresAmountContext": false
+      },
+      "result": {
+        "kind": "address",
+        "description": "The matched underlying asset."
+      }
+    },
+    {
+      "name": "expires_at",
+      "path": "allowit::expires_at",
+      "label": "Expiry",
+      "description": "Require unexpired parameters and request. The parameter is an exclusive Unix timestamp in seconds. The request must expire no later than the parameters.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "timestamp",
+        "storageTypes": [
+          "Int"
+        ],
+        "itemType": null,
+        "integerRange": {
+          "min": "0",
+          "max": "18446744073709551615"
+        },
+        "requiresAmountContext": false,
+        "timeUnit": "unix_seconds"
+      },
+      "result": {
+        "kind": "integer",
+        "description": "Seconds remaining before the parameters expire."
+      }
+    },
+    {
+      "name": "operations",
+      "path": "allowit::operations",
+      "label": "Operations",
+      "description": "Require a permitted operation. A wildcard permits every representable operation. An empty list returns an error.",
+      "parameter": {
+        "index": 1,
+        "semanticType": "operations",
+        "storageTypes": [
+          "Str",
+          "List"
+        ],
+        "itemType": "Str",
+        "integerRange": null,
+        "requiresAmountContext": false,
+        "wildcard": "*"
+      },
+      "result": {
+        "kind": "operation",
+        "description": "The request’s operation name."
+      }
+    }
+  ]
+}

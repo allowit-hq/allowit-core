@@ -28,20 +28,19 @@ flowchart TB
 
 | Package | Library | Responsibility | License |
 | --- | --- | --- | --- |
-| `allowit` | `allowit` | Deterministic policy types, nine rules, evaluation and accounting | `UNLICENSED` |
-| `allowit-sdk` | `allowit_sdk` | Generic owner capabilities, private storage, configuration, source checks and bounded transport | MIT |
+| `allowit-core` | `allowit_core` | Portable policy rules and reusable host primitives | [Per-file terms](crates/allowit-core/LICENSES.md) |
 | npm `@allowit/core` | `@allowit/core` | Common wire types and canonical function metadata for frontends | MIT |
 
 [Dependency checks](scripts/check_core_boundaries.py) reject declared and locked native rail dependencies, including hidden optional or target declarations.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly. Importing a library grants no signing or payment authority.
 
-`allowit` defaults to its `std` evaluator and uses chain-neutral Rust values.
+`allowit-core` defaults to its `std` evaluator and uses chain-neutral Rust values.
 Denials and panics discard policy writes. The crate has no rail SDK dependency.
 Rails own native contract types, storage bindings and execution profiles, along with custody,
 native transaction encoding and native receipt checks.
 
-`allowit-sdk` defaults to `std`. Its `admin` capabilities and exact-byte `digest` also build without
+The crate defaults to `std`. Its `admin` capabilities and exact-byte `digest` also build without
 `std`. Host-only features expose these modules:
 
 | Feature | Modules |
@@ -52,7 +51,7 @@ native transaction encoding and native receipt checks.
 | `policy-source` | Portable authored-source allowlist and shape checks. Selects the portable `std` backend |
 | `vendor` | Host provider traits, common inputs, opaque native packets, signer capabilities and bounded client helpers |
 
-The optional `vendor` feature exposes `allowit_sdk::vendor` for rail libraries and the SDK engine.
+The optional `vendor` feature exposes `allowit_core::vendor` for rail libraries and the SDK engine.
 It enables the existing host client, transport and source features. It does not affect minimal builds.
 Native packets retain their exact JSON bytes and carry an opaque in-memory capability plus their
 provider's validation callbacks. SDK consumers restore records through their selected native adapter.
@@ -74,14 +73,14 @@ authority. Stellar binds that shape to its native wallet tier. The server enforc
 `scripts/policy_source.py` provides the corresponding Python gate and direct-rustc host compile.
 The `policy_source` module embeds that helper, its terms and the portable source bytes from the
 selected dependency release. SDK engine can unpack them into a private directory for its bounded
-build process. The portable package exports its own bytes only in the `std` profile.
+build process. The portable module exports its own bytes only in the `std` profile.
 Source-based build hosts can also resolve both files from the same verified Core release.
 Do not substitute a sibling checkout or a helper selected through an environment variable.
 The source gate and host compile are separate required checks before trusted publication.
 
 ## Common policy interfaces
 
-Rust callers enable `policy-source` and use `allowit_sdk::policy`.
+Rust callers enable `policy-source` and use `allowit_core::policy`.
 `PolicyValue` is a JSON wrapper around the existing portable value.
 Its five tags are `Int`, `Bool`, `Str`, `Addr` and `List`. Integers use canonical decimal strings.
 Address text remains opaque. Native adapters check native identities.
@@ -108,20 +107,21 @@ The npm archive contains interfaces, metadata, runtime exports and MIT terms. It
 
 Every package in this repository releases the same annotated tag `vX.Y.Z`.
 Consumers name a published tag and its minor version, and commit `Cargo.lock`.
-For a version 0.3.1 release, the dependency declarations are:
+The crate is at `crates/allowit-core`. The repository root is a virtual workspace with one member.
+Version 0.4 combines the former `allowit` and `allowit-sdk` packages as `allowit-core`.
+Consumers replace both dependencies and use `allowit_core` for host and portable interfaces.
+Authored policy source retains its restricted `allowit::` namespace. The source helper compiles
+that embedded portable module independently, without host capabilities or dependencies.
+
+After the 0.4.0 release, a host dependency can use:
 
 ```toml
-allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false, features = ["std"] }
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.4.0", version = "0.4", default-features = false, features = ["client", "transport"] }
 ```
 
-All Allowit packages in one build name the same core tag.
-Version 0.3 removes the `soroban` feature and the `allowit::soroban` module.
-`allowit-contracts-stellar` must provide its native binding before adopting this release.
-Existing consumers pinned to version 0.2 retain their immutable source and contract behavior.
-Host consumers can retain `default-features = false, features = ["std"]`.
-The shared `allowit-sdk` package still supports its minimal `no_std` profile.
-The policy evaluator requires `std` for panic containment and synchronized write buffers.
+Published 0.3 and earlier tags retain their original package identities and behavior.
+The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
+for panic containment and synchronized write buffers. Native types and custody remain with rails.
 
 Set the workspace version, merge the reviewed release, then annotate the merge commit with that tag.
 Never move an existing tag. Registry publication is a separate operation.
@@ -133,16 +133,17 @@ Use Rust 1.98 with rustfmt and Clippy.
 ```sh
 cargo build --locked --workspace --all-targets
 cargo fmt --all --check
-cargo test --locked -p allowit-sdk --features client,service,transport,policy-source,vendor
-cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source,vendor -- -D warnings
-cargo test --locked -p allowit
-cargo test --locked -p allowit --no-default-features --features std
+cargo check --locked -p allowit-core --no-default-features --lib
+cargo test --locked -p allowit-core --features client,service,transport,policy-source,vendor
+cargo clippy --locked -p allowit-core --all-targets --features client,service,transport,policy-source,vendor -- -D warnings
+cargo test --locked -p allowit-core
+cargo test --locked -p allowit-core --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
 python3 scripts/check_core_boundaries.py
 ```
 
 [CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy
-and the minimal host package. The policy library links into its caller.
+and the minimal host profile. The policy library links into its caller.
 Each rail checks its native contract build in its own repository.
 
 The dependency guard checks Cargo declarations, the lockfile and declared npm manifests without running package-manager hooks.
@@ -155,11 +156,11 @@ Pnpm workspace files support a static `packages` list with relative paths and sh
 The portable package originates in [the Stellar policy library][portable-source].
 The retired compiler and bounded legacy model remain in [core's original source][legacy-source].
 
-The host package, including the Rust source gate from Stellar's MIT host crate, uses the
-[MIT License](LICENSE). The portable package declares `UNLICENSED` in
-[its manifest](crates/allowit/Cargo.toml). The copied Python helper and corpus generator retain their
+The host modules, including the Rust source gate from Stellar's MIT host crate, retain the
+[MIT License](LICENSE). The portable sources retain their `UNLICENSED` terms.
+The single Cargo package records these separate scopes in [LICENSES.md](crates/allowit-core/LICENSES.md). The copied Python helper and corpus generator retain their
 original undeclared terms under [scripts/LICENSE](scripts/LICENSE).
-The original corpus and portable fixture retain their terms under [tests/fixtures/LICENSE](tests/fixtures/LICENSE).
+The original corpus and portable fixture retain their terms under [fixture terms](crates/allowit-core/tests/fixtures/LICENSE).
 Dependencies retain their own terms.
 
 [portable-source]: https://github.com/allowit-hq/allowit-contracts-stellar/tree/d0ae9be9e3d7a51e9ac4a1008ba207937aef36a2/crates/allowit

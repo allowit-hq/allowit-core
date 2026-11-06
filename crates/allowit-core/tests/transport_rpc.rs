@@ -1,4 +1,4 @@
-use allowit_sdk::transport::rpc::{EnvelopeValidation, ErrorKind, Options, RpcClient};
+use allowit_core::transport::rpc::{EnvelopeValidation, ErrorKind, Options, RpcClient};
 use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
@@ -334,7 +334,7 @@ fn neutral_refusal_metadata_preserves_shape_without_vendor_retry_policy() {
 
 #[test]
 fn http_preserves_duplicate_headers_exact_body_and_never_follows_redirects() {
-    use allowit_sdk::transport::http::{HttpClient, Method, Request as HttpRequest};
+    use allowit_core::transport::http::{HttpClient, Method, Request as HttpRequest};
     let options = Options {
         timeout: Duration::from_secs(1),
         max_response_bytes: 1024,
@@ -401,7 +401,7 @@ fn http_preserves_duplicate_headers_exact_body_and_never_follows_redirects() {
 
 #[test]
 fn http_response_bounds_and_expired_deadlines_fail_before_any_retry() {
-    use allowit_sdk::transport::http::{HttpClient, Method, Request as HttpRequest};
+    use allowit_core::transport::http::{HttpClient, Method, Request as HttpRequest};
     let client = HttpClient::new(Options {
         timeout: Duration::from_secs(1),
         max_response_bytes: 10,

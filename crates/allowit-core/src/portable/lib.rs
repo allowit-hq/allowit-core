@@ -3,6 +3,7 @@
 //! validate authored policies against their execution profile:
 //!
 //! ```ignore
+//! use allowit_core as allowit;
 //! use allowit::prelude::*;
 //! /// Let my agent pay our invoices. Cap its total spending and pay only vendors I approve.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
@@ -53,6 +54,7 @@
 //! Build hosts must enable `overflow-checks = true` so arithmetic overflow also denies.
 //!
 //! ```
+//! use allowit_core as allowit;
 //! use allowit::prelude::*;
 //! /// Limit lifetime spending with a portable rule.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
@@ -67,6 +69,7 @@
 //! it; this package has no such function, so a policy that calls it does not compile:
 //!
 //! ```compile_fail,E0425
+//! use allowit_core as allowit;
 //! use allowit::prelude::*;
 //! /// A policy that re-enters the wallet does not build.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
@@ -79,6 +82,7 @@
 //! The source-admission compile checks the same loops.
 //!
 //! ```
+//! use allowit_core as allowit;
 //! use allowit::prelude::*;
 //! /// Pay only listed vendors or suppliers.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
@@ -101,6 +105,7 @@
 //! ```
 //!
 //! ```compile_fail,E0614
+//! use allowit_core as allowit;
 //! use allowit::prelude::*;
 //! /// A loop item is owned, so a dereference does not compile.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {

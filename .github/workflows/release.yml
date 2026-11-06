@@ -13,16 +13,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: Swatinem/rust-cache@v2
-      - name: Check that the tag matches both package versions
+      - name: Check that the tag matches Rust and npm versions
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline -p allowit-sdk | sed 's/.*[#@]//')"
-          test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline -p allowit | sed 's/.*[#@]//')"
+          test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline -p allowit-core | sed 's/.*[#@]//')"
+          test "$GITHUB_REF_NAME" = "v$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
       - run: python3 scripts/check_core_boundaries.py
-      - run: cargo test --locked -p allowit
-      - run: cargo test --locked -p allowit --no-default-features --features std
+      - run: cargo test --locked -p allowit-core
+      - run: cargo test --locked -p allowit-core --no-default-features --features std
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: cargo test --locked -p allowit-sdk --features policy-source
+      - run: cargo test --locked -p allowit-core --features policy-source
       - run: python3 -m unittest discover -s scripts/tests
