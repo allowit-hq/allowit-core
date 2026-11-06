@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWIT = ROOT / "crates/allowit/src"
+ALLOWIT = ROOT / "crates/allowit-core/src/portable"
 
 # Canonical param keys, which are also the canonical rule names. `allowit::<KEY>` names each key.
 PARAM_KEYS = ("payment_limit", "lifetime_spending_limit", "daily_spending_limit", "daily_volume_limit", "call_limit",

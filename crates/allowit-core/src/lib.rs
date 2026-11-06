@@ -1,7 +1,16 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-//! Shared host and owner-capability primitives. Portable policy rules live in package `allowit`.
+//! Portable policy rules and shared host and owner-capability primitives.
 
 extern crate alloc;
+extern crate self as allowit;
+
+// The embedded portable source also compiles as a standalone no_std library.
+#[cfg(feature = "std")]
+#[allow(unused_attributes)]
+#[path = "portable/lib.rs"]
+mod portable;
+#[cfg(feature = "std")]
+pub use portable::*;
 
 pub mod admin;
 #[cfg(feature = "client")]

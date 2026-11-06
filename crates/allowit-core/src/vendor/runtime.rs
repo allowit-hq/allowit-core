@@ -122,7 +122,7 @@ pub enum Kind {
 /// Callers cannot replace its bytes while retaining an authorization capability.
 ///
 /// ```compile_fail
-/// use allowit_sdk::vendor::runtime::Packet;
+/// use allowit_core::vendor::runtime::Packet;
 /// fn replace(packet: &mut Packet) { packet.network = "other:network".into(); }
 /// ```
 #[derive(Clone)]

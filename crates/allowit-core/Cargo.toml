@@ -1,0 +1,48 @@
+[package]
+name = "allowit-core"
+version.workspace = true
+edition.workspace = true
+license-file = "LICENSES.md"
+description = "Shared host primitives for Allowit rail clients and SDK engines"
+repository.workspace = true
+
+[lib]
+name = "allowit_core"
+crate-type = ["rlib"]
+
+[[test]]
+name = "transport_rpc"
+required-features = ["transport"]
+
+[[test]]
+name = "policy_source"
+required-features = ["policy-source"]
+
+[[test]]
+name = "presentation"
+required-features = ["policy-source"]
+
+[[example]]
+name = "policy_wire"
+required-features = ["policy-source"]
+
+[features]
+default = ["std"]
+std = ["serde/std", "serde_json/std", "sha2/std"]
+client = ["std", "dep:libc", "dep:url"]
+service = ["std"]
+policy-source = ["std", "serde/derive"]
+vendor = ["client", "transport", "policy-source", "dep:zeroize", "dep:time", "dep:serde_json_canonicalizer", "serde_json/raw_value", "serde_json/arbitrary_precision"]
+transport = ["service", "dep:reqwest"]
+
+[dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.150", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10.9", default-features = false }
+libc = { version = "0.2.190", optional = true }
+url = { version = "2.5.7", optional = true }
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+
+zeroize = { version = "1.8", optional = true }
+time = { version = "0.3", features = ["parsing", "formatting"], optional = true }
+serde_json_canonicalizer = { version = "0.3", optional = true }

@@ -1,6 +1,6 @@
 //! Wire values for the actual JavaScript package interoperability check.
-use allowit::{Address, AllowitValue};
-use allowit_sdk::policy::{PolicyValue, canonical_function_metadata_hash};
+use allowit_core::policy::{PolicyValue, canonical_function_metadata_hash};
+use allowit_core::{Address, AllowitValue};
 use std::io::Read;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

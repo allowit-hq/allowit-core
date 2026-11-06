@@ -1,5 +1,5 @@
-use allowit::{Address, AllowitMap, AllowitRule, AllowitTier, AllowitValue};
-use allowit_sdk::policy::{PolicyValue, canonical_function_registry};
+use allowit_core::policy::{PolicyValue, canonical_function_registry};
+use allowit_core::{Address, AllowitMap, AllowitRule, AllowitTier, AllowitValue};
 
 #[test]
 fn wire_values_keep_exact_integers_and_opaque_native_identities() {
@@ -61,7 +61,7 @@ fn function_descriptors_match_executable_rules_and_integer_bounds() {
             .iter()
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>(),
-        allowit::RULES.map(AllowitRule::key)
+        allowit_core::RULES.map(AllowitRule::key)
     );
     for descriptor in registry.functions {
         assert_eq!(descriptor.path, format!("allowit::{}", descriptor.name));
@@ -80,13 +80,13 @@ fn function_descriptors_match_executable_rules_and_integer_bounds() {
             for bound in [min, max] {
                 let params: AllowitMap =
                     [(descriptor.name.clone(), AllowitValue::Int(bound))].into();
-                assert!(allowit::check_params(&params, AllowitTier::Standard).is_ok());
+                assert!(allowit_core::check_params(&params, AllowitTier::Standard).is_ok());
             }
             let below: AllowitMap = [(descriptor.name.clone(), AllowitValue::Int(min - 1))].into();
-            assert!(allowit::check_params(&below, AllowitTier::Standard).is_err());
+            assert!(allowit_core::check_params(&below, AllowitTier::Standard).is_err());
             if let Some(above) = max.checked_add(1) {
                 let params: AllowitMap = [(descriptor.name, AllowitValue::Int(above))].into();
-                assert!(allowit::check_params(&params, AllowitTier::Standard).is_err());
+                assert!(allowit_core::check_params(&params, AllowitTier::Standard).is_err());
             }
         }
     }
@@ -95,6 +95,6 @@ fn function_descriptors_match_executable_rules_and_integer_bounds() {
         AllowitValue::List(vec![AllowitValue::Str("transfer".into())].into()),
     ] {
         let params = [("operations".into(), value)].into();
-        assert!(allowit::check_params(&params, AllowitTier::Standard).is_ok());
+        assert!(allowit_core::check_params(&params, AllowitTier::Standard).is_ok());
     }
 }

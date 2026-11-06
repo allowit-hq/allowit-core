@@ -19,7 +19,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: python3 scripts/check_core_boundaries.py
       - run: cargo build --locked --workspace --all-targets
-      - run: cargo check --locked -p allowit-sdk --no-default-features --lib
+      - run: cargo check --locked -p allowit-core --no-default-features --lib
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -34,9 +34,9 @@ jobs:
           python-version: "3.12"
       - run: python3 -m unittest discover -s scripts/tests
       - run: cargo fmt --all --check
-      - run: rustfmt --edition 2024 --check crates/allowit/src/core.rs
-      - run: cargo test --locked -p allowit-sdk --features client,service,transport,policy-source,vendor
-      - run: cargo clippy --locked -p allowit-sdk --all-targets --features client,service,transport,policy-source,vendor -- -D warnings
+      - run: rustfmt --edition 2024 --check crates/allowit-core/src/portable/core.rs
+      - run: cargo test --locked -p allowit-core --features client,service,transport,policy-source,vendor
+      - run: cargo clippy --locked -p allowit-core --all-targets --features client,service,transport,policy-source,vendor -- -D warnings
   verification:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -47,8 +47,8 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Portable rules and doctests
-        run: cargo test --locked -p allowit
+        run: cargo test --locked -p allowit-core
       - name: Host policy rules and write isolation
-        run: cargo test --locked -p allowit --no-default-features --features std
-      - run: cargo clippy --locked -p allowit --all-targets -- -D warnings
-      - run: cargo clippy --locked -p allowit --no-default-features --features std --all-targets -- -D warnings
+        run: cargo test --locked -p allowit-core --no-default-features --features std
+      - run: cargo clippy --locked -p allowit-core --all-targets -- -D warnings
+      - run: cargo clippy --locked -p allowit-core --no-default-features --features std --all-targets -- -D warnings

@@ -112,7 +112,7 @@ impl<'de> Deserialize<'de> for PolicyValue {
 }
 
 /// Exact metadata bytes shared by Rust and the JavaScript package.
-pub const CANONICAL_FUNCTIONS_JSON: &str = include_str!("../typescript/canonical-functions.json");
+pub const CANONICAL_FUNCTIONS_JSON: &str = include_str!("../resources/canonical-functions.json");
 
 /// Inclusive decimal bounds. Text prevents loss through a JavaScript number.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

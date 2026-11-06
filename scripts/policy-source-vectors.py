@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-GATE_FILE = ROOT / "tests/fixtures/policy-source-vectors.json"
-CANONICAL = (ROOT / "tests/fixtures/portable-policy.rs").read_text()
+GATE_FILE = ROOT / "crates/allowit-core/tests/fixtures/policy-source-vectors.json"
+CANONICAL = (ROOT / "crates/allowit-core/tests/fixtures/portable-policy.rs").read_text()
 BODY = "pub fn execute(ctx: &AllowitContext) -> allowit::Result {"
 
 # Top-level items appended to the canonical source. Each exercises one allowlist rule; most of them
