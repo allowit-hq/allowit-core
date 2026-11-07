@@ -120,6 +120,66 @@
 //!     Err(AllowitError::DestinationNotAllowed)
 //! }
 //! ```
+//!
+//! Portable text `String` has the traits of a native contract string: comparison, ordering, `clone`
+//! and `{:?}`. It does not dereference to `str`. The host compile therefore rejects the text uses
+//! that a native build rejects, such as a key held in a `String`, a comparison with a literal and
+//! `{}`.
+//!
+//! ```
+//! use allowit_core as allowit;
+//! use allowit::prelude::*;
+//! /// Deny when the agent's memo repeats the last approved memo.
+//! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
+//!     let memo: String = allowit::arg(ctx, "memo");
+//!     let last: Option<String> = allowit::get_state(ctx, "last_memo")?;
+//!     if last == Some(memo.clone()) {
+//!         panic!("repeated memo {:?}", memo);
+//!     }
+//!     allowit::set_state(ctx, "last_memo", memo)
+//! }
+//! ```
+//!
+//! ```compile_fail,E0308
+//! use allowit_core as allowit;
+//! use allowit::prelude::*;
+//! /// A key held in a `String` does not compile.
+//! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
+//!     let key: String = allowit::param(ctx, "cap_key");
+//!     let cap: i128 = allowit::param(ctx, &key);
+//!     if ctx.request.amount > cap {
+//!         return Err(AllowitError::PaymentLimitExceeded);
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ```compile_fail,E0614
+//! use allowit_core as allowit;
+//! use allowit::prelude::*;
+//! /// A `String` does not dereference to `str`.
+//! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
+//!     let key: String = allowit::param(ctx, "cap_key");
+//!     let cap: i128 = allowit::param(ctx, &*key);
+//!     if ctx.request.amount > cap {
+//!         return Err(AllowitError::PaymentLimitExceeded);
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ```compile_fail,E0277
+//! use allowit_core as allowit;
+//! use allowit::prelude::*;
+//! /// `{}` does not format a `String`.
+//! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
+//!     let key: String = allowit::param(ctx, "cap_key");
+//!     if ctx.request.amount > 100 {
+//!         panic!("over cap for {}", key);
+//!     }
+//!     Ok(())
+//! }
+//! ```
 #[cfg(feature = "std")]
 extern crate alloc;
 #[cfg(feature = "std")]
@@ -133,19 +193,46 @@ compile_error!("The portable policy evaluator requires feature `std`");
 #[cfg(feature = "std")]
 pub mod host {
     use alloc::collections::BTreeMap;
-    pub use alloc::string::String;
     use core::cell::Cell;
     use std::sync::{Arc, Mutex, MutexGuard};
+
+    /// Portable text with the traits of a native contract string: comparison, ordering, `clone`
+    /// and `{:?}`. It has no `str` dereference, `Display`, `Default`, `AsRef` or `Add`, so
+    /// authored code cannot use it as a key, compare it with a literal, format it with `{}` or
+    /// extend it. Host integration builds one with `From` and reads it with `as_str`.
+    #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+    pub struct String(alloc::string::String);
+
+    impl String {
+        /// The text, for the server.
+        pub fn as_str(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl From<&str> for String {
+        /// The portable text of `text`.
+        fn from(text: &str) -> Self {
+            Self(text.into())
+        }
+    }
+
+    impl From<alloc::string::String> for String {
+        /// The portable text of `text`.
+        fn from(text: alloc::string::String) -> Self {
+            Self(text)
+        }
+    }
 
     /// Exact account or contract identity, held as the text that its rail supplies. It compares
     /// only for equality. Rails own native address validation and ordering. Portable authored
     /// code cannot order addresses.
     #[derive(Clone, Debug, Eq, PartialEq)]
-    pub struct Address(String);
+    pub struct Address(alloc::string::String);
 
     impl Address {
         /// The address with this text. The rail supplies text that it has validated.
-        pub fn new(text: impl Into<String>) -> Self {
+        pub fn new(text: impl Into<alloc::string::String>) -> Self {
             Self(text.into())
         }
 
@@ -207,7 +294,7 @@ pub mod host {
     /// Portable map with bounded text keys.
     type Map<K, V> = BTreeMap<K, V>;
     /// Host map key.
-    type Symbol = String;
+    type Symbol = alloc::string::String;
 
     /// Host environment of policy evaluations. It buffers the policy's `set_state` writes for
     /// `post_flight`; clones share the buffer. `evaluate` clears it before a run and on denial.
@@ -321,7 +408,7 @@ pub mod host {
         if !key_ok(key) {
             return Err(AllowitError::InvalidParam);
         }
-        map.insert(String::from(key), value);
+        map.insert(Symbol::from(key), value);
         Ok(())
     }
 
@@ -331,13 +418,13 @@ pub mod host {
     }
 
     /// The byte length of a text value.
-    fn text_len(text: &str) -> u32 {
-        u32::try_from(text.len()).unwrap_or(u32::MAX)
+    fn text_len(text: &String) -> u32 {
+        u32::try_from(text.0.len()).unwrap_or(u32::MAX)
     }
 
     /// The bytes of a text value, or `None` beyond `MAX_TEXT` bytes.
     fn text_bytes<'a>(text: &'a String, _buf: &'a mut [u8; MAX_TEXT as usize]) -> Option<&'a [u8]> {
-        (text.len() <= MAX_TEXT as usize).then_some(text.as_bytes())
+        (text.0.len() <= MAX_TEXT as usize).then_some(text.0.as_bytes())
     }
 
     /// The text of an address, as its rail supplied it.

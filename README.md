@@ -112,11 +112,13 @@ Version 0.4 combines the former `allowit` and `allowit-sdk` packages as `allowit
 Consumers replace both dependencies and use `allowit_core` for host and portable interfaces.
 Authored policy source retains its restricted `allowit::` namespace. The source helper compiles
 that embedded portable module independently, without host capabilities or dependencies.
+Version 0.5 gives the portable `String` only the traits of a native contract string. Host code
+builds one with `From` and reads it with `as_str`.
 
-After the 0.4.0 release, a host dependency can use:
+After the 0.5.0 release, a host dependency can use:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.4.0", version = "0.4", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.5.0", version = "0.5", default-features = false, features = ["client", "transport"] }
 ```
 
 Published 0.3 and earlier tags retain their original package identities and behavior.
