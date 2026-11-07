@@ -43,7 +43,7 @@ impl Serialize for ValueRef<'_> {
         match self.0 {
             AllowitValue::Int(value) => map.serialize_entry("Int", &value.to_string())?,
             AllowitValue::Bool(value) => map.serialize_entry("Bool", value)?,
-            AllowitValue::Str(value) => map.serialize_entry("Str", value)?,
+            AllowitValue::Str(value) => map.serialize_entry("Str", value.as_str())?,
             AllowitValue::Addr(value) => map.serialize_entry("Addr", value.as_str())?,
             AllowitValue::List(items) => map.serialize_entry("List", &ListRef(items.as_slice()))?,
         }
@@ -82,7 +82,7 @@ impl<'de> Deserialize<'de> for PolicyValue {
                         AllowitValue::Int(number)
                     }
                     "Bool" => AllowitValue::Bool(map.next_value()?),
-                    "Str" => AllowitValue::Str(map.next_value()?),
+                    "Str" => AllowitValue::Str(map.next_value::<String>()?.into()),
                     "Addr" => {
                         AllowitValue::Addr(allowit::Address::new(map.next_value::<String>()?))
                     }

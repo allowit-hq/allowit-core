@@ -52,6 +52,41 @@ class PolicySourceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "fails the std-only compile"):
                 policy_source.host_compile(path)
 
+    def test_host_compile_rejects_native_string_misuse_that_the_gate_admits(self):
+        # Each body passes the gate and fails the native `String` build with this error code.
+        rejected = {
+            "let n: i128 = allowit::param(ctx, &key);": "E0308",
+            "let n: i128 = allowit::arg(ctx, &key);": "E0308",
+            "let n = ctx.params[&key].clone();": "E0308",
+            "let n = ctx.params.contains(&key);": "E0308",
+            "let n = ctx.request.args.contains(&key);": "E0308",
+            "let n: Option<i128> = allowit::get_state(ctx, &key)?;": "E0308",
+            "allowit::set_state(ctx, &key, 1i128)?;": "E0308",
+            "let n: i128 = allowit::param(ctx, &*key);": "E0614",
+            'panic!("over cap for {}", key);': "E0277",
+            'let n = key == "cap";': "E0308",
+            'let n = key + "_x";': "E0369",
+            "let n: &str = key.as_ref();": "E0599",
+            "let n = allowit::get_state::<String>(ctx, \"seen\")?.unwrap_or_default();": "E0277",
+        }
+        accepted = ('let other: String = allowit::param(ctx, "other_key"); '
+                    'let seen: Option<String> = allowit::get_state(ctx, "seen")?; '
+                    'if key < other || seen == Some(key.clone()) { panic!("repeated {:?}", key); } '
+                    'allowit::set_state(ctx, "seen", key)?;')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.rs"
+            for body, code in list(rejected.items()) + [(accepted, None)]:
+                source = ("use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n"
+                          'let key: String = allowit::param(ctx, "cap_key");\n' + body + "\nOk(())\n}\n")
+                path.write_text(source)
+                with self.subTest(body=body):
+                    policy_source.checked_code(source)
+                    if code is None:
+                        policy_source.host_compile(path)
+                    else:
+                        with self.assertRaisesRegex(ValueError, r"error\[" + code + r"\]"):
+                            policy_source.host_compile(path)
+
 
 if __name__ == "__main__":
     unittest.main()
