@@ -1,5 +1,5 @@
 //! Rust and Python must reject the same nonportable source and derive the same prefix.
-use allowit_core::policy_source::source_shape;
+use allowit_core::policy_source::{source_shape, source_shape_with_host_calls};
 use serde_json::Value;
 
 const CANONICAL: &str = include_str!("fixtures/portable-policy.rs");
@@ -43,6 +43,42 @@ fn source_gate_matches_policy_source_py() {
         }
     }
     assert!(accepted > 100 && accepted < vectors.len());
+}
+
+#[test]
+fn only_exact_registered_host_calls_extend_the_server_source_gate() {
+    for vector in vectors(include_str!("fixtures/host-call-vectors.json")) {
+        let body = vector["body"].as_str().unwrap();
+        let source = format!(
+            "use allowit::prelude::*; pub fn execute(ctx: &AllowitContext) -> allowit::Result {{
+                allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;
+                {body}
+                Ok(())
+            }}"
+        );
+        let registered = vector["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| (pair[0].as_str().unwrap(), pair[1].as_str().unwrap()))
+            .collect::<Vec<_>>();
+        let checked = source_shape_with_host_calls(&source, &registered);
+        if vector["accepted"].as_bool().unwrap() {
+            let checked = checked.unwrap_or_else(|error| panic!("{body}: {error}"));
+            assert_eq!(checked.prefix, ["payment_limit"]);
+            assert!(!checked.canonical_only);
+            assert!(!checked.writes_state);
+        } else {
+            assert!(checked.is_err(), "{body}");
+        }
+        if body.starts_with("vendor::") {
+            assert!(source_shape(&source).is_err(), "{body}");
+        }
+    }
+    assert!(source_shape_with_host_calls(CANONICAL, &[("vendor", "quote"); 129]).is_err());
+    let oversized = format!("// {}\n{CANONICAL}", "é".repeat(8000));
+    assert!(source_shape(&oversized).is_ok());
+    assert!(source_shape_with_host_calls(&oversized, &[("vendor", "quote")]).is_err());
 }
 
 #[test]
