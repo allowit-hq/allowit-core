@@ -239,7 +239,7 @@ fn byte_bound_and_expired_deadline_fail_closed() {
 }
 
 #[test]
-fn remaining_deadline_caps_the_entire_response() {
+fn remaining_deadline_bounds_the_entire_response() {
     let (url, server) = server(200, json!({"result":true}), Duration::from_millis(150), "");
     let rpc = RpcClient::with_options(
         &url,

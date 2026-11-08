@@ -56,7 +56,7 @@ pub fn operation_nonce(policy_id: &str, request_id: &str) -> [u8; 32] {
 }
 
 fn decode_reader<T: DeserializeOwned>(mut reader: impl Read) -> Result<T> {
-    // The stream cap also protects against a file that grows after the metadata check.
+    // The stream size limit also protects against a file that grows after the metadata check.
     // A fixed buffer never reallocates a partially filled secret-bearing input.
     let mut bytes = zeroize::Zeroizing::new(vec![0u8; MAX_REQUEST_BYTES + 1]);
     let mut length = 0;

@@ -164,7 +164,7 @@
     {
       "name": "expires_at",
       "path": "allowit::expires_at",
-      "label": "Expiry",
+      "label": "Expires at",
       "description": "Require unexpired parameters and request. The parameter is an exclusive Unix timestamp in seconds. The request must expire no later than the parameters.",
       "parameter": {
         "index": 1,

@@ -5,9 +5,9 @@
 //! ```ignore
 //! use allowit_core as allowit;
 //! use allowit::prelude::*;
-//! /// Let my agent pay our invoices. Cap its total spending and pay only vendors I approve.
+//! /// Let my agent pay our invoices. Limit its total spending and pay only vendors I approve.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
-//!     // "Cap its total spending"
+//!     // "Limit its total spending"
 //!     allowit::lifetime_spending_limit(ctx, &ctx.params[allowit::LIFETIME_SPENDING_LIMIT])?;
 //!     // "pay only vendors I approve"
 //!     allowit::destinations(ctx, &ctx.params[allowit::DESTINATIONS])?;
@@ -32,7 +32,7 @@
 //! as `"transfer"`, for a `match`.
 //!
 //! `param` and `arg` read an owner param or an agent arg as the type of its binding:
-//! `let cap: i128 = allowit::param(ctx, "swap_cap");`. They panic when the key is unset
+//! `let limit: i128 = allowit::param(ctx, "swap_limit");`. They panic when the key is unset
 //! (`MissingParam`) or the value has another type or range (`InvalidParam`). A panic, also from an
 //! unset `ctx.params[key]`, `panic!`, `assert!`, `unreachable!` or an integer overflow, is a hard
 //! stop: the run denies and its writes are discarded. `evaluate` catches the panic and returns
@@ -145,9 +145,9 @@
 //! use allowit::prelude::*;
 //! /// A key held in a `String` does not compile.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
-//!     let key: String = allowit::param(ctx, "cap_key");
-//!     let cap: i128 = allowit::param(ctx, &key);
-//!     if ctx.request.amount > cap {
+//!     let key: String = allowit::param(ctx, "limit_key");
+//!     let limit: i128 = allowit::param(ctx, &key);
+//!     if ctx.request.amount > limit {
 //!         return Err(AllowitError::PaymentLimitExceeded);
 //!     }
 //!     Ok(())
@@ -159,9 +159,9 @@
 //! use allowit::prelude::*;
 //! /// A `String` does not dereference to `str`.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
-//!     let key: String = allowit::param(ctx, "cap_key");
-//!     let cap: i128 = allowit::param(ctx, &*key);
-//!     if ctx.request.amount > cap {
+//!     let key: String = allowit::param(ctx, "limit_key");
+//!     let limit: i128 = allowit::param(ctx, &*key);
+//!     if ctx.request.amount > limit {
 //!         return Err(AllowitError::PaymentLimitExceeded);
 //!     }
 //!     Ok(())
@@ -173,9 +173,9 @@
 //! use allowit::prelude::*;
 //! /// `{}` does not format a `String`.
 //! pub fn execute(ctx: &AllowitContext) -> allowit::Result {
-//!     let key: String = allowit::param(ctx, "cap_key");
+//!     let key: String = allowit::param(ctx, "limit_key");
 //!     if ctx.request.amount > 100 {
-//!         panic!("over cap for {}", key);
+//!         panic!("over limit for {}", key);
 //!     }
 //!     Ok(())
 //! }
