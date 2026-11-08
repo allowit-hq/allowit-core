@@ -1,4 +1,4 @@
-//! Local rail communication for server callers. Private admission and key authority remain with the caller.
+//! Local rail communication for server callers.
 pub mod owner;
 use crate::policy::PolicyValue;
 use crate::vendor::{config::ServerAuthority, error::Result, profiles::Description};
@@ -21,7 +21,7 @@ pub struct PolicyInstallation {
     pub asset: crate::vendor::input::asset::Asset,
     pub max_fee_units: u64,
 }
-/// Immutable common identity with private native encoding. Construction grants no signing authority.
+/// Immutable common identity with private native encoding.
 pub struct Installation {
     pub description: Description,
     pub config: Box<RawValue>,
@@ -393,7 +393,7 @@ pub trait Transport: Send + Sync {
     fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value>;
 }
 
-/// Public failure information. It grants no execution or settlement authority.
+/// Public failure information.
 #[derive(Clone, Debug)]
 pub struct Problem {
     pub status: u16,

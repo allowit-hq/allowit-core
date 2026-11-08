@@ -1,7 +1,7 @@
 //! Common policy wire values and canonical-function metadata.
 //!
 //! Addresses remain opaque text. Native adapters validate their address formats and supply
-//! verified amount units. These codecs grant no policy admission or signing authority.
+//! verified amount units.
 use alloc::{string::String, vec::Vec};
 use allowit::AllowitValue;
 use serde::{Deserialize, Serialize, de::Error, ser::SerializeMap, ser::SerializeSeq};
