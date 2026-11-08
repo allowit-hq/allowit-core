@@ -62,7 +62,7 @@ fn int(n: i128) -> AllowitValue {
 
 /// A text value.
 fn text_value(_env: &Env, text: &str) -> AllowitValue {
-    AllowitValue::Str(String::from(text))
+    AllowitValue::Str(text.into())
 }
 
 /// A `List` of `Str` op names, an `operations` value.
@@ -293,7 +293,7 @@ fn operations_admit_a_custom_call_by_its_contract_and_function() {
     let pool = Address::new("pool");
     let named = std::format!("custom:{}.swap", pool.as_str());
     let other = std::format!("custom:C{}.swap", "A".repeat(55));
-    let call = |function: &str| AllowitOperation::custom(pool.clone(), String::from(function));
+    let call = |function: &str| AllowitOperation::custom(pool.clone(), function.into());
     ctx.request.operation = call("swap");
     let not = Err(AllowitError::OperationNotAllowed);
     assert_eq!(operations(&ctx, &(text_value(&env, "*"))), Ok("custom"));
@@ -318,7 +318,7 @@ fn operations_admit_a_custom_call_by_its_contract_and_function() {
 fn params_of_the_wrong_type_or_range_are_invalid_param() {
     let env = Env::new();
     let ctx = fixture(&env);
-    let text = AllowitValue::Str(String::from("100"));
+    let text = AllowitValue::Str("100".into());
     let flag = AllowitValue::Bool(true);
     let address = AllowitValue::Addr(ctx.request.recipient.clone());
     let bad = Err(AllowitError::InvalidParam);
@@ -545,7 +545,7 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
     zero.set(String::from(CALL_LIMIT), AllowitValue::Int(0));
     zero.set(String::from(DESTINATIONS), list(&env, &[]));
     assert_eq!(standard(&zero), Ok(()));
-    let text = AllowitValue::Str(String::from("x"));
+    let text = AllowitValue::Str("x".into());
     let address = AllowitValue::Addr(ctx.request.asset.clone());
     let too_big = AllowitValue::Int(i128::from(u64::MAX) + 1);
     let bad: [(&str, AllowitValue); 10] = [
@@ -590,7 +590,7 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
 fn texts(_env: &Env, lengths: &[usize]) -> AllowitValue {
     let mut out = alloc::vec::Vec::new();
     for n in lengths {
-        out.push(AllowitValue::Str(String::from(&"x".repeat(*n))));
+        out.push(AllowitValue::Str("x".repeat(*n).into()));
     }
     AllowitValue::List(out.into())
 }
@@ -603,7 +603,7 @@ fn params_args_and_state_stay_within_their_byte_budgets() {
     let budget = |last: usize| {
         let mut map = Map::new();
         map.set(String::from("a"), texts(&env, &[256; 48]));
-        let b = AllowitValue::Str(String::from(&"x".repeat(last)));
+        let b = AllowitValue::Str("x".repeat(last).into());
         map.set(String::from("b"), b);
         map
     };
@@ -634,7 +634,7 @@ fn params_args_and_state_stay_within_their_byte_budgets() {
     // + 184: exactly 16 KiB.
     assert_eq!(MAX_STATE_BYTES, 16 * 1024);
     ctx.state.set(String::from("blob"), texts(&env, &[256; 45]));
-    let tail = |n: usize| AllowitValue::Str(String::from(&"x".repeat(n)));
+    let tail = |n: usize| AllowitValue::Str("x".repeat(n).into());
     {
         let custom = |c: &AllowitContext| post_flight(c, AllowitTier::Custom);
         set_state(&ctx, "tail", tail(184)).unwrap();
@@ -675,7 +675,7 @@ fn custom_params_args_and_state_values_stay_within_their_bounds() {
         }
         out.into()
     };
-    let text = |n: usize| AllowitValue::Str(String::from(&"x".repeat(n)));
+    let text = |n: usize| AllowitValue::Str("x".repeat(n).into());
     let fits = |value: &AllowitValue| check_value(value).map(drop);
     assert_eq!(fits(&AllowitValue::List(items(MAX_ITEMS))), Ok(()));
     let over = AllowitValue::List(items(MAX_ITEMS + 1));
