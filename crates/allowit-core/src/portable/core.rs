@@ -87,7 +87,7 @@ mod types {
             pub min_out: i128,
             /// Authenticated ledger close time in Unix seconds.
             pub now: u64,
-            /// Exclusive request expiry in Unix seconds.
+            /// Unix second at which the request expires, exclusive.
             pub expires_at: u64,
             /// Irreversible expense of this operation from the validated expense bounds; zero when unpriced.
             pub spent_units: i128,
@@ -866,7 +866,7 @@ pub fn operations(ctx: &AllowitContext, value: &AllowitValue) -> Result<&'static
 }
 
 /// Owner param `key` as `T`, the type of its binding:
-/// `let cap: i128 = allowit::param(ctx, "swap_cap");`. `T` is `i128`, `u64`, `u32`, `bool`,
+/// `let limit: i128 = allowit::param(ctx, "swap_limit");`. `T` is `i128`, `u64`, `u32`, `bool`,
 /// `Address`, `String`, `Vec<AllowitValue>`, `Vec<Address>` or `AllowitValue`. An unset key panics
 /// with `MissingParam` and a value of another type or range with `InvalidParam`: the run stops and
 /// denies, and its writes are discarded.

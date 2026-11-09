@@ -134,7 +134,7 @@ pub struct ParameterDescriptor {
     pub integer_range: Option<IntegerRange>,
     /// Amount controls require unit metadata from the bound host and native adapter.
     pub requires_amount_context: bool,
-    /// Canonical expiry values use Unix seconds. Relative input belongs to source bindings.
+    /// Canonical timestamp values use Unix seconds. Relative input belongs to source bindings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

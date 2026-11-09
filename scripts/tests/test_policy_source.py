@@ -63,8 +63,8 @@ class PolicySourceTests(unittest.TestCase):
             "let n: Option<i128> = allowit::get_state(ctx, &key)?;": "E0308",
             "allowit::set_state(ctx, &key, 1i128)?;": "E0308",
             "let n: i128 = allowit::param(ctx, &*key);": "E0614",
-            'panic!("over cap for {}", key);': "E0277",
-            'let n = key == "cap";': "E0308",
+            'panic!("over limit for {}", key);': "E0277",
+            'let n = key == "limit";': "E0308",
             'let n = key + "_x";': "E0369",
             "let n: &str = key.as_ref();": "E0599",
             "let n = allowit::get_state::<String>(ctx, \"seen\")?.unwrap_or_default();": "E0277",
@@ -77,7 +77,7 @@ class PolicySourceTests(unittest.TestCase):
             path = Path(directory) / "policy.rs"
             for body, code in list(rejected.items()) + [(accepted, None)]:
                 source = ("use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n"
-                          'let key: String = allowit::param(ctx, "cap_key");\n' + body + "\nOk(())\n}\n")
+                          'let key: String = allowit::param(ctx, "limit_key");\n' + body + "\nOk(())\n}\n")
                 path.write_text(source)
                 with self.subTest(body=body):
                     policy_source.checked_code(source)

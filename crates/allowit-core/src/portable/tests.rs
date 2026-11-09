@@ -66,7 +66,7 @@ fn text_value(_env: &Env, text: &str) -> AllowitValue {
 }
 
 /// A `List` of `Str` op names, an `operations` value.
-fn ops(env: &Env, names: &[&str]) -> AllowitValue {
+fn operation_list(env: &Env, names: &[&str]) -> AllowitValue {
     let mut out = alloc::vec::Vec::new();
     for name in names {
         out.push(text_value(env, name));
@@ -119,7 +119,7 @@ fn fixture(env: &Env) -> AllowitContext {
         (DESTINATIONS, list(env, &[&recipient])),
         (TOKENS, list(env, &[&asset])),
         (EXPIRES_AT, int(999_999)),
-        (OPERATIONS, ops(env, &["transfer"])),
+        (OPERATIONS, operation_list(env, &["transfer"])),
     ] {
         set(&mut ctx, key, value);
     }
@@ -178,15 +178,15 @@ fn rules_read_any_key_and_param_returns_the_typed_value() {
     let env = Env::new();
     let mut ctx = fixture(&env);
     // A rule may read a custom key: the policy defines it.
-    set(&mut ctx, "vendor_cap", int(39));
+    set(&mut ctx, "vendor_payment_limit", int(39));
     assert_eq!(
-        payment_limit(&ctx, &ctx.params["vendor_cap"]),
+        payment_limit(&ctx, &ctx.params["vendor_payment_limit"]),
         Err(AllowitError::PaymentLimitExceeded)
     );
-    assert_eq!(param::<i128>(&ctx, "vendor_cap"), 39);
-    assert_eq!(param::<u32>(&ctx, "vendor_cap"), 39);
+    assert_eq!(param::<i128>(&ctx, "vendor_payment_limit"), 39);
+    assert_eq!(param::<u32>(&ctx, "vendor_payment_limit"), 39);
     assert_eq!(
-        param::<AllowitValue>(&ctx, "vendor_cap"),
+        param::<AllowitValue>(&ctx, "vendor_payment_limit"),
         AllowitValue::Int(39)
     );
     let tokens: Vec<Address> = param(&ctx, TOKENS);
@@ -194,41 +194,50 @@ fn rules_read_any_key_and_param_returns_the_typed_value() {
     let names: Vec<AllowitValue> = param(&ctx, OPERATIONS);
     assert_eq!(names, vec![&env, text_value(&env, "transfer")]);
     // A key that no map can hold is unset, the same on both backends.
-    assert!(ctx.params.contains("vendor_cap") && !ctx.params.contains("vendor cap"));
+    assert!(
+        ctx.params.contains("vendor_payment_limit") && !ctx.params.contains("vendor payment limit")
+    );
     // Execution params reach policy through the request.
-    set(&mut ctx, "vendor_cap", None);
+    set(&mut ctx, "vendor_payment_limit", None);
     ctx.request
         .args
         .0
         .set(String::from("invoice"), AllowitValue::Int(7));
     assert!(ctx.request.args.contains("invoice") && !ctx.request.args.contains("order"));
     assert_eq!(arg::<u64>(&ctx, "invoice"), 7);
-    assert!(!ctx.params.contains("vendor_cap"));
+    assert!(!ctx.params.contains("vendor_payment_limit"));
 }
 
 #[test]
-fn operations_admit_named_ops_star_and_custom_forms() {
+fn operations_admit_named_star_and_custom_forms() {
     let env = Env::new();
     let mut ctx = fixture(&env);
     let pool = "custom:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let not = Err(AllowitError::OperationNotAllowed);
     // A transfer is `transfer`; a deposit is `deposit`.
     assert_eq!(
-        operations(&ctx, &ops(&env, &["deposit", "transfer"])),
+        operations(&ctx, &operation_list(&env, &["deposit", "transfer"])),
         Ok("transfer")
     );
     assert_eq!(operations(&ctx, &(text_value(&env, "*"))), Ok("transfer"));
-    assert_eq!(operations(&ctx, &ops(&env, &[])), not);
+    assert_eq!(operations(&ctx, &operation_list(&env, &[])), not);
     let custom = std::format!("{pool}.swap");
     for names in [
         &["deposit", "swap", "redeem"][..],
         &["custom", "custom.transfer", custom.as_str()][..],
     ] {
-        assert_eq!(operations(&ctx, &ops(&env, names)), not, "{names:?}");
+        assert_eq!(
+            operations(&ctx, &operation_list(&env, names)),
+            not,
+            "{names:?}"
+        );
     }
     ctx.request.operation = AllowitOperation::deposit;
-    assert_eq!(operations(&ctx, &ops(&env, &["deposit"])), Ok("deposit"));
-    assert_eq!(operations(&ctx, &ops(&env, &["transfer"])), not);
+    assert_eq!(
+        operations(&ctx, &operation_list(&env, &["deposit"])),
+        Ok("deposit")
+    );
+    assert_eq!(operations(&ctx, &operation_list(&env, &["transfer"])), not);
     // Custom forms: any custom call, one function on any contract, or one contract's function.
     let swap = custom.as_bytes();
     for entry in ["custom", "custom.swap", custom.as_str()] {
@@ -276,8 +285,8 @@ fn operations_admit_named_ops_star_and_custom_forms() {
     let bad = Err(AllowitError::InvalidParam);
     let invalid = [
         text_value(&env, "transfer"),
-        ops(&env, &["*"]),
-        ops(&env, &["transfer", "pay"]),
+        operation_list(&env, &["*"]),
+        operation_list(&env, &["transfer", "pay"]),
         AllowitValue::List(vec![&env, AllowitValue::Int(1)]),
         int(1),
     ];
@@ -299,19 +308,23 @@ fn operations_admit_a_custom_call_by_its_contract_and_function() {
     assert_eq!(operations(&ctx, &(text_value(&env, "*"))), Ok("custom"));
     for entry in ["custom", "custom.swap", named.as_str()] {
         assert_eq!(
-            operations(&ctx, &ops(&env, &[entry])),
+            operations(&ctx, &operation_list(&env, &[entry])),
             Ok("custom"),
             "{entry}"
         );
     }
     for entry in ["swap", "transfer", "custom.claim", other.as_str()] {
-        assert_eq!(operations(&ctx, &ops(&env, &[entry])), not, "{entry}");
+        assert_eq!(
+            operations(&ctx, &operation_list(&env, &[entry])),
+            not,
+            "{entry}"
+        );
     }
     // A call that no op name can express, such as a function that is not a `Symbol`, is admitted
     // by no entry, not even `*`.
     ctx.request.operation = call("a-b");
     assert_eq!(operations(&ctx, &(text_value(&env, "*"))), not);
-    assert_eq!(operations(&ctx, &ops(&env, &["custom"])), not);
+    assert_eq!(operations(&ctx, &operation_list(&env, &["custom"])), not);
 }
 
 #[test]
@@ -396,11 +409,11 @@ fn boundary_equality_passes_with_zero_headroom_and_one_more_denies() {
 }
 
 #[test]
-fn accounting_caps_check_only_the_facts_they_read() {
+fn accounting_limits_check_only_the_facts_they_read() {
     let env = Env::new();
     let base = fixture(&env);
-    type Cap = fn(&AllowitContext, &AllowitValue) -> Result<i128>;
-    let caps: [Cap; 3] = [
+    type Limit = fn(&AllowitContext, &AllowitValue) -> Result<i128>;
+    let limits: [Limit; 3] = [
         lifetime_spending_limit,
         daily_spending_limit,
         daily_volume_limit,
@@ -440,9 +453,9 @@ fn accounting_caps_check_only_the_facts_they_read() {
     for (i, (change, expected)) in edits.iter().zip(expected).enumerate() {
         let mut ctx = base.clone();
         change(&mut ctx);
-        for (j, cap) in caps.iter().enumerate() {
+        for (j, limit) in limits.iter().enumerate() {
             let want = expected[j].unwrap_or(Ok(passing[j]));
-            assert_eq!(cap(&ctx, &int(1000)), want, "edit {i} limit {j}");
+            assert_eq!(limit(&ctx, &int(1000)), want, "edit {i} limit {j}");
         }
     }
     let mut ctx = base.clone();
@@ -495,7 +508,10 @@ fn preflight_enforces_every_present_param_with_its_rule_error() {
             }
             AllowitRule::tokens => (list(&env, &[&other]), AllowitError::TokenNotAllowed),
             AllowitRule::expires_at => (int(now.into()), AllowitError::Expired),
-            AllowitRule::operations => (ops(&env, &["deposit"]), AllowitError::OperationNotAllowed),
+            AllowitRule::operations => (
+                operation_list(&env, &["deposit"]),
+                AllowitError::OperationNotAllowed,
+            ),
         };
         set(&mut ctx, rule.key(), value);
         assert_eq!(preflight(&ctx, rule), Err(expected));
@@ -540,7 +556,7 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
     let ctx = fixture(&env);
     let standard = |params: &AllowitMap| check_params(params, AllowitTier::Standard);
     assert_eq!(standard(&Map::new()), Ok(()));
-    // Zero caps and an empty allowlist are valid configuration that denies.
+    // Zero limits and an empty allowlist are valid configuration that denies.
     let mut zero = ctx.params.map().clone();
     zero.set(String::from(CALL_LIMIT), AllowitValue::Int(0));
     zero.set(String::from(DESTINATIONS), list(&env, &[]));
@@ -549,7 +565,7 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
     let address = AllowitValue::Addr(ctx.request.asset.clone());
     let too_big = AllowitValue::Int(i128::from(u64::MAX) + 1);
     let bad: [(&str, AllowitValue); 10] = [
-        ("vendor_cap", AllowitValue::Int(1)),
+        ("vendor_payment_limit", AllowitValue::Int(1)),
         (PAYMENT_LIMIT, AllowitValue::Int(-1)),
         (DAILY_VOLUME_LIMIT, text.clone()),
         (CALL_LIMIT, too_big.clone()),
@@ -557,7 +573,7 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
         (DESTINATIONS, address.clone()),
         (TOKENS, AllowitValue::List(vec![&env, text.clone()])),
         (OPERATIONS, text),
-        (OPERATIONS, ops(&env, &["transfer", "pay"])),
+        (OPERATIONS, operation_list(&env, &["transfer", "pay"])),
         (OPERATIONS, AllowitValue::List(vec![&env, address])),
     ];
     for (key, value) in bad {
@@ -570,8 +586,8 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
     // `operations` is `*` or a list of op names, which may be empty.
     for value in [
         text_value(&env, "*"),
-        ops(&env, &[]),
-        ops(&env, &["custom", "swap"]),
+        operation_list(&env, &[]),
+        operation_list(&env, &["custom", "swap"]),
     ] {
         let mut params = ctx.params.map().clone();
         params.set(String::from(OPERATIONS), value);
@@ -581,7 +597,7 @@ fn standard_params_admit_only_canonical_keys_with_their_types() {
     // rejects.
     let mut few = Map::new();
     few.set(String::from(PAYMENT_LIMIT), AllowitValue::Int(1));
-    few.set(String::from("vendor_cap"), AllowitValue::Int(5));
+    few.set(String::from("vendor_payment_limit"), AllowitValue::Int(5));
     assert_eq!(standard(&few), Err(AllowitError::InvalidParam));
     assert_eq!(check_params(&few, AllowitTier::Custom), Ok(()));
 }
@@ -627,7 +643,7 @@ fn params_args_and_state_stay_within_their_byte_budgets() {
     let longest = std::format!("custom:C{}.{}", "A".repeat(55), "f".repeat(32));
     for (n, fits) in [(28, Ok(())), (29, invalid)] {
         let names = std::vec![longest.as_str(); n];
-        standard.set(String::from(OPERATIONS), ops(&env, &names));
+        standard.set(String::from(OPERATIONS), operation_list(&env, &names));
         assert_eq!(check_params(&standard, AllowitTier::Standard), fits, "{n}");
     }
     // The seven standard keys take 7 * 120 bytes, `blob` 40 + 80 + 45 * 336 and `tail` 40 + 80
@@ -749,7 +765,7 @@ fn evaluate_checks_standard_params_as_the_wallet_does() {
     let env = Env::new();
     let mut ctx = fixture(&env);
     set(&mut ctx, EXPIRES_AT, None);
-    set(&mut ctx, "vendor_cap", int(5));
+    set(&mut ctx, "vendor_payment_limit", int(5));
     {
         // A standard wallet that kept a Custom param after a code change rejects it on admission.
         let run = evaluate(&ctx, |_| Ok(()), AllowitTier::Standard);
