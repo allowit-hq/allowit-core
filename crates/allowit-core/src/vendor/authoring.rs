@@ -2,7 +2,7 @@
 use crate::client::error::{Error, Result};
 use crate::policy_source;
 const MAX_SOURCE_BYTES: usize = 65_536;
-/// Hash canonical common data with Core's digest. This grants no source admission.
+/// Hash canonical common data with Core's digest.
 pub fn canonical_digest(value: &impl serde::Serialize) -> Result<String> {
     serde_json_canonicalizer::to_vec(value)
         .map(|bytes| crate::digest(&bytes))

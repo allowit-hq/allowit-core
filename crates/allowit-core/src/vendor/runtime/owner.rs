@@ -1,4 +1,4 @@
-//! Public installation metadata. Decoding describes retained data and grants no signing authority.
+//! Public installation metadata.
 use crate::policy::PolicyValue;
 use crate::vendor::runtime::Tier;
 use std::collections::BTreeMap;
@@ -97,7 +97,6 @@ pub struct FeeBounds {
     pub native_symbol: String,
 }
 /// Literal source-consent inputs. The native codec owns field names and the signing domain.
-/// Encoding these values does not approve a policy or establish wallet authority.
 pub struct SourceConsent<'a, P: serde::Serialize> {
     pub configuration: &'a Configuration,
     pub policy_id: &'a str,
