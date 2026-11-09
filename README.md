@@ -52,7 +52,7 @@ literal or vendor dependency in Core files, including the lockfiles. Its role is
 empty baseline ([vendor-boundary.json](vendor-boundary.json)).
 The [dependency check](scripts/check_dependencies.py) admits only Core's listed Rust and npm
 dependencies, from crates.io and the npm registry. It rejects path, git and registry overrides,
-`[patch]` and `[replace]` sections, npm overrides and workspaces, and locked packages from any other
+`[patch]` and `[replace]` sections, npm overrides, workspaces and pnpm settings, and locked packages from any other
 source. A new direct dependency needs an entry in its allowlist. Every locked crate must be listed in
 [locked-crates.txt](scripts/locked-crates.txt); `python3 scripts/check_dependencies.py --write-locked`
 rewrites that list from `Cargo.lock` so the change appears in review.

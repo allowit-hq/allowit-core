@@ -88,8 +88,14 @@ class Dependencies(unittest.TestCase):
         self.assertIn("web3: locked npm package is not admitted", "\n".join(self.errors()))
 
     def test_locked_npm_remote_resolution_rejects(self):
-        self.replace("pnpm-lock.yaml", "resolution: {integrity:", "resolution: {tarball: x, other:")
+        self.replace("pnpm-lock.yaml", "resolution: {integrity:",
+                     "resolution: {tarball: https://example.com/custom.tgz, integrity:")
         self.assertIn("only registry resolutions", "\n".join(self.errors()))
+
+    def test_pnpm_settings_reject(self):
+        self.replace("package.json", '"devDependencies"',
+                     '"pnpm": {"packageExtensions": {}}, "devDependencies"')
+        self.assertIn("'pnpm' is not permitted", "\n".join(self.errors()))
 
     def test_npm_overrides_reject(self):
         self.replace("package.json", '"devDependencies"', '"overrides": {}, "devDependencies"')

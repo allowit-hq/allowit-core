@@ -21,7 +21,9 @@ REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
 TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 SOURCE_KEYS = ("path", "git", "registry", "registry-index", "branch", "tag", "rev")
 NPM_TABLES = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
-NPM_FORBIDDEN = ("workspaces", "overrides", "resolutions", "bundleDependencies", "bundledDependencies")
+NPM_FORBIDDEN = ("workspaces", "overrides", "resolutions", "bundleDependencies", "bundledDependencies",
+                 "pnpm")
+RESOLUTION = re.compile(r"^\s+resolution: \{integrity: [A-Za-z0-9+/=-]+\}$")
 NPM_VERSION = re.compile(r"^[\^~]?\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?$")
 
 
@@ -71,8 +73,6 @@ def check_lock(path, doc, members, locked):
 
 def check_npm(path, doc):
     errors = [f"{path}: '{key}' is not permitted" for key in NPM_FORBIDDEN if key in doc]
-    if "overrides" in doc.get("pnpm", {}):
-        errors.append(f"{path}: 'pnpm.overrides' is not permitted")
     for table in NPM_TABLES:
         for name, spec in doc.get(table, {}).items():
             if name not in NPM:
@@ -93,7 +93,7 @@ def check_pnpm_lock(path, text):
             name = key[: key.index("@", 1)] if "@" in key[1:] else key
             if name not in NPM:
                 errors.append(f"{path} {name}: locked npm package is not admitted")
-        elif section == "packages" and "resolution:" in line and "integrity:" not in line:
+        elif section == "packages" and "resolution:" in line and not RESOLUTION.match(line):
             errors.append(f"{path}: only registry resolutions are permitted")
     return errors
 
