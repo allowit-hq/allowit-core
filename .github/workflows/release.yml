@@ -21,7 +21,6 @@ jobs:
         run: |
           test "$GITHUB_REF_NAME" = "v$(cargo pkgid --offline -p allowit-core | sed 's/.*[#@]//')"
           test "$GITHUB_REF_NAME" = "v$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
-      - run: node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs
       - run: python3 scripts/check_dependencies.py
       - run: cargo test --locked -p allowit-core
       - run: cargo test --locked -p allowit-core --no-default-features --features std

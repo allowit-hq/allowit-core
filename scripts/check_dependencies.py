@@ -4,7 +4,7 @@
 Core depends on no other Allowit repository and on no rail package. Allowlists enforce this
 without naming any rail: a new direct dependency needs an entry in RUST or NPM, and a new locked
 crate needs an entry in scripts/locked-crates.txt. `--write-locked` rewrites that file from
-Cargo.lock for review. The vendor-boundary eval separately rejects rail names in every file.
+Cargo.lock for review.
 """
 import json
 import re

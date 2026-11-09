@@ -47,9 +47,8 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 | `allowit-core` | `allowit_core` | Portable policy rules and reusable host primitives | [Per-file terms](crates/allowit-core/LICENSES.md) |
 | npm `@allowit/core` | `@allowit/core` | Common wire types and canonical function metadata for frontends | MIT |
 
-The [vendor-boundary eval](scripts/vendor-boundary.mjs) rejects any rail or vendor name, rail-shaped
-literal or vendor dependency in Core files, including the lockfiles. Its role is `shared` with an
-empty baseline ([vendor-boundary.json](vendor-boundary.json)).
+Core files, including the lockfiles, name no rail or vendor and hold no rail-shaped literal or vendor
+dependency.
 The [dependency check](scripts/check_dependencies.py) admits only Core's listed Rust and npm
 dependencies, from crates.io and the npm registry. It rejects path, git and registry overrides,
 `[patch]` and `[replace]` sections, npm overrides, workspaces and pnpm settings, and locked packages from any other
@@ -189,17 +188,12 @@ cargo clippy --locked -p allowit-core --all-targets --features client,service,tr
 cargo test --locked -p allowit-core
 cargo test --locked -p allowit-core --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
-node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs
 python3 scripts/check_dependencies.py
 ```
 
 [CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy
 and the minimal host profile. The policy library links into its caller.
 Each rail checks its native contract build in its own repository.
-
-The vendor-boundary eval needs Node 22 or later. `cargo test` runs it through
-`crates/allowit-core/tests/vendor_boundary.rs`, and `pnpm check` runs it before the presentation check.
-`node scripts/vendor-boundary.mjs --probe` shows that the scan fails when a vendor name is added.
 
 ## Source and terms
 

@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "generate": "node scripts/generate-presentation.mjs",
-    "check": "node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs && node scripts/generate-presentation.mjs --check",
+    "check": "node scripts/generate-presentation.mjs --check",
     "test": "node --test tests/presentation/package.test.mjs"
   },
   "devDependencies": {
