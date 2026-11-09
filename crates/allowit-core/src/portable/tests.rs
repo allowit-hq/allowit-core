@@ -212,7 +212,7 @@ fn rules_read_any_key_and_param_returns_the_typed_value() {
 fn operations_admit_named_star_and_custom_forms() {
     let env = Env::new();
     let mut ctx = fixture(&env);
-    let pool = "custom:CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    let pool = std::format!("custom:pool{}", "1".repeat(52));
     let not = Err(AllowitError::OperationNotAllowed);
     // A transfer is `transfer`; a deposit is `deposit`.
     assert_eq!(
@@ -301,7 +301,7 @@ fn operations_admit_a_custom_call_by_its_contract_and_function() {
     let mut ctx = fixture(&env);
     let pool = Address::new("pool");
     let named = std::format!("custom:{}.swap", pool.as_str());
-    let other = std::format!("custom:C{}.swap", "A".repeat(55));
+    let other = std::format!("custom:{}.swap", "1".repeat(56));
     let call = |function: &str| AllowitOperation::custom(pool.clone(), function.into());
     ctx.request.operation = call("swap");
     let not = Err(AllowitError::OperationNotAllowed);
@@ -638,9 +638,9 @@ fn params_args_and_state_stay_within_their_byte_budgets() {
     standard.set(String::from(TOKENS), full);
     assert_eq!(standard.len(), 9);
     assert_eq!(check_params(&standard, AllowitTier::Standard), Ok(()));
-    // Beside full allowlists, 28 `operations` entries that name a Stellar contract's longest
-    // function fit and 29 do not.
-    let longest = std::format!("custom:C{}.{}", "A".repeat(55), "f".repeat(32));
+    // Beside full allowlists, 28 `operations` entries that name a 56-character contract's
+    // longest function fit and 29 do not.
+    let longest = std::format!("custom:{}.{}", "1".repeat(56), "f".repeat(32));
     for (n, fits) in [(28, Ok(())), (29, invalid)] {
         let names = std::vec![longest.as_str(); n];
         standard.set(String::from(OPERATIONS), operation_list(&env, &names));

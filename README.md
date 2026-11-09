@@ -22,6 +22,24 @@ flowchart TB
     Vendor -->|crate + npm| Core
 ```
 
+## Rail plugin contract
+
+`allowit_core::vendor::plugin` (feature `vendor`) defines the traits a vendor package implements.
+Core holds no rail code. The SDK registers each vendor's `RailPlugin` with one line and dispatches by
+CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SDK.
+
+- `RailPlugin`: identity, networks, capabilities, formats, assets, explorer links, deadlines, keys,
+  profiles, policy generation, transport, runtime, installation and packet restore.
+- `ExecutionProvider`: agent execution, status and recovery. The SDK owns the journal and passes a
+  store opener.
+- `OwnerRuntime`: server owner-step preparation. `OwnerStep.payload` is opaque text that only the
+  vendor signs and reads.
+- `ServerHooks`: per-network configuration, wallet profiles, sign-in verification and the charged
+  fee. `ReceiptInfo.fee.charged_units` is in installed-asset units and counts against spending and
+  volume limits.
+- `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
+- `policy_functions`: vendor evidence functions that policies may call. The default is none.
+
 ## Packages
 
 | Package | Library | Responsibility | License |
@@ -29,7 +47,9 @@ flowchart TB
 | `allowit-core` | `allowit_core` | Portable policy rules and reusable host primitives | [Per-file terms](crates/allowit-core/LICENSES.md) |
 | npm `@allowit/core` | `@allowit/core` | Common wire types and canonical function metadata for frontends | MIT |
 
-[Dependency checks](scripts/check_core_boundaries.py) reject declared and locked native rail dependencies, including hidden optional or target declarations.
+The [vendor-boundary eval](scripts/vendor-boundary.mjs) rejects any rail or vendor name, rail-shaped
+literal or vendor dependency in Core files, including the lockfiles. Its role is `shared` with an
+empty baseline ([vendor-boundary.json](vendor-boundary.json)).
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly.
 
@@ -65,8 +85,8 @@ Transport performs one attempt. The calling workflow chooses recovery using the 
 operation. A failed response does not establish transaction failure.
 
 The host-only `policy_source::source_shape` derives the canonical prefix and detects state writes.
-It rejects source constructs outside the portable allowlist. Stellar binds that shape to its native
-wallet tier. The server enforces trusted admission.
+It rejects source constructs outside the portable allowlist. Authored source may import only the
+`allowit` crate. Each rail binds that shape to its native wallet tier. The server enforces trusted admission.
 
 `scripts/policy_source.py` provides the corresponding Python gate and direct-rustc host compile.
 The `policy_source` module embeds that helper, its terms and the portable source bytes from the
@@ -163,17 +183,16 @@ cargo clippy --locked -p allowit-core --all-targets --features client,service,tr
 cargo test --locked -p allowit-core
 cargo test --locked -p allowit-core --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
-python3 scripts/check_core_boundaries.py
+node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs
 ```
 
 [CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy
 and the minimal host profile. The policy library links into its caller.
 Each rail checks its native contract build in its own repository.
 
-The dependency guard checks Cargo declarations, the lockfile and declared npm manifests without running package-manager hooks.
-It rejects local metadata paths outside Core. Local npm dependencies must be directories with regular package manifests.
-Npm archives and opaque remote sources are not permitted.
-Pnpm workspace files support a static `packages` list with relative paths and shallow globs. Unsupported YAML produces an error.
+The vendor-boundary eval needs Node 22 or later. `cargo test` runs it through
+`crates/allowit-core/tests/vendor_boundary.rs`, and `pnpm check` runs it before the presentation check.
+`node scripts/vendor-boundary.mjs --probe` shows that the scan fails when a vendor name is added.
 
 ## Source and terms
 
