@@ -44,7 +44,7 @@ OUTSIDE = (
 )
 # File and environment macros. Their names may appear only as the bare context field read
 # `ctx.env`: after a single `.` and not followed by `.`, `(` or `!`, so neither `ctx.env.<method>`
-# nor a value's `env()` method, such as the Soroban `Address::env`, passes.
+# nor a value's `env()` method, such as a rail SDK's `Address::env`, passes.
 MACRO_NAMES = re.compile(r"\b(?:include|include_str|include_bytes|env|option_env)\b")
 # Macros that authored code may invoke. Every other `name!` rejects: `core::arch::global_asm!`,
 # `asm!` and `naked_asm!` emit native code that would run inside the offchain evaluator process,
@@ -132,7 +132,7 @@ FIELDS = frozenset(("env", "params", "request", "operation", "asset", "recipient
 # Methods allowed only on one receiver field: `contains` tells whether params or args set a key, as
 # in `ctx.params.contains` or `ctx.request.args.contains`. The receiver must be that field access,
 # and the file must not declare these names: on a list bound to `params` or `args`, `contains` would
-# be a Soroban list method that the host list lacks.
+# be a rail SDK list method that the host list lacks.
 FIELD_METHODS = {"contains": ("params", "args")}
 # The only indexed receiver: `ctx.params[key]`. `AllowitParams` indexes only by key text, so the
 # std-only compile rejects any other index; every other indexing takes a pointer-width `usize`.
@@ -586,8 +586,8 @@ def _rustc(rustc, args, what):
 def host_compile(path):
     """Compile authored policy source as the offchain server does: as a module of a `no_std` crate
     whose only dependency is `allowit` with only the `std` feature, with overflow checks on. Raise
-    ValueError when it does not compile, for example when it names `soroban_sdk`, calls a Soroban
-    `Env` or `Address` method, orders addresses or uses a host-only `std` prelude item."""
+    ValueError when it does not compile, for example when it imports any crate other than `allowit`,
+    calls a rail SDK `Env` or `Address` method, orders addresses or uses a host-only `std` prelude item."""
     rustc = os.environ.get("RUSTC") or "rustc"
     digest = hashlib.sha256(b"".join((ALLOWIT / name).read_bytes() for name in ("lib.rs", "core.rs"))).hexdigest()
     lib = _host_allowit(rustc, digest)

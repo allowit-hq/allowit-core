@@ -335,6 +335,15 @@ pub struct ReceiptInfo {
     pub transaction_hash: [u8; 32],
     pub status: Status,
     pub observed_height: u64,
+    pub fee: Fee,
+    pub debits: Vec<Debit>,
+}
+/// The fee a receipt paid. `charged_units` is in installed-asset units and counts against
+/// spending and volume limits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Fee {
+    pub native_units: u128,
+    pub charged_units: i128,
 }
 impl Receipt {
     pub fn verify_operation(&self, signed: &Signed) -> Result<()> {

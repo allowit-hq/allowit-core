@@ -8,6 +8,7 @@ pub mod input;
 mod input_asset;
 pub mod owner;
 pub mod owner_session;
+pub mod plugin;
 pub mod profiles;
 mod provider;
 pub mod request;

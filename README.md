@@ -22,6 +22,24 @@ flowchart TB
     Vendor -->|crate + npm| Core
 ```
 
+## Rail plugin contract
+
+`allowit_core::vendor::plugin` (feature `vendor`) defines the traits a vendor package implements.
+Core holds no rail code. The SDK registers each vendor's `RailPlugin` with one line and dispatches by
+CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SDK.
+
+- `RailPlugin`: identity, networks, capabilities, formats, assets, explorer links, deadlines, keys,
+  profiles, policy generation, transport, runtime, installation and packet restore.
+- `ExecutionProvider`: agent execution, status and recovery. The SDK owns the journal and passes a
+  store opener.
+- `OwnerRuntime`: server owner-step preparation. `OwnerStep.payload` is opaque text that only the
+  vendor signs and reads.
+- `ServerHooks`: per-network configuration, wallet profiles, sign-in verification and the charged
+  fee. `ReceiptInfo.fee.charged_units` is in installed-asset units and counts against spending and
+  volume limits.
+- `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
+- `policy_functions`: vendor evidence functions that policies may call. The default is none.
+
 ## Packages
 
 | Package | Library | Responsibility | License |
@@ -29,7 +47,14 @@ flowchart TB
 | `allowit-core` | `allowit_core` | Portable policy rules and reusable host primitives | [Per-file terms](crates/allowit-core/LICENSES.md) |
 | npm `@allowit/core` | `@allowit/core` | Common wire types and canonical function metadata for frontends | MIT |
 
-[Dependency checks](scripts/check_core_boundaries.py) reject declared and locked native rail dependencies, including hidden optional or target declarations.
+Core files, including the lockfiles, name no rail or vendor and hold no rail-shaped literal or vendor
+dependency.
+The [dependency check](scripts/check_dependencies.py) admits only Core's listed Rust and npm
+dependencies, from crates.io and the npm registry. It rejects path, git and registry overrides,
+`[patch]` and `[replace]` sections, npm overrides, workspaces and pnpm settings, and locked packages from any other
+source. A new direct dependency needs an entry in its allowlist. Every locked crate must be listed in
+[locked-crates.txt](scripts/locked-crates.txt); `python3 scripts/check_dependencies.py --write-locked`
+rewrites that list from `Cargo.lock` so the change appears in review.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly.
 
@@ -65,8 +90,8 @@ Transport performs one attempt. The calling workflow chooses recovery using the 
 operation. A failed response does not establish transaction failure.
 
 The host-only `policy_source::source_shape` derives the canonical prefix and detects state writes.
-It rejects source constructs outside the portable allowlist. Stellar binds that shape to its native
-wallet tier. The server enforces trusted admission.
+It rejects source constructs outside the portable allowlist. Authored source may import only the
+`allowit` crate. Each rail binds that shape to its native wallet tier. The server enforces trusted admission.
 
 `scripts/policy_source.py` provides the corresponding Python gate and direct-rustc host compile.
 The `policy_source` module embeds that helper, its terms and the portable source bytes from the
@@ -141,7 +166,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.5.0", version = "0.5", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.6.0", version = "0.6", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
@@ -163,17 +188,12 @@ cargo clippy --locked -p allowit-core --all-targets --features client,service,tr
 cargo test --locked -p allowit-core
 cargo test --locked -p allowit-core --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
-python3 scripts/check_core_boundaries.py
+python3 scripts/check_dependencies.py
 ```
 
 [CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy
 and the minimal host profile. The policy library links into its caller.
 Each rail checks its native contract build in its own repository.
-
-The dependency guard checks Cargo declarations, the lockfile and declared npm manifests without running package-manager hooks.
-It rejects local metadata paths outside Core. Local npm dependencies must be directories with regular package manifests.
-Npm archives and opaque remote sources are not permitted.
-Pnpm workspace files support a static `packages` list with relative paths and shallow globs. Unsupported YAML produces an error.
 
 ## Source and terms
 
