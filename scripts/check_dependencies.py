@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Admit only Core's listed dependencies, from the public registries only.
 
-Core depends on no other Allowit repository and on no rail package. An allowlist enforces this
-without naming any rail: a new dependency needs an explicit entry here. The vendor-boundary eval
-separately rejects rail names in every file, including the lockfiles.
+Core depends on no other Allowit repository and on no rail package. Allowlists enforce this
+without naming any rail: a new direct dependency needs an entry in RUST or NPM, and a new locked
+crate needs an entry in scripts/locked-crates.txt. `--write-locked` rewrites that file from
+Cargo.lock for review. The vendor-boundary eval separately rejects rail names in every file.
 """
 import json
 import re
@@ -54,10 +55,12 @@ def check_cargo(path, doc):
     return errors
 
 
-def check_lock(path, doc, members):
+def check_lock(path, doc, members, locked):
     errors = []
     for package in doc.get("package", []):
         source = package.get("source")
+        if package.get("name") not in members and package.get("name") not in locked:
+            errors.append(f"{path} {package.get('name')}: locked crate is not admitted")
         if source is None:
             if package.get("name") not in members:
                 errors.append(f"{path} {package.get('name')}: local package is not a Core member")
@@ -79,6 +82,32 @@ def check_npm(path, doc):
     return errors
 
 
+def check_pnpm_lock(path, text):
+    """Every locked npm package must be a listed dependency resolved from the registry."""
+    errors, section = [], None
+    for line in text.splitlines():
+        if line and not line.startswith(" "):
+            section = line.rstrip(":")
+        elif section in ("packages", "snapshots") and re.match(r"^  \S", line):
+            key = line.strip().rstrip(":").split(":")[0].strip("'\"")
+            name = key[: key.index("@", 1)] if "@" in key[1:] else key
+            if name not in NPM:
+                errors.append(f"{path} {name}: locked npm package is not admitted")
+        elif section == "packages" and "resolution:" in line and "integrity:" not in line:
+            errors.append(f"{path}: only registry resolutions are permitted")
+    return errors
+
+
+def locked_names(root, members):
+    doc = tomllib.loads((root / "Cargo.lock").read_text())
+    return sorted({p["name"] for p in doc.get("package", []) if p["name"] not in members})
+
+
+def read_locked(root):
+    path = root / "scripts" / "locked-crates.txt"
+    return frozenset(path.read_text().split()) if path.exists() else frozenset()
+
+
 def check_root(root):
     root = Path(root)
     errors = []
@@ -94,16 +123,23 @@ def check_root(root):
         members.add(doc["package"]["name"])
         errors += check_cargo(manifest, doc)
     if (root / "Cargo.lock").exists():
-        errors += check_lock("Cargo.lock", tomllib.loads((root / "Cargo.lock").read_text()), members)
+        errors += check_lock("Cargo.lock", tomllib.loads((root / "Cargo.lock").read_text()), members,
+                             read_locked(root))
     errors += check_npm("package.json", json.loads((root / "package.json").read_text()))
+    if (root / "pnpm-lock.yaml").exists():
+        errors += check_pnpm_lock("pnpm-lock.yaml", (root / "pnpm-lock.yaml").read_text())
     if (root / "pnpm-workspace.yaml").exists():
         errors.append("pnpm-workspace.yaml: Core is a single npm package")
-    return errors
+    return errors, members
 
 
 def main():
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent
-    errors = check_root(root)
+    args = [a for a in sys.argv[1:] if a != "--write-locked"]
+    root = Path(args[0]) if args else Path(__file__).resolve().parent.parent
+    errors, members = check_root(root)
+    if "--write-locked" in sys.argv:
+        (root / "scripts" / "locked-crates.txt").write_text("\n".join(locked_names(root, members)) + "\n")
+        errors, members = check_root(root)
     for error in errors:
         print(error, file=sys.stderr)
     print(f"check_dependencies: {len(errors)} errors")

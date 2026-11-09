@@ -16,7 +16,8 @@ class Dependencies(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root)
-        for name in ("Cargo.toml", "Cargo.lock", "package.json", CRATE):
+        for name in ("Cargo.toml", "Cargo.lock", "package.json", "pnpm-lock.yaml", CRATE,
+                     "scripts/locked-crates.txt"):
             (self.root / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / name, self.root / name)
 
@@ -31,10 +32,10 @@ class Dependencies(unittest.TestCase):
         path.write_text(text.replace(old, new, 1))
 
     def errors(self):
-        return check_dependencies.check_root(self.root)
+        return check_dependencies.check_root(self.root)[0]
 
     def test_repository_passes(self):
-        self.assertEqual(check_dependencies.check_root(ROOT), [])
+        self.assertEqual(check_dependencies.check_root(ROOT)[0], [])
 
     def test_unlisted_dependency_rejects(self):
         self.append(CRATE, 'ethers = "2"\n')
@@ -70,12 +71,25 @@ class Dependencies(unittest.TestCase):
         self.append("Cargo.lock", '\n[[package]]\nname = "bridge"\nversion = "0.1.0"\n')
         self.assertIn("bridge: local package is not a Core member", "\n".join(self.errors()))
 
+    def test_unlisted_locked_crate_rejects(self):
+        self.append("Cargo.lock", '\n[[package]]\nname = "revm"\nversion = "1.0.0"\n'
+                    'source = "registry+https://github.com/rust-lang/crates.io-index"\n')
+        self.assertIn("revm: locked crate is not admitted", "\n".join(self.errors()))
+
     def test_npm_unlisted_or_remote_dependency_rejects(self):
         self.replace("package.json", '"typescript": "5.9.3"',
                      '"typescript": "github:microsoft/TypeScript", "web3": "1.0.0"')
         errors = "\n".join(self.errors())
         self.assertIn("devDependencies.web3: dependency is not admitted", errors)
         self.assertIn("devDependencies.typescript: only registry versions", errors)
+
+    def test_locked_npm_package_rejects(self):
+        self.append("pnpm-lock.yaml", "\n  web3@1.0.0: {}\n")
+        self.assertIn("web3: locked npm package is not admitted", "\n".join(self.errors()))
+
+    def test_locked_npm_remote_resolution_rejects(self):
+        self.replace("pnpm-lock.yaml", "resolution: {integrity:", "resolution: {tarball: x, other:")
+        self.assertIn("only registry resolutions", "\n".join(self.errors()))
 
     def test_npm_overrides_reject(self):
         self.replace("package.json", '"devDependencies"', '"overrides": {}, "devDependencies"')

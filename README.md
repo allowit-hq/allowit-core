@@ -53,7 +53,9 @@ empty baseline ([vendor-boundary.json](vendor-boundary.json)).
 The [dependency check](scripts/check_dependencies.py) admits only Core's listed Rust and npm
 dependencies, from crates.io and the npm registry. It rejects path, git and registry overrides,
 `[patch]` and `[replace]` sections, npm overrides and workspaces, and locked packages from any other
-source. A new dependency needs an explicit entry in its allowlist.
+source. A new direct dependency needs an entry in its allowlist. Every locked crate must be listed in
+[locked-crates.txt](scripts/locked-crates.txt); `python3 scripts/check_dependencies.py --write-locked`
+rewrites that list from `Cargo.lock` so the change appears in review.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly.
 
@@ -165,7 +167,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.5.0", version = "0.5", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.6.0", version = "0.6", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
