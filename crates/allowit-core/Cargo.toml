@@ -5,6 +5,8 @@ edition.workspace = true
 license-file = "LICENSES.md"
 description = "Shared host primitives for Allowit rail clients and SDK engines"
 repository.workspace = true
+# The vendor-boundary eval scans the repository checkout, so the package omits it.
+exclude = ["tests/vendor_boundary.rs"]
 
 [lib]
 name = "allowit_core"

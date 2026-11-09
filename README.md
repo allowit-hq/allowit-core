@@ -50,6 +50,10 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 The [vendor-boundary eval](scripts/vendor-boundary.mjs) rejects any rail or vendor name, rail-shaped
 literal or vendor dependency in Core files, including the lockfiles. Its role is `shared` with an
 empty baseline ([vendor-boundary.json](vendor-boundary.json)).
+The [dependency check](scripts/check_dependencies.py) admits only Core's listed Rust and npm
+dependencies, from crates.io and the npm registry. It rejects path, git and registry overrides,
+`[patch]` and `[replace]` sections, npm overrides and workspaces, and locked packages from any other
+source. A new dependency needs an explicit entry in its allowlist.
 Core depends on no other Allowit repository. Rails, vendor adapters and SDK engine can use its
 admitted package profiles directly.
 
@@ -184,6 +188,7 @@ cargo test --locked -p allowit-core
 cargo test --locked -p allowit-core --no-default-features --features std
 python3 -m unittest discover -s scripts/tests
 node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs
+python3 scripts/check_dependencies.py
 ```
 
 [CI](.github/workflows/ci.yml) also checks default and explicit `std` policy profiles with Clippy

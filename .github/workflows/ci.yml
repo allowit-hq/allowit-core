@@ -21,6 +21,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: Swatinem/rust-cache@v2
       - run: node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs
+      - run: python3 scripts/check_dependencies.py
       - run: cargo build --locked --workspace --all-targets
       - run: cargo check --locked -p allowit-core --no-default-features --lib
   test:
