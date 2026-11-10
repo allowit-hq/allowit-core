@@ -31,9 +31,12 @@
 //! request's op only when the owner's `operations` param names it, and returns the op name, such
 //! as `"transfer"`, for a `match`.
 //!
-//! `param` and `arg` read an owner param or an agent arg as the type of its binding:
-//! `let limit: i128 = allowit::param(ctx, "swap_limit");`. They panic when the key is unset
-//! (`MissingParam`) or the value has another type or range (`InvalidParam`). A panic, also from an
+//! `ctx.params[key].ok()` reads an owner param as the type of its binding or of the rule argument
+//! it feeds: `let floor: i128 = ctx.params["swap_output_floor"].ok();` and
+//! `allowit::payment_limit(ctx, &ctx.params["swap_limit"].ok())?`. `param` and `arg` read an owner
+//! param or an agent arg by key: `let limit: i128 = allowit::param(ctx, "swap_limit");`. These
+//! reads panic when the key is unset (`MissingParam`) or the value has another type or range
+//! (`InvalidParam`). No zero, default or conversion stands in for the value. A panic, also from an
 //! unset `ctx.params[key]`, `panic!`, `assert!`, `unreachable!` or an integer overflow, is a hard
 //! stop: the run denies and its writes are discarded. `evaluate` catches the panic and returns
 //! the failed-read error or `Panicked`. Rails must enforce their native abort and rollback behavior.
@@ -44,7 +47,7 @@
 //! `evaluate` checks request arguments and standard-tier parameters before executing a policy.
 //! Denied runs discard their writes. `preflight` runs one canonical rule and skips absent params.
 //!
-//! Portable authored code uses rule calls, `ctx.params[key]`, `contains`, `param`, `arg`,
+//! Portable authored code uses rule calls, `ctx.params[key]`, `ok`, `contains`, `param`, `arg`,
 //! `get_state` and `set_state`, typed scalar fields and enum comparisons.
 //! Source admission selects only portable names, paths and methods.
 //!
@@ -436,6 +439,13 @@ pub mod host {
     #[track_caller]
     fn fail(_env: &AllowitEnv, error: AllowitError, key: &str) -> ! {
         stop(error, key)
+    }
+
+    /// Record `InvalidParam` for `evaluate` and panic: a typed read met a value of another type
+    /// or range. A value carries no key, so the message names none.
+    #[track_caller]
+    fn mistyped() -> ! {
+        stop(AllowitError::InvalidParam, "value")
     }
 
     /// Record `error` for this thread's `guarded` run and panic with a message that names it and

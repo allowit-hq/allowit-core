@@ -3,6 +3,22 @@ use allowit_core::policy_source::{source_shape, source_shape_with_host_calls};
 use serde_json::Value;
 
 const CANONICAL: &str = include_str!("fixtures/portable-policy.rs");
+const TREASURY: &str = include_str!("fixtures/treasury-policy.rs");
+
+/// The treasury policy compiles on the host against this package as `allowit`.
+#[allow(dead_code)]
+mod treasury {
+    use allowit_core as allowit;
+    include!("fixtures/treasury-policy.rs");
+}
+
+/// The source gate admits typed `.ok()` reads, and the same source evaluates on the host.
+#[test]
+fn treasury_policy_with_typed_reads_passes_the_gate_and_evaluates() {
+    let shape = source_shape(TREASURY).unwrap();
+    assert!(!shape.canonical_only && !shape.writes_state);
+    let _: fn(&allowit_core::AllowitContext) -> allowit_core::Result = treasury::execute;
+}
 
 fn vectors(text: &str) -> Vec<Value> {
     serde_json::from_str(text).expect("vector file is JSON")
