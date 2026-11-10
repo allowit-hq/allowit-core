@@ -2,8 +2,8 @@
 // `AllowitEnv`, `Map`, `String`, `Symbol` and `Vec`, the owner's params `AllowitParams`, the type
 // macros `value!`, `error!` and `args!`, the map primitives `lookup`, `insert`, `count`,
 // `text_len`, `text_bytes`, `each_value`, `each_item`, `address_text`, `record`, `take_writes` and
-// `merge`, the params primitives `find` and `missing`, and the panic primitives `fail` and
-// `guarded`. Rails own their native type bindings.
+// `merge`, the params primitives `find` and `missing`, and the panic primitives `fail`, `mistyped`
+// and `guarded`. Rails own their native type bindings.
 
 /// UTC day length in seconds.
 pub const DAY: u64 = 86_400;
@@ -317,6 +317,23 @@ impl core::ops::Index<&str> for AllowitParams {
         match find(self, key) {
             Some(value) => value,
             None => missing(self, key),
+        }
+    }
+}
+
+/// Typed read of one value: `let floor: i128 = ctx.params[SWAP_OUTPUT_FLOOR].ok();`.
+impl AllowitValue {
+    /// This value as `T`, the type of its binding or of the rule argument it feeds:
+    /// `allowit::payment_limit(ctx, &ctx.params[SWAP_LIMIT].ok())?` reads the value itself.
+    /// `T` is a type that `param` reads. The value is exact: no zero, default or conversion
+    /// stands in for it. A value of another type or range panics with `InvalidParam`: the run
+    /// stops and denies, and its writes are discarded. An unset `ctx.params[key]` has already
+    /// panicked with `MissingParam`.
+    #[track_caller]
+    pub fn ok<T: TryFrom<AllowitValue>>(&self) -> T {
+        match T::try_from(self.clone()) {
+            Ok(value) => value,
+            Err(_) => mistyped(),
         }
     }
 }

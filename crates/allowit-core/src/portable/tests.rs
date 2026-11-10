@@ -1054,6 +1054,100 @@ fn unset_and_invalid_typed_reads_deny_and_discard_writes() {
 }
 
 #[test]
+fn ok_reads_a_param_as_the_type_of_its_binding() {
+    let env = Env::new();
+    let mut ctx = fixture(&env);
+    let seller = Address::new("seller");
+    set(&mut ctx, "floor", AllowitValue::Int(-7));
+    set(&mut ctx, "zero", AllowitValue::Int(0));
+    set(&mut ctx, "output", AllowitValue::Addr(seller.clone()));
+    set(&mut ctx, "sellers", list(&env, &[&seller]));
+    set(&mut ctx, "flag", AllowitValue::Bool(true));
+    let floor: i128 = ctx.params["floor"].ok();
+    let zero: u64 = ctx.params["zero"].ok();
+    let output: Address = ctx.params["output"].ok();
+    let sellers: Vec<Address> = ctx.params["sellers"].ok();
+    let same: AllowitValue = ctx.params["sellers"].ok();
+    assert_eq!((floor, zero, output), (-7, 0, seller.clone()));
+    assert_eq!(sellers, Vec::from(alloc::vec![seller.clone()]));
+    assert_eq!(same, ctx.params["sellers"]);
+    // A canonical rule takes the value itself through the same syntax.
+    ctx.request.recipient = seller.clone();
+    assert!(
+        evaluate(
+            &ctx,
+            |c| destinations(c, &c.params["sellers"].ok()).map(|_| ()),
+            AllowitTier::Custom
+        )
+        .is_ok()
+    );
+    // A missing key or a value of another type or range denies. Nothing stands in for it.
+    for (policy, error) in [
+        (
+            (|c: &AllowitContext| {
+                let _: i128 = c.params["absent"].ok();
+                Ok(())
+            }) as fn(&AllowitContext) -> Result,
+            AllowitError::MissingParam,
+        ),
+        (
+            |c| {
+                let _: i128 = c.params["flag"].ok();
+                Ok(())
+            },
+            AllowitError::InvalidParam,
+        ),
+        (
+            |c| {
+                let _: u64 = c.params["floor"].ok();
+                Ok(())
+            },
+            AllowitError::InvalidParam,
+        ),
+        (
+            |c| {
+                let _: Address = c.params["sellers"].ok();
+                Ok(())
+            },
+            AllowitError::InvalidParam,
+        ),
+        (
+            |c| {
+                let _: Vec<Address> = c.params["floor"].ok();
+                Ok(())
+            },
+            AllowitError::InvalidParam,
+        ),
+    ] {
+        assert_eq!(
+            evaluate(
+                &ctx,
+                |c| {
+                    set_state(c, "memo", 1u64)?;
+                    policy(c)
+                },
+                AllowitTier::Custom
+            ),
+            Err(error)
+        );
+        assert_eq!(
+            read::<u64>(&post_flight(&ctx, AllowitTier::Custom).unwrap(), "memo"),
+            Ok(None)
+        );
+    }
+    // A rule still checks the range of the exact value that it receives.
+    set(&mut ctx, "limit", AllowitValue::Int(-1));
+    assert_eq!(
+        evaluate(
+            &ctx,
+            |c| payment_limit(c, &c.params["limit"].ok()).map(|_| ()),
+            AllowitTier::Custom
+        ),
+        Err(AllowitError::InvalidParam)
+    );
+}
+
+#[test]
 fn canonical_rule_names_are_unique_and_absent_params_skip_preflight() {
     let mut ctx = fixture(&Env::new());
     ctx.params = Map::new().into();

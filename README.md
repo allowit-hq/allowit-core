@@ -125,6 +125,22 @@ Run `pnpm generate` after changing the registry. `pnpm check` detects stale gene
 `pnpm test` checks a packed public consumer and the Rust/JavaScript integer roundtrip.
 The npm archive contains interfaces, metadata, runtime exports and MIT terms. It excludes portable guest source.
 
+## Typed parameter reads
+
+`ctx.params[key].ok()` reads a required owner value as the type of its binding, or as the value that a
+canonical rule takes:
+
+```rust
+let floor: i128 = ctx.params[SWAP_OUTPUT_FLOOR].ok();
+allowit::payment_limit(ctx, &ctx.params[SWAP_LIMIT].ok())?;
+```
+
+The type is `i128`, `u64`, `u32`, `bool`, `Address`, `String`, `Vec<AllowitValue>`, `Vec<Address>` or
+`AllowitValue`. The read returns the exact value. An unset key stops the run with `MissingParam`. A value
+of another type or range stops it with `InvalidParam`. No zero, default or conversion stands in for the
+value, and the run discards its writes. Rules keep their own range checks and asset units.
+A rail that includes `core.rs` supplies the `mistyped() -> !` primitive, which aborts the native invocation.
+
 ## Operations
 
 `allowit::operations` admits the request's op only when the owner's `operations` param names it.
