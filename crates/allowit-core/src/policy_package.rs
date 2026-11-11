@@ -14,6 +14,20 @@ pub type PolicyFunction = fn(args: &Value, facts: &Value) -> Result<Value, Strin
 
 /// Namespaces that no package may claim. The registry also reserves every rail id.
 pub const RESERVED_NAMESPACES: [&str; 4] = ["allowit", "core", "std", "alloc"];
+/// Most host calls that one registry may admit, as in the policy-source gate.
+pub const MAX_HOST_CALLS: usize = 128;
+
+/// Names that the policy-source gate refuses in a host call registration: Rust keywords and
+/// the primitive type names. `policy_source` tests keep this list equal to the gate's lists.
+const GATE_RESERVED: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate",
+    "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl",
+    "in", "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+    "return", "self", "static", "struct", "super", "trait", "true", "try", "type", "typeof",
+    "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield", "i8", "i16", "i32",
+    "i64", "i128", "u8", "u16", "u32", "u64", "u128", "bool", "char", "str", "usize", "isize",
+    "f16", "f32", "f64", "f128",
+];
 
 /// What the shared looped tests run on each package. A package lists the features it skips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,9 +82,11 @@ impl PolicyPackage {
     }
 }
 
+/// A lowercase identifier that the policy-source gate admits in a host call registration.
 fn identifier(value: &str) -> bool {
     let mut bytes = value.bytes();
     value.len() <= 64
+        && !GATE_RESERVED.contains(&value)
         && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
         && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
@@ -78,7 +94,10 @@ fn identifier(value: &str) -> bool {
 /// Admit `packages` and return their exact host calls as `(namespace, function)` pairs, in
 /// registration order. `rails` are the registered rail ids. A namespace must be a lowercase
 /// identifier that is unique, not reserved and not a rail id. A package must name its release
-/// and declare at least one function, each a unique lowercase identifier.
+/// and declare at least one function, each a unique lowercase identifier other than `allowit`.
+/// No name is a Rust keyword or a primitive type, and one registry admits at most
+/// [`MAX_HOST_CALLS`] calls. The policy-source gate accepts every list that this function
+/// returns, alone or after the gate's own `allowit` server functions.
 pub fn host_calls(
     packages: &[&'static PolicyPackage],
     rails: &[&str],
@@ -110,13 +129,18 @@ pub fn host_calls(
             ));
         }
         for (name, _) in package.functions {
-            if !identifier(name) || calls.contains(&(namespace, *name)) {
+            if !identifier(name) || *name == "allowit" || calls.contains(&(namespace, *name)) {
                 return Err(format!(
                     "Invalid or duplicate policy function `{namespace}::{name}`"
                 ));
             }
             calls.push((namespace, *name));
         }
+    }
+    if calls.len() > MAX_HOST_CALLS {
+        return Err(format!(
+            "The policy packages declare more than {MAX_HOST_CALLS} functions"
+        ));
     }
     Ok(calls)
 }
@@ -173,6 +197,10 @@ mod tests {
         static EMPTY: PolicyPackage = package("empty", &[]);
         static REPEATED: PolicyPackage = package("twice", &[("check", echo), ("check", echo)]);
         static PATHED: PolicyPackage = package("pathed", &[("a::b", echo)]);
+        static KEYWORD: PolicyPackage = package("match", &[("check", echo)]);
+        static PRIMITIVE: PolicyPackage = package("u64", &[("check", echo)]);
+        static KEYWORD_FUNCTION: PolicyPackage = package("typed", &[("loop", echo)]);
+        static CORE_FUNCTION: PolicyPackage = package("claims", &[("allowit", echo)]);
         static UNRELEASED: PolicyPackage = PolicyPackage {
             release: "",
             ..package("unreleased", &[("check", echo)])
@@ -185,6 +213,10 @@ mod tests {
             &EMPTY,
             &REPEATED,
             &PATHED,
+            &KEYWORD,
+            &PRIMITIVE,
+            &KEYWORD_FUNCTION,
+            &CORE_FUNCTION,
             &UNRELEASED,
         ] {
             assert!(
@@ -204,5 +236,40 @@ mod tests {
                 .unwrap_err()
                 .contains("Duplicate")
         );
+    }
+
+    #[test]
+    fn a_registry_admits_at_most_the_gate_limit() {
+        fn many(count: usize) -> &'static PolicyPackage {
+            let functions: Vec<(&'static str, PolicyFunction)> = (0..count)
+                .map(|n| (&*format!("op{n}").leak(), echo as PolicyFunction))
+                .collect();
+            Box::leak(Box::new(package("many", functions.leak())))
+        }
+        assert_eq!(
+            host_calls(&[many(MAX_HOST_CALLS)], &[]).unwrap().len(),
+            MAX_HOST_CALLS
+        );
+        assert!(host_calls(&[many(MAX_HOST_CALLS + 1)], &[]).is_err());
+    }
+
+    /// Every admitted list passes the policy-source gate, and the gate refuses each name that
+    /// this module reserves, so an admitted package never fails later source checks.
+    #[cfg(feature = "policy-source")]
+    #[test]
+    fn admitted_host_calls_pass_the_policy_source_gate() {
+        use crate::policy_source::source_shape_with_host_calls;
+        const SOURCE: &str = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\n";
+        let mut calls = host_calls(&[&QUOTES, &OTHER], &["rail"]).unwrap();
+        calls.push(("allowit", "price"));
+        source_shape_with_host_calls(SOURCE, &calls).unwrap();
+        for name in GATE_RESERVED.iter().chain(&RESERVED_NAMESPACES[1..]) {
+            assert!(
+                source_shape_with_host_calls(SOURCE, &[(name, "check")]).is_err(),
+                "the gate admits the namespace `{name}`"
+            );
+        }
+        assert!(source_shape_with_host_calls(SOURCE, &[("quotes", "allowit")]).is_err());
+        assert!(source_shape_with_host_calls(SOURCE, &[("allowit", "check")]).is_err());
     }
 }
