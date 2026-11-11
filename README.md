@@ -40,6 +40,49 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 
+## Wallet kinds
+
+[`vendor::kinds`](crates/allowit-core/src/vendor/kinds.rs) describes the four wallet kinds that every host offers.
+`WALLET_KINDS` holds the title, explanation, enforcement and custody of each kind. Hosts show that text unchanged.
+
+| Id | Enforcement | Custody | Explanation |
+| --- | --- | --- | --- |
+| `native` | offchain | keypair | Allowit enforces the policy offchain, and a keypair account holds the funds. |
+| `simple` | offchain | contract | Allowit enforces the policy offchain, as for Native, and a smart-contract wallet holds the funds. |
+| `standard` | onchain | contract | A smart-contract wallet enforces the standard policy onchain for the supported params. |
+| `custom` | onchain | contract | A custom contract, built from the policy source, enforces the policy onchain. |
+
+A rail advertises its kinds through `RailPlugin::wallet_kinds(network)`. `WalletKind::binding` and
+`WalletKind::from_binding` convert between a kind and the custody and tier of an installation.
+`ConfigurationInfo::wallet_kind`, `Profile::wallet_kind`, `ProfileInfo::wallet_kind` and
+`RailPlugin::wallet_kind(network, document)` report the kind that an installation binds.
+The selection id `standard` names the tier that technical names call Common, such as the Common prefix.
+
+### Standard wallet parameters
+
+A `standard` wallet enforces only these params onchain. `STANDARD_PARAMS` lists them in this order, and
+[`canonical-functions.json`](typescript/canonical-functions.json) gives the type and range of each one.
+A policy that needs another param or its own state uses the `custom` kind.
+
+| Param | Value | Rule |
+| --- | --- | --- |
+| `payment_limit` | amount | Limit the gross amount of one operation. |
+| `lifetime_spending_limit` | amount | Limit cumulative irreversible expenses. |
+| `daily_spending_limit` | amount | Limit irreversible expenses on the request's UTC day. |
+| `daily_volume_limit` | amount | Limit gross amounts plus attributable gas on the request's UTC day. |
+| `call_limit` | count | Limit successful operations. |
+| `destinations` | list of addresses | Require an exact permitted destination. |
+| `tokens` | list of asset addresses | Require the underlying asset and, for swaps, the other token. |
+| `expires_at` | Unix timestamp in seconds | Require unexpired parameters and request. |
+| `operations` | `*` or a list of operation names | Require a permitted operation. |
+
+## Asset units
+
+A rail supplies the unit of every amount. `RailPlugin::native_asset(network)` and
+`RailPlugin::asset_display(network, asset)` return an `AssetDisplay`: `symbol`, `decimals`, `name` and `native`.
+`AssetDisplay::format(units)` prints base units with the unit, and `units_decimal` prints the number alone.
+Shared code holds no unit name.
+
 ## Packages
 
 | Package | Library | Responsibility | License |

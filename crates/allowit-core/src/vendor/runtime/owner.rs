@@ -36,6 +36,12 @@ pub struct ConfigurationInfo {
     pub tier_encoding: serde_json::Value,
     pub tier: Option<Tier>,
 }
+impl ConfigurationInfo {
+    /// The wallet kind that this installation binds, when its custody and tier name one.
+    pub fn wallet_kind(&self) -> Option<crate::vendor::kinds::WalletKind> {
+        crate::vendor::kinds::WalletKind::from_binding(self.custody, self.tier)
+    }
+}
 /// Literal retained configuration with read-only common metadata. Serialization keeps original native bytes.
 #[derive(Clone, Debug)]
 pub struct Configuration {

@@ -6,6 +6,7 @@ pub mod execution;
 pub mod generation;
 pub mod input;
 mod input_asset;
+pub mod kinds;
 pub mod owner;
 pub mod owner_session;
 pub mod plugin;

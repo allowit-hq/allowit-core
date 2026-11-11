@@ -71,6 +71,51 @@ pub struct ResolvedAsset {
     pub decimals: u32,
 }
 
+/// What a host shows for an asset. The rail plugin supplies it; shared code holds no unit.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDisplay {
+    /// The unit symbol or asset code that follows an amount.
+    pub symbol: String,
+    pub decimals: u8,
+    /// The human name of the asset.
+    pub name: String,
+    pub native: bool,
+}
+impl From<&Token> for AssetDisplay {
+    fn from(token: &Token) -> Self {
+        Self {
+            symbol: token.code.into(),
+            decimals: token.decimals,
+            name: token.code.into(),
+            native: token.native,
+        }
+    }
+}
+impl AssetDisplay {
+    /// Base units as an amount with its unit, such as `5 XYZ` or `-0.25 XYZ`.
+    pub fn format(&self, units: i128) -> String {
+        let sign = if units < 0 { "-" } else { "" };
+        let amount = units_decimal(units.unsigned_abs(), self.decimals);
+        format!("{sign}{amount} {}", self.symbol)
+    }
+}
+
+/// Base units as an exact display decimal without trailing zeros: the inverse of
+/// [`decimal_units`].
+pub fn units_decimal(units: u128, decimals: u8) -> String {
+    let digits = units.to_string();
+    let scale = usize::from(decimals);
+    let digits = format!("{digits:0>width$}", width = scale + 1);
+    let (whole, fraction) = digits.split_at(digits.len() - scale);
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.is_empty() {
+        whole.into()
+    } else {
+        format!("{whole}.{fraction}")
+    }
+}
+
 /// Converts a display decimal to base units, refusing extra precision.
 pub fn decimal_units(text: &str, decimals: u8) -> Result<u128> {
     let invalid = || {
@@ -117,6 +162,32 @@ pub fn decimal_units(text: &str, decimals: u8) -> Result<u128> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn amounts_print_exact_decimals_with_the_asset_unit() {
+        let asset = AssetDisplay {
+            symbol: "XYZ".into(),
+            decimals: 7,
+            name: "Example".into(),
+            native: true,
+        };
+        assert_eq!(asset.format(50_000_000), "5 XYZ");
+        assert_eq!(asset.format(2_500_000), "0.25 XYZ");
+        assert_eq!(asset.format(-1), "-0.0000001 XYZ");
+        assert_eq!(asset.format(0), "0 XYZ");
+        assert_eq!(units_decimal(u128::MAX, 0), u128::MAX.to_string());
+        assert_eq!(units_decimal(1, 255).len(), 257);
+        assert_eq!(
+            asset.format(i128::MIN),
+            format!("-{} XYZ", units_decimal(1 << 127, 7))
+        );
+        for (text, decimals) in [("5", 7), ("0.25", 7), ("123456789.0000001", 7), ("7", 0)] {
+            let units = decimal_units(text, decimals).unwrap();
+            assert_eq!(units_decimal(units, decimals), text);
+        }
+        let json = serde_json::to_value(&asset).unwrap();
+        assert_eq!(json["symbol"], "XYZ");
+        assert_eq!(json["decimals"], 7);
+    }
     #[test]
     fn unsupported_decimal_scales_return_an_error() {
         assert_eq!(decimal_units("1", 38).unwrap(), 10u128.pow(38));
