@@ -24,6 +24,10 @@ pub trait ProfileBinding: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
     fn verify_import(&self, endpoint: &str) -> super::error::Result<()>;
     fn verify_server_role(&self, server: &str) -> super::error::Result<()>;
+    /// The wallet kind that this profile binds, when the vendor reports one.
+    fn wallet_kind(&self) -> Option<super::kinds::WalletKind> {
+        None
+    }
 }
 pub struct Profile {
     pub description: Description,
@@ -35,6 +39,10 @@ pub struct Profile {
 impl Profile {
     pub fn description(&self) -> &Description {
         &self.description
+    }
+    /// The wallet kind that this profile binds, when the vendor reports one.
+    pub fn wallet_kind(&self) -> Option<super::kinds::WalletKind> {
+        self.binding.wallet_kind()
     }
     pub fn server_origin(&self) -> &str {
         &self.backend

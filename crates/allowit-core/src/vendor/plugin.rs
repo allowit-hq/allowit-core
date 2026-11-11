@@ -2,13 +2,14 @@
 //! plugin with one line and dispatches by network. This module names no rail.
 use super::{
     KeyProvider, OwnerProvider, RuntimeProvider,
-    error::Result,
+    error::{Error, Result, quoted},
     execution::{Capabilities, Outcome, Recovery, Request},
     generation::{GenerateRequest, GeneratedDraft},
     input::{
         Formats,
-        asset::{Amount, Token},
+        asset::{Amount, AssetDisplay, Token},
     },
+    kinds::WalletKind,
     profiles::{Description, Profile, ProfileBinding},
     request_proof::Protocol,
     routing::RailInfo,
@@ -42,6 +43,43 @@ pub trait RailPlugin: Sync {
     fn formats(&self) -> &'static Formats;
     /// Asset metadata for a network.
     fn tokens(&self, network: &str) -> &'static [Token];
+    /// Display metadata of the network's native asset: its unit symbol, decimals and name.
+    fn native_asset(&self, network: &str) -> Result<AssetDisplay> {
+        self.tokens(network)
+            .iter()
+            .find(|token| token.native)
+            .map(AssetDisplay::from)
+            .ok_or_else(|| Error::unsupported("This network publishes no native asset"))
+    }
+    /// Display metadata of an asset reference: a code, or the issuer, mint or token address.
+    /// Hosts print amounts with [`AssetDisplay::format`]; they never invent a unit.
+    fn asset_display(&self, network: &str, asset: &str) -> Result<AssetDisplay> {
+        self.tokens(network)
+            .iter()
+            .find(|token| token.code == asset || token.issuer == Some(asset))
+            .map(AssetDisplay::from)
+            .ok_or_else(|| Error::usage(format!("unknown asset {}", quoted(asset))))
+    }
+    /// The wallet kinds this rail supports on a network, in selection order.
+    fn wallet_kinds(&self, network: &str) -> Vec<WalletKind> {
+        let _ = network;
+        let profiles = self.server().profiles();
+        WalletKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                profiles
+                    .iter()
+                    .any(|profile| profile.wallet_kind() == Some(*kind))
+            })
+            .collect()
+    }
+    /// The wallet kind that a public wallet profile document binds.
+    fn wallet_kind(&self, network: &str, document: &[u8]) -> Result<WalletKind> {
+        self.decode_profile(network, document)?
+            .1
+            .wallet_kind()
+            .ok_or_else(|| Error::unsupported("This rail does not report a wallet kind"))
+    }
     /// A block-explorer link, if the network has one.
     fn explorer(&self, network: &str, kind: LinkKind, id: &str) -> Option<String>;
     /// Validity windows and block time.
@@ -231,6 +269,12 @@ pub struct ProfileInfo {
     pub custody: Custody,
     pub tier: Option<Tier>,
     pub label: &'static str,
+}
+impl ProfileInfo {
+    /// The wallet kind that this profile installs.
+    pub fn wallet_kind(&self) -> Option<WalletKind> {
+        WalletKind::from_binding(self.custody, self.tier)
+    }
 }
 
 /// A feature that shared tests exercise on each registered rail.

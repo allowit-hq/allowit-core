@@ -426,6 +426,36 @@ fn http_response_bounds_and_expired_deadlines_fail_before_any_retry() {
         ErrorKind::Size
     );
     server.join().unwrap();
+    // A refusal keeps its status when its body is too large to read; a success body does not.
+    for (status, expected) in [(409, Ok(409)), (200, Err(ErrorKind::Size))] {
+        let (url, server) =
+            self::server(status, json!({"large":"x".repeat(32)}), Duration::ZERO, "");
+        let request = HttpRequest {
+            method: Method::Post,
+            url: &url,
+            headers: &[],
+            body: Some(b"{}"),
+        };
+        let reply = client.send_refusal_body(request, None);
+        assert_eq!(
+            reply.map(|r| (r.status, r.body)).map_err(|e| e.kind),
+            expected.map(|status| (status, Vec::new()))
+        );
+        server.join().unwrap();
+    }
+    let (url, server) = self::server(409, json!({"a":1}), Duration::ZERO, "");
+    let request = HttpRequest {
+        method: Method::Post,
+        url: &url,
+        headers: &[],
+        body: Some(b"{}"),
+    };
+    let reply = client.send_refusal_body(request, None).unwrap();
+    assert_eq!(
+        (reply.status, reply.body.as_slice()),
+        (409, &b"{\"a\":1}"[..])
+    );
+    server.join().unwrap();
     let target = TcpListener::bind("127.0.0.1:0").unwrap();
     target.set_nonblocking(true).unwrap();
     let url = format!("http://{}", target.local_addr().unwrap());

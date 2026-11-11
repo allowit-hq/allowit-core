@@ -148,15 +148,10 @@ impl Client {
         if bytes.is_some() {
             headers.push(("Content-Type".into(), "application/json".into()));
         }
-        let response=self.http.send_success_body(Request{method,url:&format!("{}{path}",self.backend),headers:&headers,body:bytes.as_deref()},if uncertain {None} else {Some(Instant::now()+Duration::from_secs(30))})
+        let response=self.http.send_refusal_body(Request{method,url:&format!("{}{path}",self.backend),headers:&headers,body:bytes.as_deref()},if uncertain {None} else {Some(Instant::now()+Duration::from_secs(30))})
             .map_err(|_|if uncertain {Error::uncertain("Policy creation is uncertain; inspect the owner workspace before any new generation")} else {Error::config("Owner server request is unavailable")})?;
         if !(200..300).contains(&response.status) {
-            if uncertain && response.status >= 500 {
-                return Err(Error::uncertain(
-                    "Policy creation returned a server error; inspect the owner workspace before any new generation",
-                ));
-            }
-            return Err(Error::api(response.status, "Owner request was refused"));
+            return Err(refusal(response.status, &response.body, uncertain));
         }
         Ok(response)
     }
@@ -231,5 +226,98 @@ impl Client {
             &self.send(method, path, body, Some(&session.cookie), uncertain)?,
             uncertain,
         )
+    }
+}
+
+/// The server code of a request that the server did not send to the network.
+pub const NETWORK_UNAVAILABLE: &str = "network_unavailable";
+
+/// The error for a non-2xx owner reply. A typed body `{error, code, details}` keeps its `code` in
+/// [`Error::api_code`] and its `error` text in the message. An untyped server error of a
+/// state-changing request leaves the outcome unknown. A typed `network_unavailable` with
+/// `details.retry = "same_request_id"` states that nothing was sent, so it is not uncertain.
+fn refusal(status: u16, body: &[u8], uncertain: bool) -> Error {
+    let reply: Option<Value> = serde_json::from_slice(body).ok();
+    let text = |value: &Value, limit: usize| {
+        value
+            .as_str()
+            .filter(|v| !v.is_empty() && v.len() <= limit && !v.chars().any(char::is_control))
+            .map(String::from)
+    };
+    let code = reply
+        .as_ref()
+        .and_then(|r| text(&r["code"], 64))
+        .filter(|c| {
+            c.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        });
+    let message = reply
+        .as_ref()
+        .and_then(|r| text(&r["error"], 300))
+        .unwrap_or_else(|| "Owner request was refused".into());
+    if uncertain && status >= 500 {
+        let unsent = code.as_deref() == Some(NETWORK_UNAVAILABLE)
+            && reply
+                .as_ref()
+                .is_some_and(|r| r["details"]["retry"] == "same_request_id");
+        if !unsent {
+            return Error::uncertain(
+                "Policy creation returned a server error; inspect the owner workspace before any new generation",
+            );
+        }
+    }
+    match code {
+        Some(code) => Error::refused(status, code, message),
+        None => Error::api(status, "Owner request was refused"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn typed_refusals_keep_the_server_code_and_only_unknown_outcomes_are_uncertain() {
+        let body = |code: &str| {
+            serde_json::to_vec(
+                &json!({"error":"The owner transaction expired","code":code,"details":{}}),
+            )
+            .unwrap()
+        };
+        for code in [
+            "owner_transaction_expired",
+            "owner_transaction_pending",
+            "owner_transaction_settled",
+        ] {
+            let error = refusal(409, &body(code), true);
+            assert_eq!(error.api_code.as_deref(), Some(code));
+            assert_eq!((error.code, error.status), (4, Some(409)));
+            assert!(
+                error.message.ends_with("The owner transaction expired"),
+                "{error}"
+            );
+        }
+        // An untyped server error of a state-changing request is uncertain; a read is not.
+        assert_eq!(refusal(502, b"bad gateway", true).code, 5);
+        assert_eq!(refusal(503, &body("other"), true).code, 5);
+        assert_eq!(refusal(502, b"bad gateway", false).status, Some(502));
+        // The server states that nothing was sent.
+        let unsent = json!({"error":"Network unavailable","code":NETWORK_UNAVAILABLE,"details":{"retry":"same_request_id"}});
+        let error = refusal(503, &serde_json::to_vec(&unsent).unwrap(), true);
+        assert_eq!(error.api_code.as_deref(), Some(NETWORK_UNAVAILABLE));
+        assert_eq!(refusal(503, &body(NETWORK_UNAVAILABLE), true).code, 5);
+        // Server text reaches the caller only as a bounded code and message.
+        for hostile in [
+            json!({"code":"Bad Code","error":"x"}),
+            json!({"code":7}),
+            json!({"code":"a".repeat(65)}),
+        ] {
+            let error = refusal(409, &serde_json::to_vec(&hostile).unwrap(), true);
+            assert_eq!(error.api_code, None);
+            assert!(error.message.ends_with("Owner request was refused"));
+        }
+        let control = json!({"code":"denied","error":"line\u{1b}[31m"});
+        let error = refusal(409, &serde_json::to_vec(&control).unwrap(), true);
+        assert!(error.message.ends_with("Owner request was refused"));
+        assert_eq!(error.api_code.as_deref(), Some("denied"));
     }
 }
