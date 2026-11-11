@@ -102,28 +102,37 @@ impl HttpClient {
         })
     }
     pub fn send(&self, request: Request<'_>, deadline: Option<Instant>) -> Result<Response> {
-        self.send_inner(request, deadline, true, false)
+        self.send_inner(request, deadline, Body::Always)
+    }
+    /// Read a success body in full and a refusal body when it arrives whole and within the
+    /// bound. A refusal whose body is cut short, stalls or is too large keeps its status with an
+    /// empty body, so the refusal itself is never lost.
+    pub fn send_refusal_body(
+        &self,
+        request: Request<'_>,
+        deadline: Option<Instant>,
+    ) -> Result<Response> {
+        self.send_inner(request, deadline, Body::RefusalOptional)
     }
     pub fn send_headers(
         &self,
         request: Request<'_>,
         deadline: Option<Instant>,
     ) -> Result<Response> {
-        self.send_inner(request, deadline, false, false)
+        self.send_inner(request, deadline, Body::Never)
     }
     pub fn send_success_body(
         &self,
         request: Request<'_>,
         deadline: Option<Instant>,
     ) -> Result<Response> {
-        self.send_inner(request, deadline, true, true)
+        self.send_inner(request, deadline, Body::Success)
     }
     fn send_inner(
         &self,
         request: Request<'_>,
         deadline: Option<Instant>,
-        read_body: bool,
-        success_only: bool,
+        read: Body,
     ) -> Result<Response> {
         let timeout = match deadline {
             Some(deadline) => self.options.timeout.min(
@@ -169,13 +178,24 @@ impl HttpClient {
             .map(|(name, value)| (name.as_str().into(), value.as_bytes().to_vec()))
             .collect();
         let mut body = Vec::new();
-        if read_body && (!success_only || (200..300).contains(&status)) {
-            response
+        let success = (200..300).contains(&status);
+        if read == Body::Always || (success && read != Body::Never) || read == Body::RefusalOptional
+        {
+            let complete = response
                 .take((self.options.max_response_bytes + 1) as u64)
                 .read_to_end(&mut body)
-                .map_err(|_| Error::new(ErrorKind::Read))?;
-            if body.len() > self.options.max_response_bytes {
-                return Err(Error::new(ErrorKind::Size));
+                .map_err(|_| Error::new(ErrorKind::Read))
+                .and_then(|_| {
+                    if body.len() > self.options.max_response_bytes {
+                        Err(Error::new(ErrorKind::Size))
+                    } else {
+                        Ok(())
+                    }
+                });
+            match complete {
+                Ok(()) => {}
+                Err(_) if !success && read == Body::RefusalOptional => body.clear(),
+                Err(error) => return Err(error),
             }
         }
         Ok(Response {
@@ -184,4 +204,15 @@ impl HttpClient {
             body,
         })
     }
+}
+
+/// Which response bodies a send reads.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Body {
+    Always,
+    Never,
+    /// Only a success body.
+    Success,
+    /// A success body, and a refusal body when it is whole and within the bound.
+    RefusalOptional,
 }

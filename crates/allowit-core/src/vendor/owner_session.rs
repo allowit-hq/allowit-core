@@ -148,7 +148,7 @@ impl Client {
         if bytes.is_some() {
             headers.push(("Content-Type".into(), "application/json".into()));
         }
-        let response=self.http.send(Request{method,url:&format!("{}{path}",self.backend),headers:&headers,body:bytes.as_deref()},if uncertain {None} else {Some(Instant::now()+Duration::from_secs(30))})
+        let response=self.http.send_refusal_body(Request{method,url:&format!("{}{path}",self.backend),headers:&headers,body:bytes.as_deref()},if uncertain {None} else {Some(Instant::now()+Duration::from_secs(30))})
             .map_err(|_|if uncertain {Error::uncertain("Policy creation is uncertain; inspect the owner workspace before any new generation")} else {Error::config("Owner server request is unavailable")})?;
         if !(200..300).contains(&response.status) {
             return Err(refusal(response.status, &response.body, uncertain));
