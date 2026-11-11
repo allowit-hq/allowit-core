@@ -5,6 +5,8 @@ pub struct Error {
     pub message: String,
     pub status: Option<u16>,
     pub config: bool,
+    /// The stable `code` of a typed server refusal `{error, code, details}`, when the server sent one.
+    pub api_code: Option<String>,
 }
 impl Error {
     pub fn usage(message: impl Into<String>) -> Self {
@@ -29,12 +31,19 @@ impl Error {
         e.status = Some(status);
         e
     }
+    /// A typed server refusal. `code` is the server's stable code and `message` its text.
+    pub fn refused(status: u16, code: impl Into<String>, message: impl Into<String>) -> Self {
+        let mut e = Self::api(status, message);
+        e.api_code = Some(code.into());
+        e
+    }
     fn new(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
             status: None,
             config: false,
+            api_code: None,
         }
     }
 }
