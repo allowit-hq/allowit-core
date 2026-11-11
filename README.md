@@ -83,6 +83,12 @@ A rail supplies the unit of every amount. `RailPlugin::native_asset(network)` an
 `AssetDisplay::format(units)` prints base units with the unit, and `units_decimal` prints the number alone.
 Shared code holds no unit name.
 
+A provider reports a settled operation as `vendor::execution::Settlement` under the `settlement` key of
+`Outcome.document`: `height`, `fee` and `amount`, each amount as a `Quantity` with `units`, `asset` and `text`.
+`Settlement::of(&document)` reads it. A provider reports long steps through `client::progress::report`;
+a terminal host installs a sink with `client::progress::set_sink`, and a server installs none.
+An owner request that the server refuses with `{error, code, details}` keeps the code in `Error::api_code`.
+
 ## Packages
 
 | Package | Library | Responsibility | License |

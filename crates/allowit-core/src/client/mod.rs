@@ -3,4 +3,5 @@ pub mod config;
 pub mod error;
 pub mod journal;
 pub mod output;
+pub mod progress;
 pub mod store;
