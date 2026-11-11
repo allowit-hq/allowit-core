@@ -95,9 +95,13 @@ fn identifier(value: &str) -> bool {
 /// registration order. `rails` are the registered rail ids. A namespace must be a lowercase
 /// identifier that is unique, not reserved and not a rail id. A package must name its release
 /// and declare at least one function, each a unique lowercase identifier other than `allowit`.
-/// No name is a Rust keyword or a primitive type, and one registry admits at most
-/// [`MAX_HOST_CALLS`] calls. The policy-source gate accepts every list that this function
-/// returns, alone or after the gate's own `allowit` server functions.
+/// No name is a Rust keyword or a primitive type, and the packages declare at most
+/// [`MAX_HOST_CALLS`] calls.
+///
+/// This is the structural admission of the packages alone. The registry then checks the
+/// complete list, with the built-in server calls and the rail evidence functions, with
+/// `policy_source::check_host_call_registry`, which also refuses a name that policy source
+/// cannot call, such as `ctx` or `execute`.
 pub fn host_calls(
     packages: &[&'static PolicyPackage],
     rails: &[&str],
@@ -253,12 +257,34 @@ mod tests {
         assert!(host_calls(&[many(MAX_HOST_CALLS + 1)], &[]).is_err());
     }
 
-    /// Every admitted list passes the policy-source gate, and the gate refuses each name that
-    /// this module reserves, so an admitted package never fails later source checks.
+    /// The complete registry check accepts admitted packages with the built-in calls, calls
+    /// each function, and refuses names that policy source cannot use and a registry over
+    /// the limit. The gate refuses each name that this module reserves.
     #[cfg(feature = "policy-source")]
     #[test]
     fn admitted_host_calls_pass_the_policy_source_gate() {
-        use crate::policy_source::source_shape_with_host_calls;
+        use crate::policy_source::{check_host_call_registry, source_shape_with_host_calls};
+        let mut registry = host_calls(&[&QUOTES, &OTHER], &["rail"]).unwrap();
+        registry.push(("allowit", "price"));
+        check_host_call_registry(&registry).unwrap();
+        static CONTEXT: PolicyPackage = package("ctx", &[("check", echo)]);
+        static ENTRY: PolicyPackage = package("execute", &[("check", echo)]);
+        static FIELD: PolicyPackage = package("fields", &[("env", echo)]);
+        for unusable in [&CONTEXT, &ENTRY, &FIELD] {
+            let admitted = host_calls(&[unusable], &[]).unwrap();
+            assert!(
+                check_host_call_registry(&admitted).is_err(),
+                "{}",
+                unusable.namespace
+            );
+        }
+        // The limit covers the whole registry: full packages leave no room for a built-in.
+        let mut full: Vec<(&str, &str)> = (0..MAX_HOST_CALLS)
+            .map(|n| ("many", &*format!("op{n}").leak()))
+            .collect();
+        check_host_call_registry(&full).unwrap();
+        full.push(("allowit", "price"));
+        assert!(check_host_call_registry(&full).is_err());
         const SOURCE: &str = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\n";
         let mut calls = host_calls(&[&QUOTES, &OTHER], &["rail"]).unwrap();
         calls.push(("allowit", "price"));

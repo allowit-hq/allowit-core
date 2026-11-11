@@ -50,8 +50,10 @@ and the samples for shared looped tests.
 `policy_package::host_calls` admits the registered packages and returns their exact
 `(namespace, function)` pairs for `policy_source::source_shape_with_host_calls`. It refuses the
 namespaces `allowit`, `core`, `std` and `alloc`, every registered rail id, duplicates, Rust keywords,
-primitive type names and names that are not lowercase identifiers. The policy-source gate accepts every
-admitted list and rejects every path that is not registered.
+primitive type names and names that are not lowercase identifiers.
+`policy_source::check_host_call_registry` then checks the complete registry once, with the built-in
+server calls and the rail evidence functions: at most 128 calls, and policy source can call each one.
+The policy-source gate rejects every path that is not registered.
 
 ## Wallet kinds
 
