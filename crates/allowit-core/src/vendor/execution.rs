@@ -57,6 +57,40 @@ impl Settlement {
         serde_json::from_value(document.get(Self::KEY)?.clone()).ok()
     }
 }
+/// One spending limit of a policy: what it allows, what the policy has spent against it and
+/// what remains, each in the asset that the limit counts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitReport {
+    /// The policy param that holds the limit, such as `daily_spending_limit`.
+    pub param: String,
+    pub limit: Quantity,
+    pub spent: Quantity,
+    pub remaining: Quantity,
+}
+/// The spending limits that an outcome or wallet document reports under [`Limits::KEY`].
+pub struct Limits;
+impl Limits {
+    /// The key of the limit reports in a document.
+    pub const KEY: &'static str = "limits";
+    /// The limit reports that a document carries, if it has them.
+    pub fn of(document: &serde_json::Value) -> Option<Vec<LimitReport>> {
+        serde_json::from_value(document.get(Self::KEY)?.clone()).ok()
+    }
+}
+/// The key of the fee that the limits count for an operation, in the installed asset.
+pub const FEE_CHARGED_KEY: &str = "feeCharged";
+/// The fee that the spending limits count for the operation of an outcome document, if it
+/// reports one. It differs from [`Settlement::fee`], which is the network fee in the fee asset.
+pub fn fee_charged(document: &serde_json::Value) -> Option<Quantity> {
+    serde_json::from_value(document.get(FEE_CHARGED_KEY)?.clone()).ok()
+}
+/// The key of the block-explorer link of an operation's transaction.
+pub const EXPLORER_KEY: &str = "explorer";
+/// The block-explorer link of the transaction of an outcome document, if it has one.
+pub fn explorer(document: &serde_json::Value) -> Option<String> {
+    document.get(EXPLORER_KEY)?.as_str().map(String::from)
+}
 pub struct Capabilities {
     pub curve: &'static str,
     pub address_is_key: bool,
@@ -110,5 +144,41 @@ mod tests {
         assert_eq!(document["settlement"]["amount"]["text"], "5 XYZ");
         assert_eq!(Settlement::of(&document), Some(settlement));
         assert_eq!(Settlement::of(&serde_json::json!({"requestId": "r"})), None);
+    }
+    #[test]
+    fn limits_the_charged_fee_and_the_explorer_link_read_from_an_outcome_document() {
+        let asset = AssetDisplay {
+            symbol: "XYZ".into(),
+            decimals: 2,
+            name: "Example".into(),
+            native: false,
+        };
+        let quantity = |units| Quantity::new(units, asset.clone());
+        let limits = vec![LimitReport {
+            param: "daily_spending_limit".into(),
+            limit: quantity(5_000),
+            spent: quantity(1_200),
+            remaining: quantity(3_800),
+        }];
+        let document = serde_json::json!({"requestId": "r", Limits::KEY: limits,
+            FEE_CHARGED_KEY: quantity(7), EXPLORER_KEY: "https://explorer.example/tx/ab"});
+        assert_eq!(document["limits"][0]["param"], "daily_spending_limit");
+        assert_eq!(document["limits"][0]["remaining"]["text"], "38 XYZ");
+        assert_eq!(document["feeCharged"]["units"], "7");
+        assert_eq!(Limits::of(&document), Some(limits));
+        assert_eq!(fee_charged(&document), Some(quantity(7)));
+        assert_eq!(
+            explorer(&document).as_deref(),
+            Some("https://explorer.example/tx/ab")
+        );
+        // An absent or malformed value reads as none; it never becomes a zero or an empty list.
+        for document in [
+            serde_json::json!({"requestId": "r"}),
+            serde_json::json!({"limits": [{"param": "p"}], "feeCharged": "7", "explorer": 1}),
+        ] {
+            assert_eq!(Limits::of(&document), None);
+            assert_eq!(fee_charged(&document), None);
+            assert_eq!(explorer(&document), None);
+        }
     }
 }

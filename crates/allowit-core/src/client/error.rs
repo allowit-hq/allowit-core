@@ -7,6 +7,9 @@ pub struct Error {
     pub config: bool,
     /// The stable `code` of a typed server refusal `{error, code, details}`, when the server sent one.
     pub api_code: Option<String>,
+    /// The `details` object of a typed server refusal, when the server sent one. It is server
+    /// data: read a text field through [`Error::detail`] before printing it.
+    pub details: Option<serde_json::Value>,
 }
 impl Error {
     pub fn usage(message: impl Into<String>) -> Self {
@@ -37,6 +40,20 @@ impl Error {
         e.api_code = Some(code.into());
         e
     }
+    /// Attach the `details` object of a typed server refusal.
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+    /// A text field of the refusal `details`, such as `reason`: at most 300 bytes and no control
+    /// character, so a host can print it.
+    pub fn detail(&self, key: &str) -> Option<&str> {
+        self.details
+            .as_ref()?
+            .get(key)?
+            .as_str()
+            .filter(|v| !v.is_empty() && v.len() <= 300 && !v.chars().any(char::is_control))
+    }
     fn new(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -44,6 +61,7 @@ impl Error {
             status: None,
             config: false,
             api_code: None,
+            details: None,
         }
     }
 }
