@@ -17,6 +17,8 @@ pub mod admin;
 pub mod client;
 #[cfg(feature = "policy-source")]
 pub mod policy;
+#[cfg(feature = "std")]
+pub mod policy_package;
 #[cfg(feature = "policy-source")]
 pub mod policy_source;
 #[cfg(feature = "service")]

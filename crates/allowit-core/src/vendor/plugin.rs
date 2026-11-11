@@ -25,8 +25,7 @@ use std::{sync::Arc, time::Duration};
 
 /// Opens the caller-owned store namespace that the SDK assigned to this plugin.
 pub type StoreOpener<'a> = &'a dyn Fn() -> Result<Store>;
-/// A vendor policy function: typed arguments and observed facts in, a value or a reason out.
-pub type PolicyFunction = fn(args: &Value, facts: &Value) -> core::result::Result<Value, String>;
+pub use crate::policy_package::PolicyFunction;
 
 /// One rail family. Every method takes a canonical network id from [`RailPlugin::networks`].
 pub trait RailPlugin: Sync {

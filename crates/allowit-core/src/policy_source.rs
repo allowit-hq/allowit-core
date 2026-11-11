@@ -65,6 +65,33 @@ pub fn source_shape_with_host_calls(
     source_shape_for(source, Some(host_calls))
 }
 
+/// Check a complete host call registry before any policy uses it: the built-in server calls,
+/// the rail evidence functions and the package functions together. The gate must accept the
+/// registry for a canonical source, and a source must be able to call each registered function
+/// outside the `allowit` namespace as `<namespace>::<function>(ctx, &value)`. A registry that
+/// passes never makes a later source check fail by itself. Run this once when the registry is
+/// composed.
+pub fn check_host_call_registry(host_calls: &[(&str, &str)]) -> Result<()> {
+    const HEAD: &str =
+        "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n";
+    const TAIL: &str = "    Ok(())\n}\n";
+    gate::check_host_calls(host_calls)?;
+    source_shape_for(&format!("{HEAD}{TAIL}"), Some(host_calls))
+        .map_err(|error| format!("The policy host call registry is unusable: {error}"))?;
+    for (namespace, operation) in host_calls {
+        if *namespace == "allowit" {
+            continue;
+        }
+        let call = format!(
+            "{HEAD}    {namespace}::{operation}(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n{TAIL}"
+        );
+        source_shape_for(&call, Some(host_calls)).map_err(|error| {
+            format!("The policy host call `{namespace}::{operation}` is unusable: {error}")
+        })?;
+    }
+    Ok(())
+}
+
 fn source_shape_for(source: &str, host_calls: Option<&[(&str, &str)]>) -> Result<SourceShape> {
     let code = gate::checked_code(source, host_calls)?;
     let (prefix, canonical_only) = gate::standard_prefix(&code)?;
