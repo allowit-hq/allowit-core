@@ -40,6 +40,18 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 
+## Policy package contract
+
+`allowit_core::policy_package` (feature `std`) defines `PolicyPackage`: evidence functions that server
+policies call under one namespace. The namespace is the package's crate name, so policy source calls
+`<crate>::<function>(ctx, &value)`. A package states its crate release, the features that it skips
+and the samples for shared looped tests.
+
+`policy_package::host_calls` admits the registered packages and returns their exact
+`(namespace, function)` pairs for `policy_source::source_shape_with_host_calls`. It refuses the
+namespaces `allowit`, `core`, `std` and `alloc`, every registered rail id, duplicates and names that
+are not lowercase identifiers. The policy-source gate rejects every path that is not registered.
+
 ## Wallet kinds
 
 [`vendor::kinds`](crates/allowit-core/src/vendor/kinds.rs) describes the four wallet kinds that every host offers.
