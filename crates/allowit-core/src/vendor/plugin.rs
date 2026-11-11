@@ -3,7 +3,7 @@
 use super::{
     KeyProvider, OwnerProvider, RuntimeProvider,
     error::{Error, Result, quoted},
-    execution::{Capabilities, Outcome, Recovery, Request},
+    execution::{Capabilities, LimitReport, Outcome, Recovery, Request},
     generation::{GenerateRequest, GeneratedDraft},
     input::{
         Formats,
@@ -101,6 +101,16 @@ pub trait RailPlugin: Sync {
         request: &GenerateRequest,
     ) -> Result<GeneratedDraft>;
 
+    /// The policy params of a draft, policy or installation document of this rail, with the
+    /// asset that their amounts count. The SDK prints them; the document shape stays with the
+    /// rail. A rail without a readable document declares [`Feature::DraftDisplay`] skipped.
+    fn draft_params(&self, network: &str, document: &Value) -> Result<DraftParams> {
+        let _ = (network, document);
+        Err(Error::unsupported(
+            "This rail does not describe the params of a draft",
+        ))
+    }
+
     /// Agent execution and receipts.
     fn execution(&self) -> &'static dyn ExecutionProvider;
     /// Client owner workflow: deploy, fund, activate, export, setup and status.
@@ -133,6 +143,15 @@ pub trait RailPlugin: Sync {
     fn policy_functions(&self) -> &'static [(&'static str, PolicyFunction)] {
         &[]
     }
+}
+
+/// The params of a rail document and the asset that their amounts count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DraftParams {
+    /// Param key to its `PolicyValue` JSON, in the order of the document.
+    pub params: Vec<(String, Value)>,
+    /// The installed asset: the unit of every amount param.
+    pub asset: AssetDisplay,
 }
 
 /// Inputs for backend policy generation. Keys stay with the caller.
@@ -198,6 +217,21 @@ pub trait ExecutionProvider: Sync {
         wallet: Option<&str>,
         id: &str,
     ) -> Result<Option<Recovery>>;
+    /// The spending limits of the profile's wallet as the backend reports them: what each limit
+    /// allows, what is spent and what remains. `None` means that the rail holds no report for
+    /// this wallet yet. A rail without the read declares [`Feature::Limits`] skipped.
+    fn limits(
+        &self,
+        profile: Profile,
+        signer: Arc<dyn Signer>,
+        store: StoreOpener<'_>,
+        rpc: Option<String>,
+    ) -> Result<Option<Vec<LimitReport>>> {
+        let _ = (profile, signer, store, rpc);
+        Err(Error::unsupported(
+            "This rail does not report spending limits",
+        ))
+    }
     #[allow(clippy::too_many_arguments)]
     fn recover(
         &self,
@@ -292,6 +326,10 @@ pub enum Feature {
     Recover,
     ExplorerLinks,
     Live,
+    /// The read of spent and remaining spending limits.
+    Limits,
+    /// The params of a generated draft for display.
+    DraftDisplay,
 }
 
 /// Test capability declaration of one rail.

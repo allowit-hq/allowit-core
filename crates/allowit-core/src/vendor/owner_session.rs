@@ -232,8 +232,12 @@ impl Client {
 /// The server code of a request that the server did not send to the network.
 pub const NETWORK_UNAVAILABLE: &str = "network_unavailable";
 
+/// The largest refusal `details` object, in encoded bytes, that an error keeps.
+pub const MAX_REFUSAL_DETAILS: usize = 4096;
+
 /// The error for a non-2xx owner reply. A typed body `{error, code, details}` keeps its `code` in
-/// [`Error::api_code`] and its `error` text in the message. An untyped server error of a
+/// [`Error::api_code`], its `error` text in the message and its `details` object in
+/// [`Error::details`]. An untyped server error of a
 /// state-changing request leaves the outcome unknown. A typed `network_unavailable` with
 /// `details.retry = "same_request_id"` states that nothing was sent, so it is not uncertain.
 fn refusal(status: u16, body: &[u8], uncertain: bool) -> Error {
@@ -267,7 +271,20 @@ fn refusal(status: u16, body: &[u8], uncertain: bool) -> Error {
         }
     }
     match code {
-        Some(code) => Error::refused(status, code, message),
+        Some(code) => {
+            let error = Error::refused(status, code, message);
+            // Only an object of a bounded size is kept, so a caller reads named fields.
+            match reply.and_then(|mut r| r.get_mut("details").map(Value::take)) {
+                Some(details)
+                    if details.is_object()
+                        && serde_json::to_vec(&details)
+                            .is_ok_and(|bytes| bytes.len() <= MAX_REFUSAL_DETAILS) =>
+                {
+                    error.with_details(details)
+                }
+                _ => error,
+            }
+        }
         None => Error::api(status, "Owner request was refused"),
     }
 }
@@ -314,6 +331,27 @@ mod tests {
             let error = refusal(409, &serde_json::to_vec(&hostile).unwrap(), true);
             assert_eq!(error.api_code, None);
             assert!(error.message.ends_with("Owner request was refused"));
+        }
+        // A typed refusal keeps its details object; a host prints only a plain text field.
+        let unsupported = json!({"error":"This network has no such wallet","code":"wallet_kind_unsupported",
+            "details":{"walletKind":"custom","network":"example:testnet","reason":"No template is configured","note":"a\u{1b}[31m"}});
+        let error = refusal(400, &serde_json::to_vec(&unsupported).unwrap(), true);
+        assert_eq!(error.api_code.as_deref(), Some("wallet_kind_unsupported"));
+        assert_eq!((error.code, error.status), (4, Some(400)));
+        assert_eq!(error.details.as_ref().unwrap()["walletKind"], "custom");
+        assert_eq!(error.detail("reason"), Some("No template is configured"));
+        assert_eq!(error.detail("note"), None);
+        assert_eq!(error.detail("absent"), None);
+        for dropped in [
+            json!("text"),
+            json!(["a"]),
+            json!({"reason":"x".repeat(MAX_REFUSAL_DETAILS)}),
+        ] {
+            let body =
+                json!({"error":"Refused","code":"wallet_kind_unsupported","details":dropped});
+            let error = refusal(400, &serde_json::to_vec(&body).unwrap(), true);
+            assert_eq!(error.api_code.as_deref(), Some("wallet_kind_unsupported"));
+            assert_eq!(error.details, None);
         }
         let control = json!({"code":"denied","error":"line\u{1b}[31m"});
         let error = refusal(409, &serde_json::to_vec(&control).unwrap(), true);
