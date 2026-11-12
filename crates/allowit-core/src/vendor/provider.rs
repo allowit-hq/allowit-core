@@ -134,6 +134,21 @@ pub trait RuntimeProvider {
         fee: u64,
         now: u64,
     ) -> Result<crate::vendor::runtime::OwnerPacket>;
+    /// Prepare the owner step of a params update on an active wallet. The packet takes the
+    /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
+    /// A rail refuses an update whose expected revision is not the installed one.
+    fn prepare_params_update(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        update: &crate::vendor::runtime::ParamsUpdate,
+        fee: u64,
+        now: u64,
+    ) -> Result<crate::vendor::runtime::OwnerPacket> {
+        let _ = (i, update, fee, now);
+        Err(Error::unsupported(
+            "This rail does not update the params of an installed wallet",
+        ))
+    }
     fn read_owner_signed(
         &self,
         p: &crate::vendor::runtime::OwnerPacket,
@@ -189,4 +204,62 @@ pub trait OwnerProvider {
         rpc: &str,
         id: &str,
     ) -> super::error::Result<serde_json::Value>;
+    /// Change typed params of an unsigned draft through the backend's owner route. The reply
+    /// is the next revision of the draft. A rail without the call declares
+    /// `Feature::EditParams` skipped.
+    fn edit_params(
+        &self,
+        cx: &super::owner::Context<'_>,
+        r: super::owner::EditParams<'_>,
+    ) -> super::error::Result<serde_json::Value> {
+        let _ = (cx, r);
+        Err(Error::unsupported(
+            "This rail does not edit the params of a draft",
+        ))
+    }
+    /// Revise an unsigned draft in the owner's words. The reply is the next revision.
+    fn revise(
+        &self,
+        cx: &super::owner::Context<'_>,
+        r: super::owner::Revise<'_>,
+    ) -> super::error::Result<serde_json::Value> {
+        let _ = (cx, r);
+        Err(Error::unsupported("This rail does not revise a draft"))
+    }
+    /// Change installed params on an active wallet with one owner signature. The workflow is
+    /// resume-safe under its request id. A rail without it declares `Feature::UpdateParams`
+    /// skipped.
+    fn update_params(
+        &self,
+        cx: &super::owner::Context<'_>,
+        r: super::owner::UpdateParams<'_>,
+    ) -> super::error::Result<serde_json::Value> {
+        let _ = (cx, r);
+        Err(Error::unsupported(
+            "This rail does not update the params of an installed wallet",
+        ))
+    }
+    /// Compare the owner's document with the ledger and read the wallet state back. A rail
+    /// without the read declares `Feature::Verify` skipped.
+    fn verify(
+        &self,
+        cx: &super::owner::Context<'_>,
+        document: &[u8],
+    ) -> super::error::Result<super::owner::Verification> {
+        let _ = (cx, document);
+        Err(Error::unsupported(
+            "This rail does not verify an installation on the ledger",
+        ))
+    }
+    /// The host and native placements of a draft or installed policy document.
+    fn paired_export(
+        &self,
+        network: &str,
+        document: &[u8],
+    ) -> super::error::Result<super::owner::PairedExport> {
+        let _ = (network, document);
+        Err(Error::unsupported(
+            "This rail does not export the placements of a policy",
+        ))
+    }
 }
