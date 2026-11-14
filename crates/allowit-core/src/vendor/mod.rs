@@ -2,6 +2,7 @@
 pub use crate::client::error;
 pub mod authoring;
 pub mod config;
+pub mod custom_build;
 pub mod execution;
 pub mod generation;
 pub mod input;

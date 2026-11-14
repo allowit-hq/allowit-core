@@ -2,6 +2,7 @@
 //! plugin with one line and dispatches by network. This module names no rail.
 use super::{
     KeyProvider, OwnerProvider, RuntimeProvider,
+    custom_build::CustomWalletBuild,
     error::{Error, Result, quoted},
     execution::{Capabilities, LimitReport, Outcome, Recovery, Request},
     generation::{GenerateRequest, GeneratedDraft},
@@ -144,6 +145,13 @@ pub trait RailPlugin: Sync {
     /// it builds from settled operations. A rail without it declares
     /// [`Feature::PaidService`] skipped.
     fn paid_service(&self) -> Option<&'static dyn PaidServiceProvider> {
+        None
+    }
+
+    /// The "build custom wallet" hook: the build of a Custom wallet's code from the exact policy
+    /// source, the hash of that code and the signature scheme of the build statements. A rail
+    /// without it declares [`Feature::CustomBuild`] skipped.
+    fn custom_wallet_build(&self) -> Option<&'static dyn CustomWalletBuild> {
         None
     }
 
@@ -360,6 +368,8 @@ pub enum Feature {
     Verify,
     /// The paired host and native placements of a policy.
     PairedExport,
+    /// The build of a Custom wallet's code from the policy source, with its signed statements.
+    CustomBuild,
 }
 
 /// Test capability declaration of one rail.
@@ -396,6 +406,9 @@ pub struct Fixtures {
     pub chain: Option<Arc<dyn Transport>>,
     /// Live testnet settings for ignored tests.
     pub live: Option<LiveConfig>,
+    /// Wallet code that the rail's build hook hashes, for tests that run no compiler. Empty when
+    /// the rail skips [`Feature::CustomBuild`].
+    pub wallet_code: Vec<u8>,
 }
 
 /// Environment variables that enable ignored live tests.
