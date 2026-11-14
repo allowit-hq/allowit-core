@@ -91,7 +91,7 @@
   },
   {
     "calls": [["allowit", "decision"], ["allowit", "new_decision_context"]],
-    "body": "allowit::new_decision_context(ctx, Some(\"purchase\"))?; allowit::decision(ctx, &allowit::AllowitDecision { id: \"purchase\", query: \"Is this a research purchase?\", deny_below: 3000, allow_above: 8000 })?;",
+    "body": "allowit::new_decision_context(ctx, Some(\"The owner buys research data only.\"))?; allowit::decision(ctx, &allowit::AllowitDecision { id: \"report_purchase\", query: \"Is this a research purchase?\", deny_below: 3000, allow_above: 8000 })?;",
     "accepted": true
   },
   {
@@ -101,12 +101,12 @@
   },
   {
     "calls": [["allowit", "price"]],
-    "body": "allowit::decision(ctx, &allowit::AllowitDecision { id: \"purchase\", query: \"Is this a research purchase?\", deny_below: 3000, allow_above: 8000 })?;",
+    "body": "allowit::decision(ctx, &allowit::AllowitDecision { id: \"report_purchase\", query: \"Is this a research purchase?\", deny_below: 3000, allow_above: 8000 })?;",
     "accepted": false
   },
   {
     "calls": [["allowit", "systemone"]],
-    "body": "allowit::systemone(ctx, &allowit::AllowitSystemOne { id: \"purchase\", query: \"Is this a research purchase?\", deny_below: 3000, allow_above: 8000 })?;",
+    "body": "allowit::systemone(ctx, &allowit::AllowitSystemOne { id: \"report_purchase\", query: \"Is this a research purchase?\", deny_below: 3000, allow_above: 8000 })?;",
     "accepted": false
   },
   {

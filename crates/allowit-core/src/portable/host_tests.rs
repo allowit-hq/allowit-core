@@ -71,15 +71,15 @@ fn denied_and_panicked_host_runs_cannot_leak_writes_into_a_later_approval() {
 fn the_decision_functions_are_stubs_that_only_a_server_fills() {
     let ctx = context();
     let question = AllowitDecision {
-        id: "purchase",
+        id: "report_purchase",
         query: "Is this a research purchase?",
         deny_below: 3_000,
         allow_above: 8_000,
     };
     assert_eq!(decision(&ctx, &question), Err(AllowitError::Unsupported));
-    for name in [None, Some("purchase")] {
+    for contents in [None, Some("The owner buys research data only.")] {
         assert_eq!(
-            new_decision_context(&ctx, name),
+            new_decision_context(&ctx, contents),
             Err(AllowitError::Unsupported)
         );
     }
