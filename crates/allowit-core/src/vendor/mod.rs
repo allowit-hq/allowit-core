@@ -9,6 +9,7 @@ mod input_asset;
 pub mod kinds;
 pub mod owner;
 pub mod owner_session;
+pub mod paid_service;
 pub mod plugin;
 pub mod profiles;
 mod provider;

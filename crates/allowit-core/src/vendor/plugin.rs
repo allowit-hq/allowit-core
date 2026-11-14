@@ -10,6 +10,7 @@ use super::{
         asset::{Amount, AssetDisplay, Token},
     },
     kinds::WalletKind,
+    paid_service::PaidServiceProvider,
     profiles::{Description, Profile, ProfileBinding},
     request_proof::Protocol,
     routing::RailInfo,
@@ -138,6 +139,13 @@ pub trait RailPlugin: Sync {
     fn request_id(&self, packet: &Packet) -> Result<[u8; 32]>;
     /// Server hooks.
     fn server(&self) -> &'static dyn ServerHooks;
+
+    /// The paid-service hook: the seller challenges that this rail parses and the proofs that
+    /// it builds from settled operations. A rail without it declares
+    /// [`Feature::PaidService`] skipped.
+    fn paid_service(&self) -> Option<&'static dyn PaidServiceProvider> {
+        None
+    }
 
     /// Vendor evidence functions, by name, that policies may call.
     fn policy_functions(&self) -> &'static [(&'static str, PolicyFunction)] {
@@ -330,6 +338,8 @@ pub enum Feature {
     Limits,
     /// The params of a generated draft for display.
     DraftDisplay,
+    /// Seller payment challenges and proofs of settled payments.
+    PaidService,
 }
 
 /// Test capability declaration of one rail.
