@@ -30,9 +30,11 @@ pub fn with_overrides<T>(settings: &[(&str, String)], f: impl FnOnce() -> T) -> 
     let _restore = Restore(OVERRIDES.with(|o| o.replace(next)));
     f()
 }
+/// Checks an `ALLOWIT_URL` value and returns its origin. An empty value selects the production app,
+/// `https://app.allowit.ai`.
 pub fn parse_origin(raw: &str) -> Result<String> {
     if raw.is_empty() {
-        return Ok("https://app.allowit.xyz".into());
+        return Ok("https://app.allowit.ai".into());
     }
     let invalid = || Error::config("ALLOWIT_URL must be an origin such as https://allowit.example");
     let (scheme, rest) = raw.split_once("://").ok_or_else(invalid)?;
@@ -96,7 +98,7 @@ mod tests {
     }
     #[test]
     fn origins_are_strict() {
-        assert_eq!(parse_origin("").unwrap(), "https://app.allowit.xyz");
+        assert_eq!(parse_origin("").unwrap(), "https://app.allowit.ai");
         assert_eq!(
             parse_origin("https://EXAMPLE.com:443/").unwrap(),
             "https://example.com"
