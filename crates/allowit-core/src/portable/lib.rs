@@ -560,10 +560,11 @@ pub mod host {
             /// Lowest passing score, in basis points.
             pub deny_below: u32,
         }
-        /// SystemOne question within the evaluation's SystemOne context `id`.
+        /// Decision question, asked over the evaluation's current decision context.
         #[derive(Clone, Debug, Eq, PartialEq)]
-        pub struct AllowitSystemOne<'a> {
-            /// SystemOne context identifier.
+        pub struct AllowitDecision<'a> {
+            /// Name of the decision context that the question belongs to. Empty asks in the
+            /// current context under its own name.
             pub id: &'a str,
             /// Question asked.
             pub query: &'a str,
@@ -602,12 +603,13 @@ pub mod host {
         ) -> Result<u32> {
             Err(AllowitError::Unsupported)
         }
-        /// Ask SystemOne; returns its passing confidence.
-        pub fn systemone(_ctx: &AllowitContext, _request: &AllowitSystemOne) -> Result<u32> {
+        /// Ask the decision question; returns its passing confidence.
+        pub fn decision(_ctx: &AllowitContext, _request: &AllowitDecision) -> Result<u32> {
             Err(AllowitError::Unsupported)
         }
-        /// Clear the evaluation's SystemOne context.
-        pub fn clear_systemone_context(_ctx: &AllowitContext) -> Result {
+        /// Start a new decision context: an empty evidence window. `name` names it; `None`
+        /// starts an unnamed one.
+        pub fn new_decision_context(_ctx: &AllowitContext, _name: Option<&str>) -> Result {
             Err(AllowitError::Unsupported)
         }
     }

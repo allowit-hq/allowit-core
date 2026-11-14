@@ -92,10 +92,10 @@ ENUMS = {"AllowitOperation": ("transfer", "swap", "deposit", "redeem", "custom")
          "AllowitValue": VALUES}
 # Server-only enrichment: allowed offchain; a Custom contract that calls one does not compile. Each
 # takes a request struct whose fields `STRUCT_FIELDS` lists.
-SERVER_FUNCTIONS = ("price", "fetch", "internet_search", "marketplace_search", "systemone", "request_screening",
-                    "clear_systemone_context")
+SERVER_FUNCTIONS = ("price", "fetch", "internet_search", "marketplace_search", "decision", "request_screening",
+                    "new_decision_context")
 SERVER_TYPES = ("AllowitPrice", "AllowitFetch", "AllowitInternetSearch", "AllowitMarketplaceSearch",
-                "AllowitRequestScreening", "AllowitSystemOne")
+                "AllowitRequestScreening", "AllowitDecision")
 STRUCT_FIELDS = frozenset(("from", "to", "amount", "price", "slip", "method", "url", "data", "pubkey", "query", "id",
                            "deny_below", "allow_above"))
 ALLOWIT_FUNCTIONS = PARAM_KEYS + ("param", "arg", "get_state", "set_state") + SERVER_FUNCTIONS

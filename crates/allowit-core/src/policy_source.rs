@@ -663,9 +663,9 @@ pub(crate) mod gate {
         "fetch",
         "internet_search",
         "marketplace_search",
-        "systemone",
+        "decision",
         "request_screening",
-        "clear_systemone_context",
+        "new_decision_context",
     ];
     const SERVER_TYPES: &[&str] = &[
         "AllowitPrice",
@@ -673,7 +673,7 @@ pub(crate) mod gate {
         "AllowitInternetSearch",
         "AllowitMarketplaceSearch",
         "AllowitRequestScreening",
-        "AllowitSystemOne",
+        "AllowitDecision",
     ];
     const STRUCT_FIELDS: &[&str] = &[
         "from",
