@@ -12,6 +12,9 @@ pub struct Request {
     pub wait: Duration,
     pub build_only: bool,
     pub wallet: Option<String>,
+    /// What the payment buys, when the operation pays a seller's challenge. The rail sends it
+    /// to the server with the operation; it never changes the operation itself.
+    pub paid_service: Option<super::paid_service::PaidService>,
 }
 pub struct Outcome {
     pub document: serde_json::Value,

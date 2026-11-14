@@ -39,6 +39,30 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   volume limits.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
+- `paid_service`: the paid-service hook. The default is none.
+
+## Paid services and the marketplace catalog
+
+`allowit_core::vendor::paid_service` (feature `vendor`) defines the rail-neutral types of a paid call.
+
+A seller answers a request for a paid resource with a payment challenge. `PaidServiceProvider::challenge`
+parses that reply for one network and returns a `Challenge`: the resource URL, the recipient, the amount as
+a `Quantity`, the asset reference, the network, the scheme, the expiry and the seller's challenge id when it
+issues one. The rail validates the network, the asset, the recipient and the amount.
+
+The payment is an ordinary operation. `Request.paid_service` carries `Challenge::context()`, a
+`PaidService`, to the server with the operation. The server evaluates the policy on the operation as for
+any other payment and records the context in the receipt. After the operation settles,
+`PaidServiceProvider::proof` builds the `Proof` (one request header) that the client presents to the seller
+from the outcome document. No host waits for or calls a third party to settle.
+
+`CatalogEntry` and `SearchResult` describe marketplace catalog offers. Every text field is listing data.
+`IndicativeTerms` are never the source of the amount paid: that comes from the seller's challenge for the
+exact resource. `Ranking` states how a search ordered its results: `keyword`, `semantic` or `hybrid`.
+`MARKETPLACE_SEARCH` names the `allowit::marketplace_search` evidence function. A server binds it to
+keyword search, which depends only on the catalog and the query, so a replay reads the same candidates.
+
+A rail without the hook declares `Feature::PaidService` skipped.
 
 ## Policy package contract
 
