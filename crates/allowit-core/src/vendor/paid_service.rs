@@ -1,10 +1,16 @@
 //! Paid services and the marketplace catalog.
 //!
 //! A seller answers a request for a paid resource with a payment challenge. The rail of the
-//! challenge's network parses it. Allowit then evaluates the policy and settles the payment
-//! like any other operation, and the rail builds the proof that the client presents to the
-//! seller from the receipt of that settled operation. The seller's own verification and
-//! delivery run after it; no host waits for or calls a third party to settle.
+//! challenge's network parses it. Allowit then evaluates the policy on the payment like any
+//! other operation, and the rail builds the proof that the client presents to the seller from
+//! the outcome of that operation.
+//!
+//! A challenge states who settles the payment ([`SettledBy`]). When the payer settles, the
+//! proof names the settled transaction. When the seller settles, the operation produces a
+//! payment authorization for exactly that challenge, the proof carries it, and the seller or
+//! the service that the seller names submits it. The server reserves the payment when it
+//! signs and reads the outcome from the ledger. The seller's own verification and delivery run
+//! after the proof; no host waits for or calls a third party to settle.
 //!
 //! A catalog entry describes an offer. Its terms are indicative: the amount that a client pays
 //! comes from the seller's challenge for the exact resource, never from the catalog.
@@ -31,6 +37,28 @@ pub const MAX_SEARCH_LIMIT: usize = 50;
 /// `(namespace, function)`. A server binds it to keyword search, which depends only on the
 /// catalog and the query, so that a replay of an evaluation reads the same candidates.
 pub const MARKETPLACE_SEARCH: (&str, &str) = ("allowit", "marketplace_search");
+
+/// The longest time, in seconds, that a seller may allow between an authorization and its
+/// settlement.
+pub const MAX_SETTLE_WITHIN: u64 = 86_400;
+
+/// Who settles the payment of a challenge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SettledBy {
+    /// The payer settles the payment itself and presents the settled transaction.
+    #[default]
+    Payer,
+    /// The payer signs a payment authorization for exactly this challenge and presents it.
+    /// The seller, or the service that the seller names, submits it.
+    Seller,
+}
+impl SettledBy {
+    /// Whether the payer settles: the form that a document omits.
+    pub fn is_payer(&self) -> bool {
+        *self == Self::Payer
+    }
+}
 
 /// One seller reply as the client received it.
 #[derive(Clone, Copy, Debug)]
@@ -74,6 +102,13 @@ pub struct Challenge {
     /// The Unix time after which the seller no longer accepts the payment, when it states one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<u64>,
+    /// Who settles the payment.
+    #[serde(default, skip_serializing_if = "SettledBy::is_payer")]
+    pub settled_by: SettledBy,
+    /// The longest time, in seconds, that the seller allows between the authorization and its
+    /// settlement, when the seller settles and states one. The authorization expires no later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settle_within: Option<u64>,
     /// The seller's accepted terms as the rail read them. Shared code never interprets them;
     /// the rail reads them again when it builds the proof.
     #[serde(default, skip_serializing_if = "Value::is_null")]
@@ -97,6 +132,8 @@ impl Challenge {
             pay_to: self.pay_to.clone(),
             amount: self.amount.units.clone(),
             asset: self.asset.clone(),
+            settled_by: self.settled_by,
+            settle_within: self.settle_within,
         }
     }
 }
@@ -118,6 +155,14 @@ pub struct PaidService {
     pub amount: String,
     /// The asset reference of the challenge.
     pub asset: String,
+    /// Who settles the payment. When the seller settles, the operation signs a payment
+    /// authorization and submits nothing.
+    #[serde(default, skip_serializing_if = "SettledBy::is_payer")]
+    pub settled_by: SettledBy,
+    /// The seller's bound, in seconds, on the time between the authorization and its
+    /// settlement. The server only shortens the validity of the authorization with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settle_within: Option<u64>,
 }
 impl PaidService {
     /// Check the bounds of every field. The server treats the context as untrusted input.
@@ -141,6 +186,17 @@ impl PaidService {
             return Err(Error::usage(
                 "The paid-service context names an invalid amount.",
             ));
+        }
+        match self.settle_within {
+            None => {}
+            Some(seconds)
+                if self.settled_by == SettledBy::Seller
+                    && (1..=MAX_SETTLE_WITHIN).contains(&seconds) => {}
+            Some(_) => {
+                return Err(Error::usage(
+                    "The paid-service context names an invalid settlement time.",
+                ));
+            }
         }
         Ok(())
     }
@@ -213,8 +269,9 @@ pub trait PaidServiceProvider: Sync {
         reply: &SellerReply<'_>,
     ) -> Result<Challenge>;
     /// Build the proof for `challenge` from the outcome document of the operation that paid
-    /// it. The operation must be confirmed and must have paid this challenge's recipient,
-    /// asset and amount.
+    /// it. When the payer settles, the operation must be confirmed and must have paid this
+    /// challenge's recipient, asset and amount. When the seller settles, the operation must
+    /// hold the signed authorization of exactly this challenge; the proof carries it.
     fn proof(&self, challenge: &Challenge, receipt: &Value) -> Result<Proof>;
 }
 
@@ -298,6 +355,8 @@ mod tests {
             ),
             asset: "XYZ".into(),
             expires_at: Some(1_800_000_000),
+            settled_by: SettledBy::Payer,
+            settle_within: None,
             terms: serde_json::json!({"scheme":"exact"}),
         }
     }
@@ -363,6 +422,51 @@ mod tests {
         let mut without_id = valid.clone();
         without_id.challenge_id = None;
         without_id.validate().unwrap();
+        // A settlement time belongs to a payment that the seller settles, and it is bounded.
+        refused(&|c| c.settle_within = Some(300));
+        refused(&|c| {
+            c.settled_by = SettledBy::Seller;
+            c.settle_within = Some(0);
+        });
+        refused(&|c| {
+            c.settled_by = SettledBy::Seller;
+            c.settle_within = Some(MAX_SETTLE_WITHIN + 1);
+        });
+    }
+
+    #[test]
+    fn a_challenge_that_the_seller_settles_says_so_in_its_context() {
+        let mut challenge = challenge();
+        // The payer settles by default, and neither document names it.
+        let text = serde_json::to_string(&challenge).unwrap();
+        assert!(!text.contains("settledBy") && !text.contains("settleWithin"));
+        assert_eq!(challenge.context().settled_by, SettledBy::Payer);
+        challenge.settled_by = SettledBy::Seller;
+        challenge.settle_within = Some(300);
+        let value = serde_json::to_value(&challenge).unwrap();
+        assert_eq!(value["settledBy"], "seller");
+        assert_eq!(value["settleWithin"], 300);
+        assert_eq!(
+            serde_json::from_value::<Challenge>(value).unwrap(),
+            challenge
+        );
+        let context = challenge.context();
+        context.validate().unwrap();
+        let value = serde_json::to_value(&context).unwrap();
+        assert_eq!(value["settledBy"], "seller");
+        assert_eq!(value["settleWithin"], 300);
+        assert_eq!(
+            serde_json::from_value::<PaidService>(value).unwrap(),
+            context
+        );
+        // A context without the fields is one that the payer settles.
+        let plain: PaidService = serde_json::from_value(serde_json::json!({
+            "resource":"https://a.example/","payTo":"R","amount":"1","asset":"X"}))
+        .unwrap();
+        assert_eq!(
+            (plain.settled_by, plain.settle_within),
+            (SettledBy::Payer, None)
+        );
     }
 
     #[test]

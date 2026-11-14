@@ -40,6 +40,7 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
+- `settlement_service`: the settlement-service hook. The default is none.
 - `custom_wallet_build`: the "build custom wallet" hook. The default is none.
 
 ## Paid services and the marketplace catalog
@@ -53,9 +54,27 @@ issues one. The rail validates the network, the asset, the recipient and the amo
 
 The payment is an ordinary operation. `Request.paid_service` carries `Challenge::context()`, a
 `PaidService`, to the server with the operation. The server evaluates the policy on the operation as for
-any other payment and records the context in the receipt. After the operation settles,
-`PaidServiceProvider::proof` builds the `Proof` (one request header) that the client presents to the seller
-from the outcome document. No host waits for or calls a third party to settle.
+any other payment and records the context in the receipt.
+
+A challenge states who settles the payment, as `SettledBy`:
+
+- `payer`: the operation settles the payment. `PaidServiceProvider::proof` then builds the `Proof` (one
+  request header) from the outcome document of the settled operation.
+- `seller`: the operation signs a payment authorization for exactly the challenge and submits nothing.
+  The proof carries the authorization, and the seller or the service that the seller names submits it.
+  `settle_within` is the seller's bound on the time to settlement; the authorization expires no later.
+  `PreparedMetadata.seller_settles` marks such an operation. Its `transaction_hash` identifies the
+  authorization. The server reads the outcome from the ledger: `ReceiptInfo.settlement_hash` names the
+  transaction that settled it.
+
+No host waits for or calls a third party to settle.
+
+`allowit_core::vendor::settlement_service` defines the hook of a settlement service for sellers. A seller
+that takes payment authorizations names a service that checks and submits them. `SettlementProvider::verify`
+checks one request against the ledger and submits nothing. `SettlementProvider::settle` checks it again,
+submits it with the service's own key as the source of the transaction and its fee, and reads the
+settlement from the ledger. `Limits::max_fee` bounds the network fee of one settlement. The service holds no
+customer funds: it can submit one authorized payment, once, to the payee that the payer signed.
 
 `CatalogEntry` and `SearchResult` describe marketplace catalog offers. Every text field is listing data.
 `IndicativeTerms` are never the source of the amount paid: that comes from the seller's challenge for the

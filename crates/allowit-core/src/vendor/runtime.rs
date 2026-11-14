@@ -260,6 +260,10 @@ pub struct PreparedMetadata {
     pub debit_units: i128,
     pub request_hash: [u8; 32],
     pub debit: Debit,
+    /// The operation signs a payment authorization that the seller submits: the server sends
+    /// nothing, and another party's transaction settles it. `transaction_hash` then
+    /// identifies the authorization, not a transaction.
+    pub seller_settles: bool,
 }
 #[derive(Clone, Debug)]
 pub struct Debit {
@@ -337,6 +341,10 @@ pub struct ReceiptInfo {
     pub observed_height: u64,
     pub fee: Fee,
     pub debits: Vec<Debit>,
+    /// The transaction that settled the operation, when another party submitted it: the
+    /// settlement of a payment authorization. `transaction_hash` stays the identity of the
+    /// retained packet. `None` when the retained packet is the settled transaction.
+    pub settlement_hash: Option<[u8; 32]>,
 }
 /// The fee a receipt paid. `charged_units` is in installed-asset units and counts against
 /// spending and volume limits.

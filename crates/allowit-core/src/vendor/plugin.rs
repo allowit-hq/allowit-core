@@ -148,6 +148,15 @@ pub trait RailPlugin: Sync {
         None
     }
 
+    /// The settlement-service hook: the payment authorizations that this rail checks and
+    /// submits for a seller that names the host as its settlement service. The default is
+    /// none.
+    fn settlement_service(
+        &self,
+    ) -> Option<&'static dyn super::settlement_service::SettlementProvider> {
+        None
+    }
+
     /// The "build custom wallet" hook: the build of a Custom wallet's code from the exact policy
     /// source, the hash of that code and the signature scheme of the build statements. A rail
     /// without it declares [`Feature::CustomBuild`] skipped.

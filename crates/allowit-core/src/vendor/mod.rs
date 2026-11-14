@@ -18,6 +18,7 @@ pub mod request;
 pub mod request_proof;
 pub mod routing;
 pub mod runtime;
+pub mod settlement_service;
 pub mod typed_request;
 pub mod wallet;
 pub use provider::{OwnerProvider, RuntimeProvider};
