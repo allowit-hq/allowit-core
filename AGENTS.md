@@ -1,8 +1,8 @@
 # allowit-core
 
-## Artifact storage
+## Repository scope
 
-Keep code, required build/test inputs and concise API/usage documentation here. Keep plans in the canonical Allowit knowledge project's `.agents/4-plans/`. Keep reviews, evidence and recordings in its `.agents/artifacts/`. Preserve original owner inputs in its `.agents/1-sources/`. Do not commit those artifacts in this implementation repository or its feature branches.
+Keep code, required build/test inputs and concise API/usage documentation here. Do not commit plans, reviews, evidence or recordings in this repository or its feature branches.
 
 ## Dependencies and packages
 
@@ -10,7 +10,7 @@ Core depends on no other Allowit repository. Rails depend on core. The shared SD
 
 The virtual workspace has one package, `allowit-core` (library `allowit_core`), at `crates/allowit-core`. It contains generic host primitives and the portable policy module. Native request models, signing, custody and rail semantics belong to their rail repository. Core owns the portable source allowlist and its Python helper. Rail libraries bind source shape to native wallet tiers. Server owns trusted publication and admission. SDK engine owns shared execution workflows for CLI and server. Resolve the Python helper and portable library from the same released Core source. Preserve the copied helper and fixture terms. Keep the portable module's declared `UNLICENSED` terms separate from the host modules' MIT terms. Follow `crates/allowit-core/LICENSES.md`. Do not relicense either scope implicitly.
 
-Every package releases one workspace version. Consumers name a release tag `vX.Y.Z` and its minor version. Breaking public API changes need a new minor version before 1.0. Name affected repositories in the pull request. Never move or delete a pushed tag. Preserve owner approval of each new public head, independent reviews, deployment restrictions and subscription authentication.
+Every package releases one workspace version. Consumers name a release tag `vX.Y.Z` and its minor version. Breaking public API changes need a new minor version before 1.0. Name affected repositories in the pull request. Never move or delete a pushed tag.
 
 ## Validation profiles
 
