@@ -84,3 +84,41 @@ fn the_decision_functions_are_stubs_that_only_a_server_fills() {
         );
     }
 }
+
+/// A server policy passes an owner text param to a server function: a typed read yields the
+/// portable text, and `as_str()` is the `&str` of a request.
+#[test]
+fn an_owner_text_param_passes_to_a_server_function_request() {
+    let mut ctx = context();
+    ctx.params = BTreeMap::from([
+        ("web_query".into(), AllowitValue::Str("vault risk".into())),
+        (
+            "background".into(),
+            AllowitValue::Str("The owner holds the Meridian vault.".into()),
+        ),
+    ])
+    .into();
+    let query: String = param(&ctx, "web_query");
+    let background: String = param(&ctx, "background");
+    assert_eq!(query.as_str(), "vault risk");
+    assert_eq!(
+        internet_search(
+            &ctx,
+            &AllowitInternetSearch {
+                query: query.as_str()
+            }
+        ),
+        Err(AllowitError::Unsupported)
+    );
+    assert_eq!(
+        new_decision_context(&ctx, Some(background.as_str())),
+        Err(AllowitError::Unsupported)
+    );
+    let question = AllowitDecision {
+        id: "position",
+        query: query.as_str(),
+        deny_below: 3_000,
+        allow_above: 8_000,
+    };
+    assert_eq!(decision(&ctx, &question), Err(AllowitError::Unsupported));
+}
