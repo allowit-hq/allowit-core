@@ -97,6 +97,41 @@ fn only_exact_registered_host_calls_extend_the_server_source_gate() {
     assert!(source_shape_with_host_calls(&oversized, &[("vendor", "quote")]).is_err());
 }
 
+/// `as_str()` reads the text of a portable `String` in server mode only, with no argument. A
+/// contract string has no such method, so the portable profile rejects it.
+#[test]
+fn server_mode_alone_admits_the_text_of_a_portable_string() {
+    let source = |body: &str| {
+        format!(
+            "use allowit::prelude::*; pub fn execute(ctx: &AllowitContext) -> allowit::Result {{
+                allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;
+                let query: String = allowit::param(ctx, \"web_query\");
+                {body}
+                Ok(())
+            }}"
+        )
+    };
+    const SEARCH: &[(&str, &str)] = &[("allowit", "internet_search")];
+    let passed = source(
+        "allowit::internet_search(ctx, &allowit::AllowitInternetSearch { query: query.as_str() })?;",
+    );
+    assert!(source_shape_with_host_calls(&passed, SEARCH).is_ok());
+    // The portable profile, also for source that names no server function.
+    let error = source_shape(&source("let _ = query.as_str();")).unwrap_err();
+    assert!(error.to_string().contains("the method `as_str`"), "{error}");
+    // Server mode admits the bare call only.
+    for body in [
+        "let _ = query.as_str(0);",
+        "let _ = query.as_bytes();",
+        "let _ = query.to_string();",
+    ] {
+        assert!(
+            source_shape_with_host_calls(&source(body), SEARCH).is_err(),
+            "{body}"
+        );
+    }
+}
+
 #[test]
 fn packaged_resources_compile_and_reject_against_their_own_portable_library() {
     use allowit_core::policy_source::{

@@ -113,5 +113,25 @@
     "calls": [["allowit", "clear_systemone_context"]],
     "body": "allowit::clear_systemone_context(ctx)?;",
     "accepted": false
+  },
+  {
+    "calls": [["allowit", "internet_search"]],
+    "body": "let query: String = allowit::param(ctx, \"web_query\"); allowit::internet_search(ctx, &allowit::AllowitInternetSearch { query: query.as_str() })?;",
+    "accepted": true
+  },
+  {
+    "calls": [["allowit", "decision"], ["allowit", "new_decision_context"]],
+    "body": "let background: String = allowit::param(ctx, \"background\"); let question: String = allowit::param(ctx, \"question\"); allowit::new_decision_context(ctx, Some(background.as_str()))?; allowit::decision(ctx, &allowit::AllowitDecision { id: \"position\", query: question.as_str(), deny_below: 3000, allow_above: 8000 })?;",
+    "accepted": true
+  },
+  {
+    "calls": [["allowit", "internet_search"]],
+    "body": "let query: String = allowit::param(ctx, \"web_query\"); allowit::internet_search(ctx, &allowit::AllowitInternetSearch { query: query.as_bytes() })?;",
+    "accepted": false
+  },
+  {
+    "calls": [["allowit", "internet_search"]],
+    "body": "let query: String = allowit::param(ctx, \"web_query\"); allowit::internet_search(ctx, &allowit::AllowitInternetSearch { query: query.as_str(0) })?;",
+    "accepted": false
   }
 ]

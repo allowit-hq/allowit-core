@@ -87,6 +87,29 @@ class PolicySourceTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, r"error\[" + code + r"\]"):
                             policy_source.host_compile(path)
 
+    def test_server_mode_alone_admits_the_text_of_a_portable_string(self):
+        # `as_str()` passes an owner text param to a server function. The portable profile rejects
+        # it, because a contract string has no such method.
+        search = [("allowit", "internet_search")]
+
+        def source(body):
+            return ("use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n"
+                    'let query: String = allowit::param(ctx, "web_query");\n' + body + "\nOk(())\n}\n")
+        passed = source("let _ = allowit::internet_search(ctx, "
+                        "&allowit::AllowitInternetSearch { query: query.as_str() });")
+        policy_source.checked_code(passed, host_calls=search)
+        with self.assertRaisesRegex(ValueError, "the method `as_str`"):
+            policy_source.checked_code(source("let _ = query.as_str();"))
+        for body in ("let _ = query.as_str(0);", "let _ = query.as_bytes();", "let _ = query.to_string();"):
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                policy_source.checked_code(source(body), host_calls=search)
+        # The server source compiles in the std backend, where the text has `as_str`.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.rs"
+            path.write_text(passed)
+            policy_source.host_compile(path)
+
+
 
 if __name__ == "__main__":
     unittest.main()

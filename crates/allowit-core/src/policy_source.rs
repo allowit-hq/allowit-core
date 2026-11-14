@@ -52,6 +52,9 @@ pub fn source_shape(source: &str) -> Result<SourceShape> {
 /// Each pair names an exact namespace and operation. Pass only the operations linked by the
 /// selected host build. Policy source, owner params, and request args cannot extend this list.
 /// Server policy source is limited to 16000 bytes. Other source checks still apply.
+/// Server policy source may read the text of a portable `String` with `as_str()`, to pass an
+/// owner value to a server function. A contract string has no such method, so [`source_shape`]
+/// rejects it. The host supplies owner params; text from `ctx.request.args` is the agent's.
 /// Run the verified guest compiler and bind the source hash
 /// and registry identity separately before execution. Use [`source_shape`] for portable builds.
 pub fn source_shape_with_host_calls(
@@ -713,6 +716,8 @@ pub(crate) mod gate {
     ];
     /// `FIELD_METHODS`: `contains` only on the `params` or `args` field.
     const FIELD_NAMES: &[&str] = &["params", "args"];
+    /// `SERVER_TEXT`: the one method that only server mode admits, as `text.as_str()`.
+    const SERVER_TEXT: &str = "as_str";
     /// `INDEXED_FIELD`: the only indexed receiver, `ctx.params[key]`.
     const INDEXED_FIELD: &str = "params";
     const METHODS: &[&str] = &[
@@ -1199,7 +1204,14 @@ pub(crate) mod gate {
             }
             if before == "." && (i < 2 || tokens[i - 2] != ".") {
                 if after == "(" || after == "::" {
-                    if !METHODS.contains(&name) {
+                    // `SERVER_TEXT`: a server policy reads the text of a portable `String` with
+                    // `as_str()`, to pass an owner value to a server function. A contract
+                    // string has no such method, so the portable profile rejects it.
+                    let server_text = name == SERVER_TEXT
+                        && host_calls.is_some()
+                        && after == "("
+                        && tok(i + 2) == ")";
+                    if !server_text && !METHODS.contains(&name) {
                         return Err(reject(&format!(
                             "the method `{name}`, which is not on the portable allowlist"
                         )));
