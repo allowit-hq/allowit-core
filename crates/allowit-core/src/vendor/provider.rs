@@ -251,6 +251,19 @@ pub trait OwnerProvider {
             "This rail does not verify an installation on the ledger",
         ))
     }
+    /// The owner's view of the build of a Custom policy on the backend: the server
+    /// presignature, the build ticket and the build that the backend holds. A rail without the
+    /// build hook declares `Feature::CustomBuild` skipped.
+    fn custom_build(
+        &self,
+        cx: &super::owner::Context<'_>,
+        policy_id: &str,
+    ) -> super::error::Result<serde_json::Value> {
+        let _ = (cx, policy_id);
+        Err(Error::unsupported(
+            "This rail does not build a custom wallet",
+        ))
+    }
     /// The host and native placements of a draft or installed policy document.
     fn paired_export(
         &self,

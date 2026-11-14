@@ -40,6 +40,7 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
+- `custom_wallet_build`: the "build custom wallet" hook. The default is none.
 
 ## Paid services and the marketplace catalog
 
@@ -63,6 +64,54 @@ exact resource. `Ranking` states how a search ordered its results: `keyword`, `s
 keyword search, which depends only on the catalog and the query, so a replay reads the same candidates.
 
 A rail without the hook declares `Feature::PaidService` skipped.
+
+## Custom wallet build
+
+`allowit_core::vendor::custom_build` (feature `vendor`) defines the build of a Custom wallet. The wallet runs
+code that is built from the exact policy source. The server does not build the code and does not vouch for
+a build. Two signed text statements bind a build to its source.
+
+The server presignature states that the server admitted one policy source on one network:
+
+```text
+Allowit custom policy presignature v1
+network: <CAIP-2 network>
+policy: <policy id>
+source-sha256: <SHA-256 of the exact policy source>
+server: <server identity>
+```
+
+The owner attestation states that the owner built the wallet code with `code-sha256` from that source. It
+repeats the presignature fields and carries the server's signature, so it verifies without the server:
+
+```text
+Allowit custom build attestation v1
+network: <CAIP-2 network>
+policy: <policy id>
+source-sha256: <SHA-256 of the exact policy source>
+code-sha256: <identity of the wallet code>
+server: <server identity>
+presignature: <the server's signature, hexadecimal>
+owner: <owner identity>
+```
+
+The first line of each statement is its domain and version. Lines end with one line feed and the last line
+has none. A value is 1 to 128 printable ASCII characters without a space. Hashes and signatures are
+lowercase hexadecimal text.
+
+A rail implements `CustomWalletBuild`: `build` compiles the wallet code from the source, `code_hash` gives
+the identity of code as the network records it, and `sign_message` and `verify_message` are the rail's
+wallet text-message signature. A local key and a browser wallet produce the same signature.
+
+`presign` and `attest` sign the statements. `verify_presignature` passes only when the trusted server key
+signed exactly the verifier's own network, policy id and source. `verify_attestation` also requires the
+owner's signature over that presignature and the code hash. `check_code_hash` compares the attested hash
+with a hash that the verifier read itself. The `code` module lists the typed refusal codes:
+`custom_policy_unknown`, `custom_presignature_mismatch`, `custom_attestation_invalid`,
+`custom_code_hash_mismatch`, `custom_toolchain_missing`, `custom_build_failed`, `custom_build_missing` and
+`custom_build_attested`.
+
+A rail without the hook declares `Feature::CustomBuild` skipped.
 
 ### Owner updates and verification
 
