@@ -383,6 +383,85 @@ pub enum OwnerAction {
         recipient: Option<String>,
     },
 }
+/// The owner action that changes installed params on an active wallet. A rail prepares its
+/// owner step with `RuntimeProvider::prepare_params_update`: it writes the next configuration
+/// revision and keeps the policy source, the recorded usage and the request nonce.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ParamsUpdate {
+    /// The policy that the installation binds.
+    pub policy_id: String,
+    /// The configuration revision that the owner reviewed. The rail refuses the update when
+    /// the wallet is at another revision. `None` accepts the revision the rail reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+    /// Each changed param with its complete new value. Other params keep their values.
+    pub changes: BTreeMap<String, PolicyValue>,
+}
+/// The storage type name of a value, as the canonical function metadata names it.
+fn type_name(value: &allowit::AllowitValue) -> &'static str {
+    use allowit::AllowitValue as V;
+    match value {
+        V::Int(_) => "Int",
+        V::Bool(_) => "Bool",
+        V::Str(_) => "Str",
+        V::Addr(_) => "Addr",
+        V::List(_) => "List",
+    }
+}
+/// The storage types that the canonical function of this param declares, if it is canonical.
+fn declared_types(key: &str) -> Option<Vec<String>> {
+    crate::policy::canonical_function_registry()
+        .ok()?
+        .functions
+        .into_iter()
+        .find(|function| function.name == key)
+        .map(|function| function.parameter.storage_types)
+}
+impl ParamsUpdate {
+    /// Most params that one update may change.
+    pub const MAX_CHANGES: usize = 32;
+    /// The installed params with this update applied. An update changes installed params
+    /// only: it adds no param, removes none and keeps the type of each value. The rail and
+    /// the backend check each value against the param's range.
+    pub fn apply(
+        &self,
+        installed: &BTreeMap<String, PolicyValue>,
+    ) -> Result<BTreeMap<String, PolicyValue>> {
+        use crate::client::error::Error;
+        if self.changes.is_empty() || self.changes.len() > Self::MAX_CHANGES {
+            return Err(Error::usage(
+                "A params update needs one to 32 changed params",
+            ));
+        }
+        let mut next = installed.clone();
+        let mut changed = false;
+        for (key, value) in &self.changes {
+            let current = next.get_mut(key).ok_or_else(|| {
+                Error::usage(format!("The installed policy has no param `{key}`"))
+            })?;
+            // A param keeps its type. A canonical param that is declared with more than one
+            // storage type, such as a wildcard or a list, keeps any of its declared types.
+            if core::mem::discriminant(&current.0) != core::mem::discriminant(&value.0)
+                && !declared_types(key).is_some_and(|types| {
+                    [&current.0, &value.0]
+                        .iter()
+                        .all(|v| types.iter().any(|t| t == type_name(v)))
+                })
+            {
+                return Err(Error::usage(format!(
+                    "The new value of `{key}` has another type than the installed value"
+                )));
+            }
+            changed |= current != value;
+            *current = value.clone();
+        }
+        if !changed {
+            return Err(Error::usage("The update changes no installed param"));
+        }
+        Ok(next)
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct Poll {
     pub attempts: u32,
@@ -484,6 +563,62 @@ mod tests {
         fn receipt_info(&self, _: &Packet) -> Result<ReceiptInfo> {
             unreachable!()
         }
+    }
+    #[test]
+    fn params_update_changes_only_installed_params_of_the_same_type() {
+        use allowit::AllowitValue as V;
+        let installed: BTreeMap<String, PolicyValue> = [
+            ("daily_spending_limit".to_owned(), PolicyValue(V::Int(100))),
+            ("label".to_owned(), PolicyValue(V::Bool(false))),
+            ("operations".to_owned(), PolicyValue(V::Str("*".into()))),
+            ("memo".to_owned(), PolicyValue(V::Str("note".into()))),
+        ]
+        .into();
+        let update = |changes: &[(&str, V)]| ParamsUpdate {
+            policy_id: "policy".into(),
+            expected_revision: Some(1),
+            changes: changes
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), PolicyValue(v.clone())))
+                .collect(),
+        };
+        let next = update(&[("daily_spending_limit", V::Int(250))])
+            .apply(&installed)
+            .unwrap();
+        assert_eq!(next["daily_spending_limit"], PolicyValue(V::Int(250)));
+        assert_eq!(next["label"], installed["label"]);
+        assert_eq!(next.len(), installed.len());
+        // The wildcard form of a param can become its list form.
+        let list = V::List(vec![V::Str("transfer".into())].into());
+        let next = update(&[("operations", list.clone())])
+            .apply(&installed)
+            .unwrap();
+        assert_eq!(next["operations"], PolicyValue(list.clone()));
+        for refused in [
+            update(&[]),
+            update(&[("call_limit", V::Int(1))]),
+            update(&[("daily_spending_limit", V::Bool(true))]),
+            // Only a param that declares both forms can change its form.
+            update(&[("memo", list.clone())]),
+            update(&[("daily_spending_limit", V::Int(100))]),
+        ] {
+            assert!(refused.apply(&installed).is_err());
+        }
+        // The signed-in wire form is stable: camelCase keys, typed values, no unknown field.
+        let wire = serde_json::json!({"policyId":"policy","expectedRevision":1,
+            "changes":{"daily_spending_limit":{"Int":"250"}}});
+        let update = update(&[("daily_spending_limit", V::Int(250))]);
+        assert_eq!(serde_json::to_value(&update).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<ParamsUpdate>(wire).unwrap(),
+            update
+        );
+        assert!(
+            serde_json::from_value::<ParamsUpdate>(
+                serde_json::json!({"policyId":"p","changes":{},"reset":true})
+            )
+            .is_err()
+        );
     }
     #[test]
     fn retained_document_keeps_exact_bytes_and_opaque_state_stays_in_memory() {

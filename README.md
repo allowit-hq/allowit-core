@@ -64,6 +64,33 @@ keyword search, which depends only on the catalog and the query, so a replay rea
 
 A rail without the hook declares `Feature::PaidService` skipped.
 
+### Owner updates and verification
+
+An owner changes installed params on an active wallet with the owner action `ParamsUpdate`.
+`RuntimeProvider::prepare_params_update` prepares its owner step, which then takes the path of every
+owner packet. The call is a separate provider method with a default, so `OwnerAction` keeps its
+variants and no consumer changes. `ParamsUpdate` holds the policy id, the expected configuration revision and each changed param with its
+complete typed value. `ParamsUpdate::apply` changes installed params only: it adds no param, removes none
+and keeps the type of each value. The rail writes the next configuration revision and keeps the policy
+source, the recorded usage and the request nonce. `OwnerRuntime::with_params` returns the installation
+that a caller stores after the update settles.
+
+`OwnerProvider` has these client calls. Each has a default that reports `unsupported`, and a rail without
+a call declares the matching `Feature` skipped.
+
+| Call | Feature | Result |
+| --- | --- | --- |
+| `edit_params` | `EditParams` | The next revision of an unsigned draft with typed param values changed. |
+| `revise` | `EditParams` | The next revision of an unsigned draft from the owner's words. |
+| `update_params` | `UpdateParams` | The owner-signed params update of an active wallet, resume-safe under its request id. |
+| `verify` | `Verify` | A `Verification`: each `Comparison` of the owner's document with the ledger, and the `StateReadback` with the installed revision, params and `Counters`. |
+| `paired_export` | `PairedExport` | A `PairedExport`: the `HostPlacement` that the server evaluates and the `NativePlacement` that the wallet enforces. |
+
+`Verification.matches` is true only when every comparison matches. `PairedExport::of` keeps evidence
+functions in the host placement for every wallet kind. A `native` or `simple` wallet enforces no rule
+on-chain, a `standard` wallet enforces the ordered canonical prefix, and a `custom` wallet enforces its
+compiled source.
+
 ## Policy package contract
 
 `allowit_core::policy_package` (feature `std`) defines `PolicyPackage`: evidence functions that server

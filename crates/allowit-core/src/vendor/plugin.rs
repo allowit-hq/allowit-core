@@ -265,6 +265,18 @@ pub trait OwnerRuntime: Sync {
     ) -> Result<[u8; 32]>;
     fn validate_signed(&self, network: &str, original: &[u8], signed: &[u8]) -> Result<[u8; 32]>;
     fn with_policy(&self, c: &Configuration, identity: PolicyIdentity) -> Result<Configuration>;
+    /// The installation after a confirmed params update: the same wallet, source and identity
+    /// with `update` applied to its params. The caller stores it only after the update settled.
+    fn with_params(
+        &self,
+        c: &Configuration,
+        update: &crate::vendor::runtime::ParamsUpdate,
+    ) -> Result<Configuration> {
+        let _ = (c, update);
+        Err(Error::unsupported(
+            "This rail does not update the params of an installed wallet",
+        ))
+    }
     fn code_hash(&self, wasm: &[u8]) -> Result<[u8; 32]>;
     fn fee_bounds(&self) -> FeeBounds;
     fn wallet_address(&self, network: &str, owner: &str, instance: &[u8; 32]) -> Result<String>;
@@ -340,6 +352,14 @@ pub enum Feature {
     DraftDisplay,
     /// Seller payment challenges and proofs of settled payments.
     PaidService,
+    /// Typed param edits and revisions of an unsigned draft.
+    EditParams,
+    /// The owner-signed params update of an active wallet.
+    UpdateParams,
+    /// Ledger verification with the comparison and the state read-back.
+    Verify,
+    /// The paired host and native placements of a policy.
+    PairedExport,
 }
 
 /// Test capability declaration of one rail.
