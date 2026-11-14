@@ -161,7 +161,8 @@ pub struct NativePlacement {
     /// The source that the wallet compiled, when the wallet kind compiles source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// The params that the wallet stores. Empty when the wallet stores none.
+    /// The params that the wallet stores: none when the server alone enforces the policy, the
+    /// canonical params for a standard wallet and every param for a compiled source.
     pub params: std::collections::BTreeMap<String, crate::policy::PolicyValue>,
 }
 /// A draft as its two placements: the host part and the native part of one policy.
@@ -193,7 +194,19 @@ impl PairedExport {
             WalletKind::Native | WalletKind::Simple => {
                 (Enforcement::Offchain, Vec::new(), None, Default::default())
             }
-            WalletKind::Standard => (Enforcement::Onchain, prefix, None, params.clone()),
+            // A standard wallet admits only the canonical params.
+            WalletKind::Standard => (
+                Enforcement::Onchain,
+                prefix,
+                None,
+                params
+                    .iter()
+                    .filter(|(key, _)| {
+                        crate::vendor::kinds::STANDARD_PARAMS.contains(&key.as_str())
+                    })
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
             WalletKind::Custom => (
                 Enforcement::Onchain,
                 rules.clone(),
@@ -243,7 +256,11 @@ mod tests {
     use crate::vendor::kinds::{Enforcement, WalletKind};
     use allowit::AllowitValue as V;
     fn params() -> std::collections::BTreeMap<String, PolicyValue> {
-        [("daily_spending_limit".to_owned(), PolicyValue(V::Int(5)))].into()
+        [
+            ("daily_spending_limit".to_owned(), PolicyValue(V::Int(5))),
+            ("report_limit".to_owned(), PolicyValue(V::Int(2))),
+        ]
+        .into()
     }
     fn state() -> StateReadback {
         StateReadback {
@@ -332,10 +349,16 @@ mod tests {
         let custom = pair(WalletKind::Custom);
         assert_eq!(custom.native.rules, custom.host.rules);
         assert_eq!(custom.native.source.as_deref(), Some("source"));
+        // A standard wallet stores only canonical params; a compiled source stores every param.
+        assert_eq!(
+            standard.native.params.keys().collect::<Vec<_>>(),
+            ["daily_spending_limit"]
+        );
+        assert_eq!(custom.native.params, custom.host.params);
         // Evidence functions stay with the host in every placement.
         for p in [standard, custom] {
             assert_eq!(p.host.evidence_functions, ["catalog::report"]);
-            assert_eq!(p.native.params, p.host.params);
+            assert_eq!(p.host.params, params());
             let wire = serde_json::to_value(&p).unwrap();
             assert_eq!(serde_json::from_value::<PairedExport>(wire).unwrap(), p);
         }

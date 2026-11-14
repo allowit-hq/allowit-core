@@ -398,6 +398,26 @@ pub struct ParamsUpdate {
     /// Each changed param with its complete new value. Other params keep their values.
     pub changes: BTreeMap<String, PolicyValue>,
 }
+/// The storage type name of a value, as the canonical function metadata names it.
+fn type_name(value: &allowit::AllowitValue) -> &'static str {
+    use allowit::AllowitValue as V;
+    match value {
+        V::Int(_) => "Int",
+        V::Bool(_) => "Bool",
+        V::Str(_) => "Str",
+        V::Addr(_) => "Addr",
+        V::List(_) => "List",
+    }
+}
+/// The storage types that the canonical function of this param declares, if it is canonical.
+fn declared_types(key: &str) -> Option<Vec<String>> {
+    crate::policy::canonical_function_registry()
+        .ok()?
+        .functions
+        .into_iter()
+        .find(|function| function.name == key)
+        .map(|function| function.parameter.storage_types)
+}
 impl ParamsUpdate {
     /// Most params that one update may change.
     pub const MAX_CHANGES: usize = 32;
@@ -420,15 +440,14 @@ impl ParamsUpdate {
             let current = next.get_mut(key).ok_or_else(|| {
                 Error::usage(format!("The installed policy has no param `{key}`"))
             })?;
-            // A param keeps its type. One that takes a wildcard or a list keeps either form.
-            let text_or_list = |v: &allowit::AllowitValue| {
-                matches!(
-                    v,
-                    allowit::AllowitValue::Str(_) | allowit::AllowitValue::List(_)
-                )
-            };
+            // A param keeps its type. A canonical param that is declared with more than one
+            // storage type, such as a wildcard or a list, keeps any of its declared types.
             if core::mem::discriminant(&current.0) != core::mem::discriminant(&value.0)
-                && !(text_or_list(&current.0) && text_or_list(&value.0))
+                && !declared_types(key).is_some_and(|types| {
+                    [&current.0, &value.0]
+                        .iter()
+                        .all(|v| types.iter().any(|t| t == type_name(v)))
+                })
             {
                 return Err(Error::usage(format!(
                     "The new value of `{key}` has another type than the installed value"
@@ -552,6 +571,7 @@ mod tests {
             ("daily_spending_limit".to_owned(), PolicyValue(V::Int(100))),
             ("label".to_owned(), PolicyValue(V::Bool(false))),
             ("operations".to_owned(), PolicyValue(V::Str("*".into()))),
+            ("memo".to_owned(), PolicyValue(V::Str("note".into()))),
         ]
         .into();
         let update = |changes: &[(&str, V)]| ParamsUpdate {
@@ -573,11 +593,13 @@ mod tests {
         let next = update(&[("operations", list.clone())])
             .apply(&installed)
             .unwrap();
-        assert_eq!(next["operations"], PolicyValue(list));
+        assert_eq!(next["operations"], PolicyValue(list.clone()));
         for refused in [
             update(&[]),
             update(&[("call_limit", V::Int(1))]),
             update(&[("daily_spending_limit", V::Bool(true))]),
+            // Only a param that declares both forms can change its form.
+            update(&[("memo", list.clone())]),
             update(&[("daily_spending_limit", V::Int(100))]),
         ] {
             assert!(refused.apply(&installed).is_err());
