@@ -563,8 +563,8 @@ pub mod host {
         /// Decision question, asked over the evaluation's current decision context.
         #[derive(Clone, Debug, Eq, PartialEq)]
         pub struct AllowitDecision<'a> {
-            /// Name of the decision context that the question belongs to. Empty asks in the
-            /// current context under its own name.
+            /// Identifier of this decision call within the policy, such as `report_purchase`.
+            /// The owner's answers and past decisions belong to it.
             pub id: &'a str,
             /// Question asked.
             pub query: &'a str,
@@ -607,9 +607,9 @@ pub mod host {
         pub fn decision(_ctx: &AllowitContext, _request: &AllowitDecision) -> Result<u32> {
             Err(AllowitError::Unsupported)
         }
-        /// Start a new decision context: an empty evidence window. `name` names it; `None`
-        /// starts an unnamed one.
-        pub fn new_decision_context(_ctx: &AllowitContext, _name: Option<&str>) -> Result {
+        /// Start a new decision context. `None` starts it empty; `Some(text)` starts it with
+        /// that text as its first contents. A decision asks in the current context.
+        pub fn new_decision_context(_ctx: &AllowitContext, _contents: Option<&str>) -> Result {
             Err(AllowitError::Unsupported)
         }
     }
