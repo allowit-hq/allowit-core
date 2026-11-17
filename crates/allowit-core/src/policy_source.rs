@@ -95,6 +95,9 @@ pub fn check_host_call_registry(host_calls: &[(&str, &str)]) -> Result<()> {
     Ok(())
 }
 
+mod derive;
+pub use derive::{Cause, Derived, Figure, ServerOnly, derive};
+
 fn source_shape_for(source: &str, host_calls: Option<&[(&str, &str)]>) -> Result<SourceShape> {
     let code = gate::checked_code(source, host_calls)?;
     let (prefix, canonical_only) = gate::standard_prefix(&code)?;
@@ -195,13 +198,13 @@ pub(crate) mod gate {
     fn before_ok(chars: &[char], i: usize) -> bool {
         i == 0 || !(chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_')
     }
-    fn starts(chars: &[char], i: usize, text: &str) -> bool {
+    pub(super) fn starts(chars: &[char], i: usize, text: &str) -> bool {
         (i..)
             .zip(text.chars())
             .all(|(k, c)| chars.get(k) == Some(&c))
     }
     /// `[bc]?r(#*)"` at `i`: the index after the opening quote and the number of hashes.
-    fn raw_string(chars: &[char], i: usize) -> Option<(usize, usize)> {
+    pub(super) fn raw_string(chars: &[char], i: usize) -> Option<(usize, usize)> {
         if !before_ok(chars, i) {
             return None;
         }
@@ -220,7 +223,7 @@ pub(crate) mod gate {
         (chars.get(k) == Some(&'"')).then_some((k + 1, k - start))
     }
     /// `[bc]?"(?:\\[\s\S]|[^"\\])*"` at `i`: the index after the closing quote.
-    fn string(chars: &[char], i: usize) -> Option<usize> {
+    pub(super) fn string(chars: &[char], i: usize) -> Option<usize> {
         if !before_ok(chars, i) {
             return None;
         }
@@ -243,7 +246,7 @@ pub(crate) mod gate {
         None
     }
     /// A char literal at `i`: the index after its closing quote.
-    fn char_literal(chars: &[char], i: usize) -> Option<usize> {
+    pub(super) fn char_literal(chars: &[char], i: usize) -> Option<usize> {
         if !before_ok(chars, i) {
             return None;
         }
@@ -661,7 +664,7 @@ pub(crate) mod gate {
         "Panicked",
     ];
     const VALUES: &[&str] = &["Int", "Bool", "Str", "Addr", "List"];
-    const SERVER_FUNCTIONS: &[&str] = &[
+    pub(super) const SERVER_FUNCTIONS: &[&str] = &[
         "price",
         "fetch",
         "internet_search",
@@ -670,7 +673,7 @@ pub(crate) mod gate {
         "request_screening",
         "new_decision_context",
     ];
-    const SERVER_TYPES: &[&str] = &[
+    pub(super) const SERVER_TYPES: &[&str] = &[
         "AllowitPrice",
         "AllowitFetch",
         "AllowitInternetSearch",
@@ -893,8 +896,13 @@ pub(crate) mod gate {
             }
         })
     }
+    /// Whether the portable profile admits the two-segment path `path`, such as `u64::from`.
+    pub(super) fn portable_path(path: &str) -> bool {
+        let lists = lists();
+        lists.paths.contains(path) || lists.constructors.contains(path)
+    }
     /// Python `str.isspace` for one character: Unicode whitespace plus the ASCII separators.
-    fn py_space(c: char) -> bool {
+    pub(super) fn py_space(c: char) -> bool {
         c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)
     }
     fn ascii_word(b: u8) -> bool {

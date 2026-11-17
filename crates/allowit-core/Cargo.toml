@@ -19,11 +19,19 @@ name = "policy_source"
 required-features = ["policy-source"]
 
 [[test]]
+name = "policy_derive"
+required-features = ["policy-source"]
+
+[[test]]
 name = "presentation"
 required-features = ["policy-source"]
 
 [[example]]
 name = "policy_wire"
+required-features = ["policy-source"]
+
+[[example]]
+name = "derive_policy"
 required-features = ["policy-source"]
 
 [features]
