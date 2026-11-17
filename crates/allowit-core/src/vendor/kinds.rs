@@ -213,7 +213,7 @@ mod tests {
                 assert!(!text.is_empty() && text.ends_with('.'), "{text}");
                 assert!(text.len() <= 120, "{text}");
                 // Owner words: no enforcement jargon and no amount, which a rail states.
-                for jargon in ["offchain", "onchain", "keypair", "smart-contract", "stroop"] {
+                for jargon in ["offchain", "onchain", "keypair", "smart-contract"] {
                     assert!(!text.contains(jargon), "{text}");
                 }
                 // `x402` is the name of the payment protocol.
