@@ -368,7 +368,35 @@ impl<'a> Parsed<'a> {
         None
     }
 
-    /// The branch statement whose keyword or `{` is token `p`.
+    /// Whether token `i`, the one after a closed block, continues an expression. Then the
+    /// block was no body of a statement: it was a value, such as the condition of
+    /// `while { true } { ... }`. Such a statement is not split.
+    fn continues(&self, i: usize) -> bool {
+        matches!(
+            self.text(i),
+            "{" | "."
+                | "?"
+                | "&&"
+                | "||"
+                | "=="
+                | "!="
+                | "+"
+                | "-"
+                | "*"
+                | "/"
+                | "%"
+                | "<"
+                | ">"
+                | "="
+                | "&"
+                | "|"
+                | "^"
+                | "as"
+        )
+    }
+
+    /// The branch statement whose keyword or `{` is token `p`. A condition, a matched value
+    /// or an iterated value holds at least one token before its block.
     fn branch(&self, p: usize, end: usize) -> Option<Branch> {
         let mut branch = Branch {
             end: p,
@@ -382,7 +410,7 @@ impl<'a> Parsed<'a> {
             "if" => {
                 let mut q = p;
                 loop {
-                    let open = self.block_after(q + 1, end)?;
+                    let open = self.block_after(q + 1, end).filter(|open| *open > q + 1)?;
                     let close = self.close(open)?;
                     branch.headers.push((q + 1, open));
                     branch.blocks.push((open, close));
@@ -404,7 +432,7 @@ impl<'a> Parsed<'a> {
                 }
             }
             "match" => {
-                let open = self.block_after(p + 1, end)?;
+                let open = self.block_after(p + 1, end).filter(|open| *open > p + 1)?;
                 let close = self.close(open)?;
                 branch.headers.push((p + 1, open));
                 branch.end = close;
@@ -416,7 +444,7 @@ impl<'a> Parsed<'a> {
                     let block_end = (self.text(body) == "{")
                         .then(|| self.close(body))
                         .flatten()
-                        .filter(|c| !matches!(self.text(c + 1), "." | "?"));
+                        .filter(|c| !self.continues(c + 1));
                     a = match block_end {
                         Some(c) => {
                             branch.blocks.push((body, c));
@@ -437,7 +465,7 @@ impl<'a> Parsed<'a> {
                 }
             }
             "while" | "for" => {
-                let open = self.block_after(p + 1, end)?;
+                let open = self.block_after(p + 1, end).filter(|open| *open > p + 1)?;
                 let close = self.close(open)?;
                 branch.headers.push((p + 1, open));
                 branch.blocks.push((open, close));
@@ -567,7 +595,7 @@ impl<'a> Parsed<'a> {
             } else {
                 let branch = self
                     .branch(p, close)
-                    .filter(|branch| !matches!(self.text(branch.end + 1), "." | "?"));
+                    .filter(|branch| !self.continues(branch.end + 1));
                 match branch {
                     None => {
                         let last = plain(self);

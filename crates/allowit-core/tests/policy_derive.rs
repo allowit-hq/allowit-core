@@ -402,6 +402,38 @@ fn a_helper_return_a_late_value_and_an_attributed_import_derive() {
     assert_eq!(import.kept, ["payment_limit"]);
 }
 
+/// A condition that is itself a block: the block after it is the body. The derivation does
+/// not split such a statement, so a `break` that depends on a server function takes the
+/// whole loop, with the check after it.
+#[test]
+fn a_statement_whose_condition_is_a_block_is_not_split() {
+    let looped = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    while { true } {\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            break;\n        }\n        assert!(false);\n    }\n    Ok(())\n}\n";
+    let derived = derive(looped).unwrap();
+    assert_eq!(derived.kept, ["payment_limit"]);
+    assert!(!derived.source.contains("while") && !derived.source.contains("assert!"));
+    for (shape, body) in [
+        (
+            "if",
+            "    if { ctx.request.amount > 0 } {\n        allowit::new_decision_context(ctx, None)?;\n        return Ok(());\n    }\n    assert!(ctx.request.amount > 5);\n",
+        ),
+        (
+            "match",
+            "    match { ctx.request.amount } {\n        _ => {\n            allowit::new_decision_context(ctx, None)?;\n            return Ok(());\n        }\n    }\n    assert!(ctx.request.amount > 5);\n",
+        ),
+    ] {
+        let source = format!(
+            "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n{body}    Ok(())\n}}\n"
+        );
+        let derived = derive(&source).unwrap();
+        assert_eq!(derived.kept, ["payment_limit"], "{shape}");
+        assert!(
+            !derived.source.contains("assert!"),
+            "{shape}: {}",
+            derived.source
+        );
+    }
+}
+
 /// A local `Err` that approves, declared inside an expression, would make a `return Err(...)`
 /// an approval. The derivation reads that form as a denial, so it refuses the source.
 #[test]
