@@ -76,7 +76,7 @@ macro_rules! golden {
         )),*];
         $(
             // Authored policy source keeps its own style.
-            #[allow(dead_code, unused, clippy::all)]
+            #[allow(dead_code, unused, non_snake_case, clippy::all)]
             mod $module {
                 pub mod owner {
                     use crate::served as allowit;
@@ -112,6 +112,8 @@ golden!(
     late_value => "late-value",
     attributed_import => "attributed-import",
     stored_state => "stored-state",
+    type_named_binding => "type-named-binding",
+    unsplit_tail => "unsplit-tail",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -443,6 +445,30 @@ fn a_local_err_inside_an_expression_is_refused() {
     assert!(derive(source).unwrap_err().contains("local `Ok` or `Err`"));
 }
 
+/// A binding with the name of a type is a binding: a statement that reads it after a server
+/// value bound it leaves. A check in a statement that leaves whole names what it reads itself:
+/// one that reads a server value cannot move, and one that does not can.
+#[test]
+fn a_type_named_binding_is_followed_and_an_unsplit_check_names_what_it_reads() {
+    let named = derive(include_str!("fixtures/derive/type-named-binding.rs")).unwrap();
+    assert!(named.kept.is_empty() && !named.source.contains("assert"));
+    let [check] = &named.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!((check.cause, check.movable()), (Cause::ServerValue, false));
+
+    let tail = derive(include_str!("fixtures/derive/unsplit-tail.rs")).unwrap();
+    let reported: Vec<(u32, Cause, bool)> = tail
+        .server_only
+        .iter()
+        .map(|check| (check.line, check.cause, check.movable()))
+        .collect();
+    assert_eq!(
+        reported,
+        [(8, Cause::ServerValue, false), (9, Cause::NotSplit, true)]
+    );
+}
+
 /// A contract wallet keeps only the figures of its canonical rules, and the server keeps no
 /// policy state of its own. So a policy that writes state is refused wherever the write
 /// stands: before a server call, after one, in a local function, or with no server call.
@@ -766,6 +792,8 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("late-value", late_value::BOTH),
         ("attributed-import", attributed_import::BOTH),
         ("stored-state", stored_state::BOTH),
+        ("type-named-binding", type_named_binding::BOTH),
+        ("unsplit-tail", unsplit_tail::BOTH),
     ] {
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {

@@ -590,14 +590,15 @@ impl<'a> Parsed<'a> {
         self.nodes.len() - 1
     }
 
-    /// The names that the pattern in `from..to` binds: every lowercase name that is no path
-    /// segment, call, struct name or macro.
+    /// The names that the pattern in `from..to` binds: every name that is no path segment,
+    /// call, struct name or macro. A name that starts with an uppercase letter counts too: a
+    /// binding may carry the name of a type, and a unit variant read as a name only makes more
+    /// statements leave.
     fn bound(&self, from: usize, to: usize) -> Vec<String> {
         (from..to)
             .filter_map(|i| {
                 let name = self.word(i)?;
                 let free = !matches!(name, "mut" | "ref" | "_")
-                    && !name.starts_with(|c: char| c.is_ascii_uppercase())
                     && self.text(i.wrapping_sub(1)) != "::"
                     && !matches!(self.text(i + 1), "(" | "::" | "{" | "!");
                 free.then(|| name.to_owned())
@@ -1493,34 +1494,76 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     let mut server_only = vec![];
+    // A statement that is not split reports each check with the cause of what the check
+    // itself reads. Its own `let` names count as server values when the statement depends on a
+    // server function, and as stored state when it reads stored state.
+    let unsplit = |id: usize| -> Option<(HashSet<String>, Cause)> {
+        let own = own_cause[id]?;
+        let (from, to) = range(id);
+        let mut local = HashSet::new();
+        for k in (from..to).filter(|k| p.word(*k) == Some("let")) {
+            let end = p.find(k + 1, to, &["=", ":", ";"]).unwrap_or(to);
+            local.extend(p.bound(k + 1, end));
+        }
+        let local_cause = match own {
+            Cause::StoredState => Cause::StoredState,
+            _ => Cause::ServerValue,
+        };
+        Some((local, local_cause))
+    };
     let reported = order
         .iter()
         .copied()
         .filter(|id| gone[*id])
         .map(|id| {
             let structural = cause[id].unwrap_or(Cause::ServerValue);
+            let braced = p.nodes[id].braced;
             let why = match own_cause[id] {
-                Some(own) if !p.nodes[id].braced => own,
+                Some(own) if !braced => own,
                 _ => structural,
             };
-            (own(id), why)
+            (own(id), why, braced.then(|| unsplit(id)).flatten())
         })
         .chain(
             named
                 .iter()
                 .copied()
                 .filter(|id| gone[*id] && !in_execute(*id))
-                .map(|id| (vec![range(id)], Cause::NotSplit)),
+                .map(|id| (vec![range(id)], Cause::NotSplit, None)),
         );
-    for (ranges, why) in reported {
+    for (ranges, why, inside) in reported {
         for i in ranges.into_iter().flat_map(|(from, to)| from..to) {
-            if let Some(check) = p.check_at(i) {
-                server_only.push(ServerOnly {
-                    line: p.line(p.tokens[i].start),
-                    check,
-                    cause: why,
-                });
-            }
+            let Some(check) = p.check_at(i) else {
+                continue;
+            };
+            let cause = match &inside {
+                // The check's own tokens: the keyword or path, then its bracketed arguments.
+                Some((local, local_cause)) => {
+                    let end = (i..(i + 4).min(count))
+                        .find(|k| matches!(p.text(*k), "(" | "[" | "{"))
+                        .and_then(|open| p.close(open))
+                        .map_or(i + 1, |close| close + 1);
+                    if p.calls(i, end, &callers) {
+                        Cause::ServerCall
+                    } else if p.mentions(i, end, &served) {
+                        Cause::ServerValue
+                    } else if p.mentions(i, end, local) {
+                        *local_cause
+                    } else if (i..end).any(|k| p.state_at(k) || p.names(k, &readers))
+                        || p.mentions(i, end, &stored)
+                    {
+                        Cause::StoredState
+                    } else {
+                        why
+                    }
+                }
+                None => why,
+            };
+            server_only.push(ServerOnly {
+                line: p.line(p.tokens[i].start),
+                check,
+                cause,
+            });
         }
     }
     server_only.sort_by_key(|check| check.line);
