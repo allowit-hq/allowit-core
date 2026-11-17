@@ -105,7 +105,6 @@ golden!(
     mutable_name => "mutable-name",
     value_branches => "value-branches",
     server_tail => "server-tail",
-    mutable_alias => "mutable-alias",
     labeled_block => "labeled-block",
     text_temporary => "text-temporary",
     return_before_item => "return-before-item",
@@ -286,29 +285,60 @@ fn the_rules_after_an_early_approval_on_a_server_value_leave() {
     assert!(!looped.source.contains("for ") && !looped.source.contains("checked"));
 }
 
-/// A mutable reference lets a leaving statement assign a name that it does not mention. The
-/// check that reads that name leaves too, and a state write of it is refused.
+/// A mutable reference lets a statement assign a name that it does not mention. The rule
+/// follows names, so it derives no part of a policy with a server part that takes one: not
+/// through a named alias, and not through a reference to a value without a name.
 #[test]
-fn a_name_that_a_leaving_statement_assigns_through_a_reference_leaves() {
-    let source = include_str!("fixtures/derive/mutable-alias.rs");
+fn a_policy_with_a_server_part_that_takes_a_mutable_reference_is_refused() {
+    let alias = include_str!("fixtures/derive/mutable-alias.rs");
+    let unnamed = alias
+        .replace("    let mut total: i128 = 0;\n", "")
+        .replace("let alias = &mut total;", "let total = &mut 0i128;")
+        .replace("*alias = {", "*total = {")
+        .replace("assert!(total == 1);", "assert!(*total == 1);");
+    assert!(unnamed.contains("let total = &mut 0i128;") && unnamed.contains("*total == 1"));
+    let pattern = alias.replace("let alias = &mut total;", "let ref mut alias = total;");
+    for source in [alias, unnamed.as_str(), pattern.as_str()] {
+        let error = derive(source).unwrap_err();
+        assert!(error.contains("mutable reference"), "{error}");
+    }
+    // The same policy without its server function has no server part: it is its own part.
+    let plain = alias.replace("        allowit::new_decision_context(ctx, None)?;\n", "");
+    assert_eq!(derive(&plain).unwrap().source, plain);
+}
+
+/// Two local functions with one name: the rule cannot tell which one a statement calls, so
+/// it derives no part of such a policy with a server part.
+#[test]
+fn two_local_items_with_one_name_are_refused() {
+    let source = "use allowit::prelude::*;\nfn limit(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    fn limit(ctx: &AllowitContext) -> allowit::Result {\n        assert!(ctx.request.amount < 100);\n        Ok(())\n    }\n    limit(ctx)?;\n    Ok(())\n}\n";
+    let error = derive(source).unwrap_err();
+    assert!(error.contains("declare `limit` twice"), "{error}");
+}
+
+/// An import in a block keeps the names that the kept code reads. A check in a branch that
+/// left is movable only when it reads no server value itself.
+#[test]
+fn a_block_import_keeps_its_portable_names_and_a_check_reports_its_own_cause() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    use allowit::{AllowitDecision, AllowitOperation};\n    let score = allowit::decision(ctx, &AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    if score < 9000 {\n        let doubled = score + score;\n        assert!(doubled > 5);\n        assert!(ctx.request.amount > 0);\n    }\n    assert!(ctx.request.operation == AllowitOperation::transfer);\n    Ok(())\n}\n";
     let derived = derive(source).unwrap();
-    assert!(!derived.source.contains("total") && !derived.source.contains("alias"));
-    assert_eq!(derived.kept, ["payment_limit", "tokens"]);
-    let [check] = &derived.server_only[..] else {
-        panic!("one check leaves");
-    };
-    assert_eq!(
-        (check.check.as_str(), check.cause),
-        ("assert", Cause::ServerValue)
-    );
-    let written = source.replace(
-        "    assert!(total == 1);\n",
-        "    allowit::set_state(ctx, \"total\", total)?;\n",
-    );
     assert!(
-        derive(&written)
-            .unwrap_err()
-            .contains("cannot write policy state")
+        derived
+            .source
+            .contains("    use allowit::AllowitOperation;\n")
+    );
+    assert!(derived.source.contains("AllowitOperation::transfer"));
+    let reported: Vec<(u32, Cause, bool)> = derived
+        .server_only
+        .iter()
+        .map(|check| (check.line, check.cause, check.movable()))
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            (7, Cause::ServerValue, false),
+            (8, Cause::ServerBranch, true)
+        ]
     );
 }
 
@@ -593,7 +623,6 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("mutable-name", mutable_name::BOTH),
         ("value-branches", value_branches::BOTH),
         ("server-tail", server_tail::BOTH),
-        ("mutable-alias", mutable_alias::BOTH),
         ("labeled-block", labeled_block::BOTH),
         ("text-temporary", text_temporary::BOTH),
         ("return-before-item", return_before_item::BOTH),

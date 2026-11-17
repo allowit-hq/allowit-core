@@ -16,9 +16,8 @@
 //! 1. it makes a server call, names a server request type, or reads owner text with
 //!    `as_str()`, which only the server can read. A server call is a call of a server
 //!    function, of a registered package function, or of a local function that makes one;
-//! 2. it reads a name that a leaving statement binds, or a `mut` name that a leaving statement
-//!    can assign. In a policy that takes a mutable reference, a leaving statement can assign
-//!    every `mut` name;
+//! 2. it reads a name that a leaving statement binds, or a name that a leaving statement can
+//!    assign: a `mut` name, or a name that its `let` declares without a value;
 //! 3. it is an `if`, `match`, `while` or `for` whose condition, matched value, pattern guard
 //!    or iterated value does 1 or 2: the whole statement leaves, with every branch;
 //! 4. it is a `let` that only reads an owner param, a request field or a constant, and only
@@ -38,7 +37,10 @@
 //! leaves whole.
 //!
 //! [`derive`] refuses a source in which a leaving statement writes policy state: the chain
-//! could not store that write.
+//! could not store that write. It also refuses a source with a server part that the rule
+//! cannot follow by its names: one that takes a mutable reference (`&mut`, `ref mut`), which
+//! lets a statement assign a name that it does not mention; one that declares two local
+//! functions or constants with one name; and one that declares a local `Ok` or `Err`.
 use super::{Result, gate, param_keys, source_shape};
 use std::collections::HashSet;
 
@@ -805,10 +807,8 @@ impl<'a> Parsed<'a> {
 struct Scope<'a> {
     /// The statements of the body of `execute`.
     body: &'a [usize],
-    /// Every name that `execute` declares `mut`.
+    /// Every name of `execute` that a later statement can assign.
     mutable: &'a HashSet<String>,
-    /// The policy takes a mutable reference.
-    aliasing: bool,
 }
 
 /// One change of the source text.
@@ -926,16 +926,9 @@ pub fn derive(source: &str) -> Result<Derived> {
             mutable.extend(p.bound(i + 1, pattern));
         }
     }
-    // A mutable reference lets a statement assign a name that it does not mention. The
-    // derivation does not follow references: in a policy that takes one, a leaving statement
-    // can assign every `mut` name.
-    let aliasing = (0..count).any(|i| {
-        p.word(i + 1) == Some("mut") && (matches!(p.text(i), "&" | "&&") || p.text(i) == "ref")
-    });
     let scope = Scope {
         body: &body,
         mutable: &mutable,
-        aliasing,
     };
 
     // The statements of `execute` in source order, with the statements of their blocks.
@@ -1001,9 +994,6 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
         mark(p, cause, tainted, id, why);
         let (from, to) = (p.nodes[id].first, p.nodes[id].last + 1);
-        if scope.aliasing {
-            tainted.extend(scope.mutable.iter().cloned());
-        }
         for i in from..to {
             if p.names(i, scope.mutable) {
                 tainted.extend(p.word(i).map(str::to_owned));
@@ -1048,6 +1038,10 @@ pub fn derive(source: &str) -> Result<Derived> {
         let before = cause.iter().flatten().count() + tainted.len();
         for id in &order {
             if cause[*id].is_some() {
+                continue;
+            }
+            // A `use` item is no step: it keeps the names that the kept code reads.
+            if p.nodes[*id].shape == Shape::Item && p.text(p.nodes[*id].key) == "use" {
                 continue;
             }
             let ranges = own(*id);
@@ -1155,6 +1149,27 @@ pub fn derive(source: &str) -> Result<Derived> {
     });
     if changed && shadowed {
         return Err("A policy that depends on a server function cannot define a local `Ok` or `Err`. Rename that function or constant.".into());
+    }
+    // A mutable reference lets a statement assign a name that it does not mention. The rule
+    // follows names, not references, so it derives no part of such a policy.
+    let aliasing = (0..count).any(|i| {
+        p.word(i + 1) == Some("mut") && (matches!(p.text(i), "&" | "&&") || p.text(i) == "ref")
+    });
+    if changed && aliasing {
+        return Err("A policy for a contract wallet that depends on a server function cannot take a mutable reference (`&mut` or `ref mut`). Assign the name itself.".into());
+    }
+    // Two local functions or constants with one name: the rule cannot tell which one a
+    // statement calls.
+    let mut seen: HashSet<&str> = HashSet::new();
+    if let Some(twice) = named
+        .iter()
+        .filter_map(|id| p.nodes[*id].name.as_deref())
+        .find(|name| !seen.insert(name))
+        .filter(|_| changed)
+    {
+        return Err(format!(
+            "A policy for a contract wallet that depends on a server function cannot declare `{twice}` twice. Rename one of the two."
+        ));
     }
 
     // The text: each topmost leaving statement leaves once.
@@ -1311,12 +1326,55 @@ pub fn derive(source: &str) -> Result<Derived> {
 
     // Each leaving statement reports its own checks: a split statement those of its
     // conditions, and its statements theirs. A leaving local function is not split.
+    //
+    // A check that itself calls a server function or reads a server value cannot run on
+    // chain wherever it stands. So its cause is its own, also inside a branch that left.
+    let mut served: HashSet<String> = HashSet::new();
+    let mut own_cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
+    loop {
+        let before = served.len() + own_cause.iter().flatten().count();
+        for id in order.iter().copied().filter(|id| cause[*id].is_some()) {
+            let ranges = own(id);
+            let calls = ranges
+                .iter()
+                .any(|(from, to)| p.server(*from, *to, &helpers));
+            let reads = p.nodes[id].shape != Shape::Item
+                && ranges
+                    .iter()
+                    .any(|(from, to)| p.mentions(*from, *to, &served));
+            if !calls && !reads {
+                continue;
+            }
+            own_cause[id] = Some(if calls {
+                Cause::ServerCall
+            } else {
+                Cause::ServerValue
+            });
+            served.extend(p.nodes[id].names.iter().cloned());
+            let (from, to) = range(id);
+            for i in from..to {
+                if p.names(i, &mutable) {
+                    served.extend(p.word(i).map(str::to_owned));
+                }
+            }
+        }
+        if served.len() + own_cause.iter().flatten().count() == before {
+            break;
+        }
+    }
     let mut server_only = vec![];
     let reported = order
         .iter()
         .copied()
         .filter(|id| gone[*id])
-        .map(|id| (own(id), cause[id].unwrap_or(Cause::ServerValue)))
+        .map(|id| {
+            let structural = cause[id].unwrap_or(Cause::ServerValue);
+            let why = match own_cause[id] {
+                Some(own) if !p.nodes[id].braced => own,
+                _ => structural,
+            };
+            (own(id), why)
+        })
         .chain(
             named
                 .iter()
