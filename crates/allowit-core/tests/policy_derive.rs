@@ -111,6 +111,7 @@ golden!(
     helper_return => "helper-return",
     late_value => "late-value",
     attributed_import => "attributed-import",
+    stored_state => "stored-state",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -442,32 +443,122 @@ fn a_local_err_inside_an_expression_is_refused() {
     assert!(derive(source).unwrap_err().contains("local `Ok` or `Err`"));
 }
 
+/// A contract wallet keeps only the figures of its canonical rules, and the server keeps no
+/// policy state of its own. So a policy that writes state is refused wherever the write
+/// stands: before a server call, after one, in a local function, or with no server call.
 #[test]
-fn a_state_write_that_leaves_is_refused() {
+fn a_policy_that_writes_state_is_refused() {
     let error = derive(STATE_WRITE).unwrap_err();
     assert!(
-        error.contains("cannot write policy state") && error.contains("line 7"),
+        error.contains("cannot write policy state") && error.contains("line 5"),
         "{error}"
     );
-    // The same write before the server call stays, and the source derives.
-    let moved = STATE_WRITE.replace("    allowit::set_state(ctx, \"score\", score)?;\n", "");
-    let derived = derive(&moved).unwrap();
-    assert!(
-        derived
-            .source
-            .contains("allowit::set_state(ctx, \"seen\", true)?;")
+    let first = STATE_WRITE.replace("    allowit::set_state(ctx, \"seen\", true)?;\n", "");
+    assert!(derive(&first).unwrap_err().contains("line 6"));
+    let second = STATE_WRITE.replace("    allowit::set_state(ctx, \"score\", score)?;\n", "");
+    assert!(derive(&second).unwrap_err().contains("line 5"));
+    // A local function that writes state, called or not.
+    let helper = second.replace(
+        "pub fn execute",
+        "fn remember(ctx: &AllowitContext) -> allowit::Result {\n    Ok(())\n}\nfn unused(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"score\", 1u32)\n}\npub fn execute",
+    ).replace("    allowit::set_state(ctx, \"seen\", true)?;\n", "    remember(ctx)?;\n");
+    assert!(derive(&helper).unwrap_err().contains("line 8"), "{helper}");
+    // A source with no server function that writes state.
+    let plain = include_str!("fixtures/derive/no-server-function.rs").replace(
+        "    Ok(())\n}",
+        "    allowit::set_state(ctx, \"last\", ctx.request.amount)?;\n    Ok(())\n}",
     );
-    // A local function that writes state, called from a leaving statement, is refused too.
-    let helper = STATE_WRITE
-        .replace(
-            "pub fn execute",
-            "fn remember(ctx: &AllowitContext, score: u32) -> allowit::Result {\n    allowit::set_state(ctx, \"score\", score)\n}\npub fn execute",
-        )
-        .replace("allowit::set_state(ctx, \"score\", score)?;", "remember(ctx, score)?;");
+    assert!(plain.contains("set_state"));
     assert!(
-        derive(&helper)
+        derive(&plain)
             .unwrap_err()
             .contains("cannot write policy state")
+    );
+}
+
+/// A statement that reads stored state leaves: the server reads the same figures when it
+/// evaluates the whole source. The chain keeps the figures that its kept rules read.
+#[test]
+fn a_read_of_stored_state_leaves_and_the_kept_rules_name_their_figures() {
+    let derived = derive(include_str!("fixtures/derive/stored-state.rs")).unwrap();
+    let reported: Vec<(u32, &str, Cause, bool)> = derived
+        .server_only
+        .iter()
+        .map(|check| {
+            (
+                check.line,
+                check.check.as_str(),
+                check.cause,
+                check.movable(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            (6, "assert", Cause::StoredState, false),
+            (8, "destinations", Cause::ServerBranch, true)
+        ]
+    );
+    assert_eq!(Cause::StoredState.code(), "stored_state");
+    assert_eq!(derived.kept, ["payment_limit", "daily_spending_limit"]);
+    let figures: Vec<(&str, bool)> = derived
+        .figures
+        .iter()
+        .map(|figure| (figure.key, figure.daily))
+        .collect();
+    assert_eq!(figures, [("day_spent", true), ("day_unpriced", true)]);
+
+    // A local function that only reads state leaves as a read of state, not as a server call.
+    let helper = include_str!("fixtures/derive/stored-state.rs")
+        .replace(
+            "pub fn execute",
+            "fn count(ctx: &AllowitContext) -> Option<u64> {\n    allowit::get_state(ctx, \"calls\").ok().flatten()\n}\npub fn execute",
+        )
+        .replace("allowit::get_state(ctx, \"calls\")?;", "count(ctx);");
+    let derived = derive(&helper).unwrap();
+    assert!(!derived.source.contains("fn count") && !derived.source.contains("get_state"));
+    assert_eq!(derived.server_only[0].cause, Cause::StoredState);
+    // A server value comes before stored state.
+    let mixed = include_str!("fixtures/derive/stored-state.rs").replace(
+        "    assert!(calls != Some(1_000));",
+        "    let score = allowit::decision(ctx, &allowit::AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    assert!(calls != Some(1_000) && score > 1);",
+    );
+    let derived = derive(&mixed).unwrap();
+    let causes: Vec<Cause> = derived
+        .server_only
+        .iter()
+        .map(|check| check.cause)
+        .collect();
+    assert_eq!(causes, [Cause::ServerValue, Cause::ServerBranch]);
+}
+
+/// Each kept canonical rule names the figures that it reads; a check that keeps no figure,
+/// such as `payment_limit`, names none.
+#[test]
+fn the_figures_are_those_that_the_kept_rules_read() {
+    let sample = derive(include_str!("fixtures/derive/sample-mandate.rs")).unwrap();
+    let keys: Vec<&str> = sample.figures.iter().map(|figure| figure.key).collect();
+    assert_eq!(
+        keys,
+        [
+            "spent",
+            "unpriced",
+            "day_spent",
+            "day_total",
+            "day_unpriced"
+        ]
+    );
+    let only = derive(include_str!("fixtures/derive/only-server-functions.rs")).unwrap();
+    assert!(only.figures.is_empty());
+    let calls = derive(
+        "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::call_limit(ctx, &ctx.params[allowit::CALL_LIMIT])?;\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\n",
+    )
+    .unwrap();
+    assert_eq!(calls.figures.len(), 1);
+    assert_eq!(
+        (calls.figures[0].key, calls.figures[0].daily),
+        ("calls", false)
     );
 }
 
@@ -559,8 +650,8 @@ fn every_admitted_vector_derives_to_portable_source() {
 }
 
 /// The property that the derivation keeps: the on-chain part never denies a request that the
-/// whole source allows, and it then stores the same policy state. Every golden source runs
-/// with its on-chain part over the same requests, params and server answers.
+/// whole source allows, and it then stores the same figures. Every golden source runs with its
+/// on-chain part over the same requests, params, stored figures and server answers.
 #[test]
 fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
     use allowit_core::{
@@ -632,6 +723,19 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         set("allow_above", AllowitValue::Int(8_000));
         map
     };
+    // No state, and the figures of a wallet that made many payments today.
+    let states = [AllowitMap::new(), {
+        let mut state = AllowitMap::new();
+        let mut set = |key: &str, value: AllowitValue| {
+            state.insert(key.into(), value);
+        };
+        set("calls", AllowitValue::Int(1_000));
+        set("spent", AllowitValue::Int(450));
+        set("day", AllowitValue::Int(1_800_000_000 / 86_400));
+        set("day_spent", AllowitValue::Int(450));
+        set("day_total", AllowitValue::Int(450));
+        state
+    }];
     let operations = [
         AllowitOperation::transfer,
         AllowitOperation::swap,
@@ -661,16 +765,20 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("helper-return", helper_return::BOTH),
         ("late-value", late_value::BOTH),
         ("attributed-import", attributed_import::BOTH),
+        ("stored-state", stored_state::BOTH),
     ] {
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {
                 for recipient in ["SELLER", "STRANGER"] {
                     for limit in [500i128, 10_000_000] {
-                        for answer in [(false, 0), (true, 0), (true, 4_000), (true, 9_500)] {
+                        for (answer, state) in [(false, 0), (true, 0), (true, 4_000), (true, 9_500)]
+                            .into_iter()
+                            .flat_map(|answer| states.iter().map(move |state| (answer, state)))
+                        {
                             let context = || AllowitContext {
                                 env: AllowitEnv::new(),
                                 params: AllowitParams::from(params(limit)),
-                                state: AllowitMap::new(),
+                                state: state.clone(),
                                 request: AllowitRequest {
                                     operation: operation.clone(),
                                     asset: address("ASSET"),

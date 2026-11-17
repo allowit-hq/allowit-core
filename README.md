@@ -174,6 +174,27 @@ primitive type names and names that are not lowercase identifiers.
 server calls and the rail evidence functions: at most 128 calls, and policy source can call each one.
 The policy-source gate rejects every path that is not registered.
 
+## On-chain part of a policy
+
+The owner writes and signs one policy source, and the server evaluates all of it. A contract cannot call a
+server function, so a Custom wallet compiles the part of the source that
+[`policy_source::derive`](crates/allowit-core/src/policy_source/derive.rs) keeps: the steps that the chain
+can check by itself. Nobody writes the derived part. It is a pure function of the source bytes, so every
+client derives the same part, byte for byte. A source with no server function is its own on-chain part.
+
+A statement of `execute` leaves the derived part when it calls a server function, a package function or a
+local function that calls one, reads owner text with `as_str()` or reads stored state with `get_state`;
+when it reads a name that a leaving statement sets; when it is a branch or loop whose condition does so; and
+when it comes after an early approval that depends on a server function. A rule inside a branch whose
+condition depends on a server function leaves with the branch: kept alone, it could deny on chain what the
+owner's policy allows. `Derived::server_only` lists each check that leaves, with its line and cause, and
+`ServerOnly::movable` says whether the owner can move it out of the branch so that the chain enforces it too.
+The derived part never denies a request that the whole source allows.
+
+A contract wallet stores no policy state of its own. `Derived::figures` names the cumulated figures that the
+kept canonical rules read, each daily or total, and the wallet keeps only those. `derive` refuses a source
+that writes policy state with `set_state`.
+
 ## Wallet kinds
 
 [`vendor::kinds`](crates/allowit-core/src/vendor/kinds.rs) describes the four wallet kinds that every host offers.
@@ -186,7 +207,7 @@ offer it first to an owner who deploys.
 | `native` (recommended) | offchain | keypair | Your agent's own wallet. Allowit checks each payment against your policy before it co-signs. | Every x402 seller. | The lowest: none when the seller's facilitator settles the payment. |
 | `simple` | offchain | contract | A contract wallet holds the funds. Allowit checks each payment against your policy, as for Native. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
 | `standard` | onchain | contract | A contract wallet enforces the standard rules of your policy on chain. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
-| `custom` | onchain | contract | A contract built from your policy enforces all of it on chain. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
+| `custom` | onchain | contract | A contract from your policy enforces each step that the chain can check. Allowit checks the rest before it co-signs. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
 
 A rail advertises its kinds through `RailPlugin::wallet_kinds(network)`. `WalletKind::binding` and
 `WalletKind::from_binding` convert between a kind and the custody and tier of an installation.

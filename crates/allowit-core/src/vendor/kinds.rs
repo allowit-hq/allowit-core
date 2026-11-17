@@ -118,7 +118,7 @@ pub const WALLET_KINDS: [WalletKindInfo; 4] = [
     WalletKindInfo {
         id: WalletKind::Custom,
         title: "Custom",
-        explanation: "A contract built from your policy enforces all of it on chain.",
+        explanation: "A contract from your policy enforces each step that the chain can check. Allowit checks the rest before it co-signs.",
         recommended: false,
         pays: PROOF_SELLERS,
         fee: CONTRACT_FEE,

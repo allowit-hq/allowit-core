@@ -11,6 +11,8 @@ fn main() {
             print!("{}", derived.source);
             eprintln!("left: {:?}", derived.left);
             eprintln!("kept: {:?}", derived.kept);
+            let figures: Vec<&str> = derived.figures.iter().map(|figure| figure.key).collect();
+            eprintln!("figures: {figures:?}");
             for check in derived.server_only {
                 eprintln!(
                     "server only: line {} {} ({})",

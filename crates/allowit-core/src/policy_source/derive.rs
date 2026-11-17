@@ -13,9 +13,10 @@
 //!
 //! A statement of `execute` leaves when:
 //!
-//! 1. it makes a server call, names a server request type, or reads owner text with
-//!    `as_str()`, which only the server can read. A server call is a call of a server
-//!    function, of a registered package function, or of a local function that makes one;
+//! 1. it makes a server call, names a server request type, reads owner text with `as_str()`,
+//!    which only the server can read, or reads stored policy state with `allowit::get_state`.
+//!    A server call is a call of a server function, of a registered package function, or of a
+//!    local function that makes one;
 //! 2. it reads a name that a leaving statement binds, or a name that a leaving statement can
 //!    assign: a `mut` name, or a name that its `let` declares without a value;
 //! 3. it is an `if`, `match`, `while` or `for` whose condition, matched value, pattern guard
@@ -36,11 +37,16 @@
 //! or a block that ends with `;`, or that is the last expression of `execute`, stays whole or
 //! leaves whole.
 //!
-//! [`derive`] refuses a source in which a leaving statement writes policy state: the chain
-//! could not store that write. It also refuses a source with a server part that the rule
-//! cannot follow by its names: one that takes a mutable reference (`&mut`, `ref mut`), which
-//! lets a statement assign a name that it does not mention; one that declares two local
-//! functions or constants with one name; and one that declares a local `Ok` or `Err`.
+//! A contract wallet stores no policy state of its own: it keeps only the cumulated figures
+//! that its kept canonical rules read ([`Derived::figures`]). So a statement that reads stored
+//! state leaves (rule 1), and the server reads the same figures when it evaluates the whole
+//! source. [`derive`] refuses a source that writes policy state (`allowit::set_state`)
+//! anywhere: neither the chain nor the server stores such a write.
+//!
+//! [`derive`] also refuses a source with a server part that the rule cannot follow by its
+//! names: one that takes a mutable reference (`&mut`, `ref mut`), which lets a statement
+//! assign a name that it does not mention; one that declares two local functions or
+//! constants with one name; and one that declares a local `Ok` or `Err`.
 use super::{Result, gate, param_keys, source_shape};
 use std::collections::HashSet;
 
@@ -51,7 +57,10 @@ pub enum Cause {
     ServerCall,
     /// The statement reads a value that a server call gave.
     ServerValue,
-    /// The statement is in a branch whose condition depends on a server function.
+    /// The statement reads stored policy state, which only the server reads.
+    StoredState,
+    /// The statement is in a branch whose condition depends on a server function or on
+    /// stored state.
     ServerBranch,
     /// The statement comes after an early exit that depends on a server function.
     AfterServerExit,
@@ -65,6 +74,7 @@ impl Cause {
         match self {
             Self::ServerCall => "server_call",
             Self::ServerValue => "server_value",
+            Self::StoredState => "stored_state",
             Self::ServerBranch => "server_branch",
             Self::AfterServerExit => "after_server_exit",
             Self::NotSplit => "not_split",
@@ -115,6 +125,75 @@ pub struct Derived {
     /// The deterministic checks that stay, in source order and without repetition. An empty
     /// list means that the contract enforces nothing of the policy beyond its signatures.
     pub kept: Vec<String>,
+    /// The cumulated figures that the kept checks read, in a fixed order and without
+    /// repetition. A contract wallet keeps these figures and no other state.
+    pub figures: Vec<Figure>,
+}
+
+/// One cumulated figure that a kept canonical rule reads: a key of the standard state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Figure {
+    /// The standard state key, such as `day_spent`.
+    pub key: &'static str,
+    /// Whether the figure counts one UTC day. A daily figure starts again at zero each day;
+    /// a total counts the wallet's whole life.
+    pub daily: bool,
+}
+
+/// Every figure, in the fixed order of [`Derived::figures`], with the canonical rules that
+/// read it.
+const FIGURES: &[(Figure, &[&str])] = &[
+    (
+        Figure {
+            key: allowit::CALLS,
+            daily: false,
+        },
+        &["call_limit"],
+    ),
+    (
+        Figure {
+            key: allowit::SPENT,
+            daily: false,
+        },
+        &["lifetime_spending_limit"],
+    ),
+    (
+        Figure {
+            key: allowit::UNPRICED,
+            daily: false,
+        },
+        &["lifetime_spending_limit"],
+    ),
+    (
+        Figure {
+            key: allowit::DAY_SPENT,
+            daily: true,
+        },
+        &["daily_spending_limit"],
+    ),
+    (
+        Figure {
+            key: allowit::DAY_TOTAL,
+            daily: true,
+        },
+        &["daily_volume_limit"],
+    ),
+    (
+        Figure {
+            key: allowit::DAY_UNPRICED,
+            daily: true,
+        },
+        &["daily_spending_limit", "daily_volume_limit"],
+    ),
+];
+
+/// The figures that the checks in `kept` read.
+fn figures(kept: &[String]) -> Vec<Figure> {
+    FIGURES
+        .iter()
+        .filter(|(_, rules)| rules.iter().any(|rule| kept.iter().any(|k| k == rule)))
+        .map(|(figure, _)| *figure)
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,7 +754,7 @@ impl<'a> Parsed<'a> {
             return true;
         }
         if let Some(function) = self.allowit_path(i) {
-            return gate::SERVER_FUNCTIONS.contains(&function);
+            return gate::SERVER_FUNCTIONS.contains(&function) || function == "get_state";
         }
         let package = self.text(i + 1) == "::"
             && self.text(i + 3) == "("
@@ -695,12 +774,23 @@ impl<'a> Parsed<'a> {
             && self.text(i + 1) == "("
     }
 
+    /// Whether token `i` reads stored policy state: `allowit::get_state`.
+    fn state_at(&self, i: usize) -> bool {
+        self.allowit_path(i) == Some("get_state")
+    }
+
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {
         (from..to).any(|i| self.server_at(i) || self.server_text_at(i) || self.names(i, helpers))
     }
 
-    fn writes(&self, from: usize, to: usize, writers: &HashSet<String>) -> bool {
-        (from..to).any(|i| self.allowit_path(i) == Some("set_state") || self.names(i, writers))
+    /// Whether the tokens make a server call other than a read of stored state. `callers` are
+    /// the local functions that make one.
+    fn calls(&self, from: usize, to: usize, callers: &HashSet<String>) -> bool {
+        (from..to).any(|i| {
+            (self.server_at(i) && !self.state_at(i))
+                || self.server_text_at(i)
+                || self.names(i, callers)
+        })
     }
 
     /// The deterministic check that token `i` starts, if any.
@@ -937,7 +1027,19 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     };
     let helpers = closure(&|from, to, found| p.server(from, to, found));
-    let writers = closure(&|from, to, found| p.writes(from, to, found));
+    // The helpers that make a server call other than a read of stored state. The others only
+    // read stored state.
+    let callers = closure(&|from, to, found| p.calls(from, to, found));
+    let readers: HashSet<String> = helpers.difference(&callers).cloned().collect();
+
+    // Neither a contract wallet nor the server stores a policy's own state: the wallet keeps
+    // only the figures of its canonical rules.
+    if let Some(write) = (0..count).find(|i| p.allowit_path(*i) == Some("set_state")) {
+        return Err(format!(
+            "A policy for a contract wallet cannot write policy state (`allowit::set_state`, line {}). The wallet keeps only the cumulated figures that its canonical rules read, and no policy state of its own. State the limit with a canonical rule.",
+            p.line(p.tokens[write].start)
+        ));
+    }
 
     let mut mutable: HashSet<String> = (open..last)
         .filter(|i| p.word(*i) == Some("mut"))
@@ -1159,17 +1261,6 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
 
-    // A state write that leaves cannot be stored on chain.
-    for id in &order {
-        let (from, to) = range(*id);
-        if gone[*id] && p.writes(from, to, &writers) {
-            return Err(format!(
-                "A policy for a contract wallet cannot write policy state in a step that depends on a server function (line {}). The chain could not store that write. Write the state in a step that does not depend on a server function, or use a keypair wallet.",
-                p.line(p.tokens[from].start)
-            ));
-        }
-    }
-
     // The derivation reads `return Err(...)` as a denial and ends a derived `execute` with
     // `Ok(())`. A local item with one of these names would change both.
     let shadowed = (0..count).any(|i| {
@@ -1355,38 +1446,49 @@ pub fn derive(source: &str) -> Result<Derived> {
     // Each leaving statement reports its own checks: a split statement those of its
     // conditions, and its statements theirs. A leaving local function is not split.
     //
-    // A check that itself calls a server function or reads a server value cannot run on
-    // chain wherever it stands. So its cause is its own, also inside a branch that left.
+    // A check that itself calls a server function, reads a server value or reads stored state
+    // cannot run on chain wherever it stands. So its cause is its own, also inside a branch
+    // that left. A server call or value comes before stored state.
     let mut served: HashSet<String> = HashSet::new();
+    let mut stored: HashSet<String> = HashSet::new();
     let mut own_cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
     loop {
-        let before = served.len() + own_cause.iter().flatten().count();
+        let before = served.len() + stored.len() + own_cause.iter().flatten().count();
         for id in order.iter().copied().filter(|id| cause[*id].is_some()) {
             let ranges = own(id);
-            let calls = ranges
-                .iter()
-                .any(|(from, to)| p.server(*from, *to, &helpers));
-            let reads = p.nodes[id].shape != Shape::Item
-                && ranges
-                    .iter()
-                    .any(|(from, to)| p.mentions(*from, *to, &served));
-            if !calls && !reads {
+            let item = p.nodes[id].shape == Shape::Item;
+            let any = |test: &dyn Fn(usize, usize) -> bool| {
+                ranges.iter().any(|(from, to)| test(*from, *to))
+            };
+            let why = if any(&|from, to| p.calls(from, to, &callers)) {
+                Cause::ServerCall
+            } else if !item && any(&|from, to| p.mentions(from, to, &served)) {
+                Cause::ServerValue
+            } else if any(&|from, to| (from..to).any(|i| p.state_at(i) || p.names(i, &readers)))
+                || (!item && any(&|from, to| p.mentions(from, to, &stored)))
+            {
+                Cause::StoredState
+            } else {
+                continue;
+            };
+            if own_cause[id].is_some_and(|known| known != Cause::StoredState) {
                 continue;
             }
-            own_cause[id] = Some(if calls {
-                Cause::ServerCall
+            own_cause[id] = Some(why);
+            let names = if why == Cause::StoredState {
+                &mut stored
             } else {
-                Cause::ServerValue
-            });
-            served.extend(p.nodes[id].names.iter().cloned());
+                &mut served
+            };
+            names.extend(p.nodes[id].names.iter().cloned());
             let (from, to) = range(id);
             for i in from..to {
                 if p.names(i, &mutable) {
-                    served.extend(p.word(i).map(str::to_owned));
+                    names.extend(p.word(i).map(str::to_owned));
                 }
             }
         }
-        if served.len() + own_cause.iter().flatten().count() == before {
+        if served.len() + stored.len() + own_cause.iter().flatten().count() == before {
             break;
         }
     }
@@ -1459,6 +1561,7 @@ fn finish(
         source,
         left,
         server_only,
+        figures: figures(&kept),
         kept,
     })
 }

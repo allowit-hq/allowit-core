@@ -96,7 +96,7 @@ pub fn check_host_call_registry(host_calls: &[(&str, &str)]) -> Result<()> {
 }
 
 mod derive;
-pub use derive::{Cause, Derived, ServerOnly, derive};
+pub use derive::{Cause, Derived, Figure, ServerOnly, derive};
 
 fn source_shape_for(source: &str, host_calls: Option<&[(&str, &str)]>) -> Result<SourceShape> {
     let code = gate::checked_code(source, host_calls)?;
