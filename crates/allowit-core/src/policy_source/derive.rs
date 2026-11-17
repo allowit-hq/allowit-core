@@ -299,7 +299,10 @@ fn lex(source: &str) -> Result<Vec<Token>> {
             let end = word_end(i + 1);
             push(Kind::Lifetime, i, end);
             i = end;
-        } else if ["::", "=>", "->", "==", "!=", "&&", "||"]
+        } else if gate::starts(&chars, i, "..=") {
+            push(Kind::Punct, i, i + 3);
+            i += 3;
+        } else if ["::", "=>", "->", "==", "!=", "&&", "||", ".."]
             .iter()
             .any(|t| gate::starts(&chars, i, t))
         {
@@ -454,6 +457,8 @@ impl<'a> Parsed<'a> {
         matches!(
             self.text(i),
             "{" | "."
+                | ".."
+                | "..="
                 | "?"
                 | "&&"
                 | "||"
@@ -472,6 +477,86 @@ impl<'a> Parsed<'a> {
                 | "^"
                 | "as"
         )
+    }
+
+    /// The `{` that opens the body after the header that starts at `from`. A block can also
+    /// stand as an operand of the header, as in `if { a } { ... }` or `if x == { 1 } { ... }`:
+    /// a `{` opens an operand at the start of the header and after an operator, and the body
+    /// after a name, a literal or a closing bracket.
+    fn body_after(&self, from: usize, end: usize) -> Option<usize> {
+        let mut depth = 0i64;
+        let mut i = from;
+        while i < end {
+            match self.text(i) {
+                "let" if depth == 0 => i = self.find(i + 1, end, &["="])?,
+                "(" | "[" => depth += 1,
+                ")" | "]" => depth -= 1,
+                "{" if depth == 0 => {
+                    let operand = i == from
+                        || matches!(
+                            self.text(i - 1),
+                            "if" | "while"
+                                | "match"
+                                | "in"
+                                | "return"
+                                | "=="
+                                | "!="
+                                | "&&"
+                                | "||"
+                                | "<"
+                                | ">"
+                                | "="
+                                | "+"
+                                | "-"
+                                | "*"
+                                | "/"
+                                | "%"
+                                | "!"
+                                | "&"
+                                | "|"
+                                | "^"
+                                | ","
+                                | ".."
+                                | "..="
+                                | "=>"
+                                | ":"
+                        );
+                    if !operand {
+                        return Some(i);
+                    }
+                    i = self.close(i)?;
+                }
+                ";" if depth == 0 => return None,
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// The last token of the branch statement whose keyword or `{` is token `p`, also when its
+    /// header holds a block, which [`Parsed::branch`] does not split.
+    fn block_like_end(&self, p: usize, end: usize) -> Option<usize> {
+        match self.text(p) {
+            "if" => {
+                let mut q = p;
+                loop {
+                    let close = self.close(self.body_after(q + 1, end)?)?;
+                    if self.text(close + 1) != "else" {
+                        return Some(close);
+                    }
+                    match self.text(close + 2) {
+                        "if" => q = close + 2,
+                        "{" => return self.close(close + 2),
+                        _ => return None,
+                    }
+                }
+            }
+            "match" | "while" | "for" => self.close(self.body_after(p + 1, end)?),
+            "loop" if self.text(p + 1) == "{" => self.close(p + 1),
+            "{" => self.close(p),
+            _ => None,
+        }
     }
 
     /// The branch statement whose keyword or `{` is token `p`. A condition, a matched value
@@ -676,11 +761,28 @@ impl<'a> Parsed<'a> {
                 let branch = self
                     .branch(p, close)
                     .filter(|branch| !self.continues(branch.end + 1));
+                // A branch statement that is not split, such as one whose condition is a block,
+                // ends with its own last block, not at the next `;`.
+                let unsplit = || {
+                    self.block_like_end(p, close)
+                        .filter(|last| *last < close && !self.continues(last + 1))
+                };
                 match branch {
-                    None => {
-                        let last = plain(self);
-                        self.node(Shape::Whole, first, last, parent)
-                    }
+                    None => match unsplit() {
+                        Some(end) => {
+                            let semi = self.text(end + 1) == ";" && end + 1 < close;
+                            let last = if semi { end + 1 } else { end };
+                            let id = self.node(Shape::Whole, first, last, parent);
+                            self.nodes[id].is_loop =
+                                labeled || matches!(self.text(p), "while" | "for" | "loop");
+                            self.nodes[id].braced = true;
+                            id
+                        }
+                        None => {
+                            let last = plain(self);
+                            self.node(Shape::Whole, first, last, parent)
+                        }
+                    },
                     Some(branch) => {
                         let semi = self.text(branch.end + 1) == ";" && branch.end + 1 < close;
                         let last = if semi { branch.end + 1 } else { branch.end };

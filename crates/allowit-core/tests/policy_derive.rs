@@ -114,6 +114,8 @@ golden!(
     stored_state => "stored-state",
     type_named_binding => "type-named-binding",
     unsplit_tail => "unsplit-tail",
+    server_range => "server-range",
+    block_condition => "block-condition",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -469,6 +471,24 @@ fn a_type_named_binding_is_followed_and_an_unsplit_check_names_what_it_reads() {
     );
 }
 
+/// A name after a range operator is a read of that name, not a field. A statement whose
+/// condition holds a block ends with its own last block, so the rules after it stay.
+#[test]
+fn a_range_bound_is_a_read_and_a_block_condition_takes_no_later_rule() {
+    let range = derive(include_str!("fixtures/derive/server-range.rs")).unwrap();
+    assert_eq!(range.kept, ["payment_limit"]);
+    assert!(!range.source.contains("count"));
+    let causes: Vec<Cause> = range.server_only.iter().map(|check| check.cause).collect();
+    assert_eq!(causes, [Cause::ServerBranch, Cause::ServerBranch]);
+
+    let block = derive(include_str!("fixtures/derive/block-condition.rs")).unwrap();
+    assert_eq!(block.kept, ["payment_limit", "destinations"]);
+    let [check] = &block.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!((check.line, check.cause), (13, Cause::NotSplit));
+}
+
 /// A contract wallet keeps only the figures of its canonical rules, and the server keeps no
 /// policy state of its own. So a policy that writes state is refused wherever the write
 /// stands: before a server call, after one, in a local function, or with no server call.
@@ -794,6 +814,8 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("stored-state", stored_state::BOTH),
         ("type-named-binding", type_named_binding::BOTH),
         ("unsplit-tail", unsplit_tail::BOTH),
+        ("server-range", server_range::BOTH),
+        ("block-condition", block_condition::BOTH),
     ] {
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {
