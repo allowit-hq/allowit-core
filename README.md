@@ -183,10 +183,10 @@ offer it first to an owner who deploys.
 
 | Id | Enforcement | Custody | Explanation | Pays | Network fee |
 | --- | --- | --- | --- | --- | --- |
-| `native` (recommended) | offchain | keypair | Your agent's own wallet. Allowit checks each payment against your policy before it co-signs. | Every x402 seller. | The lowest. None when the seller's facilitator settles the payment. |
-| `simple` | offchain | contract | A contract wallet holds the funds. Allowit checks each payment against your policy, as for Native. | Sellers that accept a settled payment as proof. | Higher. Each payment runs the wallet contract on chain. |
-| `standard` | onchain | contract | A contract wallet enforces the standard rules of your policy on chain. | Sellers that accept a settled payment as proof. | Higher. Each payment runs the wallet contract on chain. |
-| `custom` | onchain | contract | A contract built from your policy enforces all of it on chain. | Sellers that accept a settled payment as proof. | Higher. Each payment runs the wallet contract on chain. |
+| `native` (recommended) | offchain | keypair | Your agent's own wallet. Allowit checks each payment against your policy before it co-signs. | Every x402 seller. | The lowest: none when the seller's facilitator settles the payment. |
+| `simple` | offchain | contract | A contract wallet holds the funds. Allowit checks each payment against your policy, as for Native. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
+| `standard` | onchain | contract | A contract wallet enforces the standard rules of your policy on chain. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
+| `custom` | onchain | contract | A contract built from your policy enforces all of it on chain. | Fewer sellers: only those that accept a settled payment as proof. | Higher: each payment runs the wallet contract on chain. |
 
 A rail advertises its kinds through `RailPlugin::wallet_kinds(network)`. `WalletKind::binding` and
 `WalletKind::from_binding` convert between a kind and the custody and tier of an installation.

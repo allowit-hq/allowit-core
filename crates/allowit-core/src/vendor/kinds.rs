@@ -73,9 +73,9 @@ pub struct WalletKindInfo {
 /// The sellers that a contract wallet pays: its payment settles first, and the seller takes the
 /// settled transaction as proof. A seller whose own facilitator settles the payment needs the
 /// agent's own wallet.
-const PROOF_SELLERS: &str = "Sellers that accept a settled payment as proof.";
+const PROOF_SELLERS: &str = "Fewer sellers: only those that accept a settled payment as proof.";
 /// The network fee of a payment from a contract wallet.
-const CONTRACT_FEE: &str = "Higher. Each payment runs the wallet contract on chain.";
+const CONTRACT_FEE: &str = "Higher: each payment runs the wallet contract on chain.";
 
 /// Every wallet kind, in selection order. The recommended kind is first.
 pub const WALLET_KINDS: [WalletKindInfo; 4] = [
@@ -85,7 +85,7 @@ pub const WALLET_KINDS: [WalletKindInfo; 4] = [
         explanation: "Your agent's own wallet. Allowit checks each payment against your policy before it co-signs.",
         recommended: true,
         pays: "Every x402 seller.",
-        fee: "The lowest. None when the seller's facilitator settles the payment.",
+        fee: "The lowest: none when the seller's facilitator settles the payment.",
         enforcement: Enforcement::Offchain,
         custody: WalletCustody::Keypair,
         supported_params: &[],
