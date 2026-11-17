@@ -13,11 +13,12 @@
 //!
 //! A statement of `execute` leaves when:
 //!
-//! 1. it makes a server call or names a server request type. A server call is a call of a
-//!    server function, of a registered package function, or of a local function that makes
-//!    one;
+//! 1. it makes a server call, names a server request type, or reads owner text with
+//!    `as_str()`, which only the server can read. A server call is a call of a server
+//!    function, of a registered package function, or of a local function that makes one;
 //! 2. it reads a name that a leaving statement binds, or a `mut` name that a leaving statement
-//!    can assign;
+//!    can assign. In a policy that takes a mutable reference, a leaving statement can assign
+//!    every `mut` name;
 //! 3. it is an `if`, `match`, `while` or `for` whose condition, matched value, pattern guard
 //!    or iterated value does 1 or 2: the whole statement leaves, with every branch;
 //! 4. it is a `let` that only reads an owner param, a request field or a constant, and only
@@ -260,7 +261,8 @@ struct Node {
     init: Option<(usize, usize)>,
     /// The conditions, matched values, patterns and guards of a split statement.
     headers: Vec<(usize, usize)>,
-    /// A `while`, `for` or `loop` statement.
+    /// A statement that a `break` can end: a `while`, `for` or `loop` statement, or a
+    /// labeled block.
     is_loop: bool,
     /// A whole statement that holds a block: a branch statement that is not split.
     braced: bool,
@@ -508,7 +510,9 @@ impl<'a> Parsed<'a> {
                     _ => break,
                 }
             }
-            if self.tokens[p].kind == Kind::Lifetime && self.text(p + 1) == ":" && p + 2 < close {
+            let labeled =
+                self.tokens[p].kind == Kind::Lifetime && self.text(p + 1) == ":" && p + 2 < close;
+            if labeled {
                 p += 2;
             }
             let item = if self.text(p) == "pub" { p + 1 } else { p };
@@ -571,7 +575,7 @@ impl<'a> Parsed<'a> {
                         if split {
                             let id = self.node(Shape::Split, first, last, parent);
                             self.nodes[id].headers = branch.headers;
-                            self.nodes[id].is_loop = branch.is_loop;
+                            self.nodes[id].is_loop = branch.is_loop || labeled;
                             for (slot, (open, close)) in branch.blocks.into_iter().enumerate() {
                                 let children =
                                     self.statements(open + 1, close, true, Some(id), slot);
@@ -644,8 +648,16 @@ impl<'a> Parsed<'a> {
                 .is_some_and(|operation| !gate::portable_path(&format!("{name}::{operation}")))
     }
 
+    /// Whether token `i` reads the text of a portable `String`: `text.as_str()`. Only server
+    /// policy source has this method, so a contract cannot compile a statement that holds it.
+    fn server_text_at(&self, i: usize) -> bool {
+        self.word(i) == Some("as_str")
+            && self.text(i.wrapping_sub(1)) == "."
+            && self.text(i + 1) == "("
+    }
+
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {
-        (from..to).any(|i| self.server_at(i) || self.names(i, helpers))
+        (from..to).any(|i| self.server_at(i) || self.server_text_at(i) || self.names(i, helpers))
     }
 
     fn writes(&self, from: usize, to: usize, writers: &HashSet<String>) -> bool {
@@ -667,13 +679,24 @@ impl<'a> Parsed<'a> {
                 _ => None,
             };
         }
-        (name == "return" && self.word(i + 1) == Some("Err")).then(|| "deny".into())
+        self.denies_at(i).then(|| "deny".into())
+    }
+
+    /// Whether token `i` starts a plain denial: `return Err(...)` that ends its statement or
+    /// its arm. `return Err(...).or(Ok(()))` is no denial.
+    fn denies_at(&self, i: usize) -> bool {
+        self.word(i) == Some("return")
+            && self.word(i + 1) == Some("Err")
+            && self.text(i + 2) == "("
+            && self
+                .close(i + 2)
+                .is_some_and(|close| matches!(self.text(close + 1), ";" | "," | "}" | ""))
     }
 
     /// Whether the tokens of a leaving statement hold a `return` that can end `execute` with
     /// an approval.
     fn returns(&self, from: usize, to: usize) -> bool {
-        (from..to).any(|i| self.word(i) == Some("return") && self.word(i + 1) != Some("Err"))
+        (from..to).any(|i| self.word(i) == Some("return") && !self.denies_at(i))
     }
 
     /// Whether the tokens hold a `break` or `continue` of a loop that encloses them.
@@ -745,6 +768,16 @@ impl<'a> Parsed<'a> {
     fn line(&self, byte: usize) -> u32 {
         1 + self.source[..byte].bytes().filter(|b| *b == b'\n').count() as u32
     }
+}
+
+/// What the statements of `execute` share.
+struct Scope<'a> {
+    /// The statements of the body of `execute`.
+    body: &'a [usize],
+    /// Every name that `execute` declares `mut`.
+    mutable: &'a HashSet<String>,
+    /// The policy takes a mutable reference.
+    aliasing: bool,
 }
 
 /// One change of the source text.
@@ -851,6 +884,17 @@ pub fn derive(source: &str) -> Result<Derived> {
         .filter(|i| p.word(*i) == Some("mut"))
         .filter_map(|i| p.word(i + 1).map(str::to_owned))
         .collect();
+    // A mutable reference lets a statement assign a name that it does not mention. The
+    // derivation does not follow references: in a policy that takes one, a leaving statement
+    // can assign every `mut` name.
+    let aliasing = (0..count).any(|i| {
+        p.word(i + 1) == Some("mut") && (matches!(p.text(i), "&" | "&&") || p.text(i) == "ref")
+    });
+    let scope = Scope {
+        body: &body,
+        mutable: &mutable,
+        aliasing,
+    };
 
     // The statements of `execute` in source order, with the statements of their blocks.
     fn walk(nodes: &[Node], ids: &[usize], out: &mut Vec<usize>) {
@@ -876,8 +920,7 @@ pub fn derive(source: &str) -> Result<Derived> {
 
     fn leave(
         p: &Parsed,
-        body: &[usize],
-        mutable: &HashSet<String>,
+        scope: &Scope,
         cause: &mut Vec<Option<Cause>>,
         tainted: &mut HashSet<String>,
         id: usize,
@@ -916,8 +959,11 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
         mark(p, cause, tainted, id, why);
         let (from, to) = (p.nodes[id].first, p.nodes[id].last + 1);
+        if scope.aliasing {
+            tainted.extend(scope.mutable.iter().cloned());
+        }
         for i in from..to {
-            if p.names(i, mutable) {
+            if p.names(i, scope.mutable) {
                 tainted.extend(p.word(i).map(str::to_owned));
             }
         }
@@ -935,7 +981,7 @@ pub fn derive(source: &str) -> Result<Derived> {
                     (Some(parent), Some((slot, at))) => {
                         p.nodes[parent].children[slot][at + 1..].to_vec()
                     }
-                    (None, Some((_, at))) => body[at + 1..].to_vec(),
+                    (None, Some((_, at))) => scope.body[at + 1..].to_vec(),
                     _ => vec![],
                 };
                 // An item is no step of the evaluation: it leaves only when nothing names it.
@@ -943,30 +989,14 @@ pub fn derive(source: &str) -> Result<Derived> {
                     if p.nodes[next].shape == Shape::Item {
                         continue;
                     }
-                    leave(
-                        p,
-                        body,
-                        mutable,
-                        cause,
-                        tainted,
-                        next,
-                        Cause::AfterServerExit,
-                    );
+                    leave(p, scope, cause, tainted, next, Cause::AfterServerExit);
                 }
             }
             let Some(parent) = parent else {
                 return;
             };
             if p.nodes[parent].is_loop {
-                leave(
-                    p,
-                    body,
-                    mutable,
-                    cause,
-                    tainted,
-                    parent,
-                    Cause::AfterServerExit,
-                );
+                leave(p, scope, cause, tainted, parent, Cause::AfterServerExit);
             }
             current = parent;
         }
@@ -982,16 +1012,19 @@ pub fn derive(source: &str) -> Result<Derived> {
             let calls = ranges
                 .iter()
                 .any(|(from, to)| p.server(*from, *to, &helpers));
-            let reads = ranges
-                .iter()
-                .any(|(from, to)| p.mentions(*from, *to, &tainted));
+            // An item cannot read a local name: a function or constant that has the name of a
+            // server value is not that value.
+            let reads = p.nodes[*id].shape != Shape::Item
+                && ranges
+                    .iter()
+                    .any(|(from, to)| p.mentions(*from, *to, &tainted));
             let why = match (calls, reads) {
                 (false, false) => continue,
                 _ if p.nodes[*id].braced => Cause::NotSplit,
                 (true, _) => Cause::ServerCall,
                 (false, true) => Cause::ServerValue,
             };
-            leave(&p, &body, &mutable, &mut cause, &mut tainted, *id, why);
+            leave(&p, &scope, &mut cause, &mut tainted, *id, why);
         }
         if cause.iter().flatten().count() + tainted.len() == before {
             break;
@@ -1090,21 +1123,32 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.tokens[p.nodes[id].last].end,
         )
     };
+    let last_step = body
+        .iter()
+        .rev()
+        .copied()
+        .find(|id| p.nodes[*id].shape != Shape::Item);
     let mut edits: Vec<Edit> = vec![];
     for id in &all {
         let node = &p.nodes[*id];
         let top = gone[*id] && !node.parent.is_some_and(|parent| gone[parent]);
         let (start, end) = bytes(*id);
         if top {
-            if body.last() == Some(id) {
-                if &source[start..end] == "Ok(())" {
-                    continue;
+            if last_step == Some(*id) {
+                // The last step of `execute` leaves: the derived `execute` approves there.
+                // Items can follow the last step, so it is then a `return`.
+                let approval = if body.last() == Some(id) {
+                    "Ok(())"
+                } else {
+                    "return Ok(());"
+                };
+                if &source[start..end] != approval {
+                    edits.push(Edit {
+                        start,
+                        end,
+                        text: approval.into(),
+                    });
                 }
-                edits.push(Edit {
-                    start,
-                    end,
-                    text: "Ok(())".into(),
-                });
             } else if node.shape == Shape::Arm {
                 edits.push(Edit {
                     start,

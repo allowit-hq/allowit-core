@@ -105,6 +105,10 @@ golden!(
     mutable_name => "mutable-name",
     value_branches => "value-branches",
     server_tail => "server-tail",
+    mutable_alias => "mutable-alias",
+    labeled_block => "labeled-block",
+    text_temporary => "text-temporary",
+    return_before_item => "return-before-item",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -264,10 +268,78 @@ fn the_rules_after_an_early_approval_on_a_server_value_leave() {
             ("tokens", Cause::AfterServerExit)
         ]
     );
+    // `return Err(...).or(Ok(()))` approves, so it is no denial: the later rule leaves.
+    let denial = include_str!("fixtures/derive/deny-on-server-value.rs");
+    let approval = denial.replace(
+        "return Err(AllowitError::DestinationNotAllowed);",
+        "return Err(AllowitError::DestinationNotAllowed).or(Ok(()));",
+    );
+    assert_ne!(approval, denial);
+    assert_eq!(derive(denial).unwrap().kept, ["destinations"]);
+    assert!(derive(&approval).unwrap().kept.is_empty());
     // A loop that a server value can end leaves whole, with what it assigns.
     let looped = derive(include_str!("fixtures/derive/break-on-server-value.rs")).unwrap();
     assert_eq!(looped.kept, ["payment_limit", "tokens"]);
     assert!(!looped.source.contains("for ") && !looped.source.contains("checked"));
+}
+
+/// A mutable reference lets a leaving statement assign a name that it does not mention. The
+/// check that reads that name leaves too, and a state write of it is refused.
+#[test]
+fn a_name_that_a_leaving_statement_assigns_through_a_reference_leaves() {
+    let source = include_str!("fixtures/derive/mutable-alias.rs");
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("total") && !derived.source.contains("alias"));
+    assert_eq!(derived.kept, ["payment_limit", "tokens"]);
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (check.check.as_str(), check.cause),
+        ("assert", Cause::ServerValue)
+    );
+    let written = source.replace(
+        "    assert!(total == 1);\n",
+        "    allowit::set_state(ctx, \"total\", total)?;\n",
+    );
+    assert!(
+        derive(&written)
+            .unwrap_err()
+            .contains("cannot write policy state")
+    );
+}
+
+/// A `break` out of a labeled block skips the rest of the block. When the `break` depends on a
+/// server function, the block leaves whole.
+#[test]
+fn a_labeled_block_that_a_server_value_can_end_leaves_whole() {
+    let derived = derive(include_str!("fixtures/derive/labeled-block.rs")).unwrap();
+    assert_eq!(derived.kept, ["payment_limit", "tokens"]);
+    assert!(!derived.source.contains("'checks"));
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (check.check.as_str(), check.cause, check.movable()),
+        ("destinations", Cause::AfterServerExit, true)
+    );
+}
+
+/// Owner text that a statement reads with `as_str()` is server vocabulary: the statement
+/// leaves with the server call that takes the text. When the last step of `execute` leaves
+/// and items follow it, the derived `execute` approves with a `return`.
+#[test]
+fn server_text_leaves_and_an_erased_last_step_approves_before_its_items() {
+    let text = derive(include_str!("fixtures/derive/text-temporary.rs")).unwrap();
+    assert_eq!(text.kept, ["payment_limit"]);
+    assert!(!text.source.contains("as_str") && !text.source.contains("catalog_query"));
+
+    let item = derive(include_str!("fixtures/derive/return-before-item.rs")).unwrap();
+    assert!(
+        item.source
+            .contains("    limit(ctx)?;\n    return Ok(());\n    fn limit(")
+    );
+    assert_eq!(item.kept, ["payment_limit"]);
 }
 
 #[test]
@@ -483,6 +555,10 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("mutable-name", mutable_name::BOTH),
         ("value-branches", value_branches::BOTH),
         ("server-tail", server_tail::BOTH),
+        ("mutable-alias", mutable_alias::BOTH),
+        ("labeled-block", labeled_block::BOTH),
+        ("text-temporary", text_temporary::BOTH),
+        ("return-before-item", return_before_item::BOTH),
     ] {
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {
