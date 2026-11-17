@@ -27,11 +27,16 @@ pub struct Activate<'a> {
     pub server: Option<&'a str>,
     pub request_id: &'a str,
 }
+/// The setup of an agent's own wallet account: one owner transaction creates, funds and secures it.
 pub struct Setup<'a> {
     pub agent: &'a str,
     pub server: &'a str,
     pub request_id: &'a str,
     pub fee_per_operation: &'a str,
+    /// The amount that the setup moves into the wallet for the agent's payments, as decimal text
+    /// in the installed asset. The owner's account pays it, with every reserve of the new
+    /// account, in the same transaction. `None` funds the reserve and the fee float only.
+    pub amount: Option<&'a str>,
 }
 /// Typed edits of a draft's params through the backend's owner route. The backend checks each
 /// value against the param's type and range and refuses an invalid value.
