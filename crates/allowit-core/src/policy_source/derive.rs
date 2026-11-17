@@ -255,6 +255,11 @@ struct Node {
     /// The name of a `fn` or `const` item.
     name: Option<String>,
     is_fn: bool,
+    /// The token of the statement's own keyword or first word, after its attributes, its
+    /// label and `pub`.
+    key: usize,
+    /// The brackets of each block of a split statement.
+    blocks: Vec<(usize, usize)>,
     /// The names that a `let` binds.
     names: Vec<String>,
     /// The tokens of a `let` initializer, as a half-open range.
@@ -461,6 +466,8 @@ impl<'a> Parsed<'a> {
             last,
             name: None,
             is_fn: false,
+            key: first,
+            blocks: vec![],
             names: vec![],
             init: None,
             headers: vec![],
@@ -580,6 +587,7 @@ impl<'a> Parsed<'a> {
                                 let children =
                                     self.statements(open + 1, close, true, Some(id), slot);
                                 self.nodes[id].children.push(children);
+                                self.nodes[id].blocks.push((open, close));
                             }
                             for (from, to) in branch.arms {
                                 let arm = self.node(Shape::Arm, from, to - 1, Some(id));
@@ -596,6 +604,7 @@ impl<'a> Parsed<'a> {
                 }
             };
             self.nodes[id].place = Some((slot, found.len()));
+            self.nodes[id].key = item;
             p = self.nodes[id].last + 1;
             found.push(id);
         }
@@ -696,14 +705,36 @@ impl<'a> Parsed<'a> {
     /// Whether the tokens of a leaving statement hold a `return` that can end `execute` with
     /// an approval.
     fn returns(&self, from: usize, to: usize) -> bool {
-        (from..to).any(|i| self.word(i) == Some("return") && !self.denies_at(i))
+        self.steps(from, to)
+            .into_iter()
+            .any(|i| self.word(i) == Some("return") && !self.denies_at(i))
+    }
+
+    /// The tokens in `from..to` that are steps of the statement itself: those outside the
+    /// body of every function that the statement declares. A `return` or a `break` in such a
+    /// body ends that function, not `execute`.
+    fn steps(&self, from: usize, to: usize) -> Vec<usize> {
+        let mut steps = vec![];
+        let mut i = from;
+        while i < to {
+            steps.push(i);
+            // The keyword itself: a raw identifier `r#fn` is a name.
+            let body = (self.text(i) == "fn")
+                .then(|| self.find(i, to, &["{", ";"]))
+                .flatten()
+                .filter(|open| self.text(*open) == "{")
+                .and_then(|open| self.close(open))
+                .filter(|close| *close < to);
+            i = body.map_or(i + 1, |close| close + 1);
+        }
+        steps
     }
 
     /// Whether the tokens hold a `break` or `continue` of a loop that encloses them.
     fn breaks(&self, from: usize, to: usize) -> bool {
         let mut loops: Vec<bool> = vec![];
         let (mut pending, mut depth, mut pending_depth) = (false, 0i64, 0i64);
-        for i in from..to {
+        for i in self.steps(from, to) {
             match self.text(i) {
                 "loop" | "while" | "for" if self.tokens[i].kind == Kind::Word => {
                     pending = true;
@@ -880,10 +911,21 @@ pub fn derive(source: &str) -> Result<Derived> {
     let helpers = closure(&|from, to, found| p.server(from, to, found));
     let writers = closure(&|from, to, found| p.writes(from, to, found));
 
-    let mutable: HashSet<String> = (open..last)
+    let mut mutable: HashSet<String> = (open..last)
         .filter(|i| p.word(*i) == Some("mut"))
         .filter_map(|i| p.word(i + 1).map(str::to_owned))
         .collect();
+    // A name that a `let` declares without a value gets its value from a later statement,
+    // which can leave: `let accepted: bool;`.
+    for i in (open..last).filter(|i| p.word(*i) == Some("let")) {
+        if let Some(end) = p
+            .find(i + 1, last, &["=", ";"])
+            .filter(|end| p.text(*end) == ";")
+        {
+            let pattern = p.find(i + 1, end, &[":"]).unwrap_or(end);
+            mutable.extend(p.bound(i + 1, pattern));
+        }
+    }
     // A mutable reference lets a statement assign a name that it does not mention. The
     // derivation does not follow references: in a policy that takes one, a leaving statement
     // can assign every `mut` name.
@@ -1108,10 +1150,9 @@ pub fn derive(source: &str) -> Result<Derived> {
 
     // The derivation reads `return Err(...)` as a denial and ends a derived `execute` with
     // `Ok(())`. A local item with one of these names would change both.
-    let shadowed = named
-        .iter()
-        .filter_map(|id| p.nodes[*id].name.as_deref())
-        .any(|name| matches!(name, "Ok" | "Err"));
+    let shadowed = (0..count).any(|i| {
+        matches!(p.word(i), Some("fn" | "const")) && matches!(p.word(i + 1), Some("Ok" | "Err"))
+    });
     if changed && shadowed {
         return Err("A policy that depends on a server function cannot define a local `Ok` or `Err`. Rename that function or constant.".into());
     }
@@ -1165,12 +1206,20 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
             continue;
         }
+        // A block whose statements all leave is an empty block.
+        if node.shape == Shape::Split && !gone[*id] {
+            for (block, (open, close)) in node.children.iter().zip(&node.blocks) {
+                if !block.is_empty() && block.iter().all(|child| gone[*child]) {
+                    edits.push(Edit {
+                        start: p.tokens[*open].end,
+                        end: p.tokens[*close].start,
+                        text: String::new(),
+                    });
+                }
+            }
+        }
         // A `use` item keeps its other names.
-        let item = if p.text(node.first) == "pub" {
-            node.first + 1
-        } else {
-            node.first
-        };
+        let item = node.key;
         if node.shape != Shape::Item || p.text(item) != "use" || gone[*id] {
             continue;
         }

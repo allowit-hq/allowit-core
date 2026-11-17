@@ -109,6 +109,9 @@ golden!(
     labeled_block => "labeled-block",
     text_temporary => "text-temporary",
     return_before_item => "return-before-item",
+    helper_return => "helper-return",
+    late_value => "late-value",
+    attributed_import => "attributed-import",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -342,6 +345,41 @@ fn server_text_leaves_and_an_erased_last_step_approves_before_its_items() {
     assert_eq!(item.kept, ["payment_limit"]);
 }
 
+/// A `return` in a local function ends that function, not `execute`: when the function
+/// leaves, the rules after its call stay. A name that gets its value in a leaving statement
+/// leaves with every statement that reads it. An import behind an attribute leaves like any
+/// other.
+#[test]
+fn a_helper_return_a_late_value_and_an_attributed_import_derive() {
+    let helper = derive(include_str!("fixtures/derive/helper-return.rs")).unwrap();
+    assert_eq!(helper.kept, ["payment_limit"]);
+    assert!(!helper.source.contains("fn ask") && !helper.source.contains("ask(ctx)"));
+
+    let late = derive(include_str!("fixtures/derive/late-value.rs")).unwrap();
+    assert_eq!(late.kept, ["payment_limit"]);
+    assert!(!late.source.contains("accepted"));
+    let [check] = &late.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (check.check.as_str(), check.cause),
+        ("assert", Cause::ServerValue)
+    );
+
+    let import = derive(include_str!("fixtures/derive/attributed-import.rs")).unwrap();
+    assert!(!import.source.contains("AllowitRequestScreening"));
+    assert!(!import.source.contains("#[allow"));
+    assert_eq!(import.kept, ["payment_limit"]);
+}
+
+/// A local `Err` that approves, declared inside an expression, would make a `return Err(...)`
+/// an approval. The derivation reads that form as a denial, so it refuses the source.
+#[test]
+fn a_local_err_inside_an_expression_is_refused() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let _started = {\n        fn Err(_: AllowitError) -> allowit::Result {\n            Ok(())\n        }\n        allowit::new_decision_context(ctx, None)?;\n        return Err(AllowitError::Expired);\n    };\n    assert!(ctx.request.amount < 0);\n    Ok(())\n}\n";
+    assert!(derive(source).unwrap_err().contains("local `Ok` or `Err`"));
+}
+
 #[test]
 fn a_state_write_that_leaves_is_refused() {
     let error = derive(STATE_WRITE).unwrap_err();
@@ -490,7 +528,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             "report_limit",
             "swap_limit",
             "daily_limit",
-            "cap",
+            "ceiling",
             "share_limit",
         ] {
             set(key, AllowitValue::Int(limit));
@@ -559,6 +597,9 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("labeled-block", labeled_block::BOTH),
         ("text-temporary", text_temporary::BOTH),
         ("return-before-item", return_before_item::BOTH),
+        ("helper-return", helper_return::BOTH),
+        ("late-value", late_value::BOTH),
+        ("attributed-import", attributed_import::BOTH),
     ] {
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {
