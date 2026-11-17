@@ -138,6 +138,8 @@ FIELD_METHODS = {"contains": ("params", "args")}
 # std-only compile rejects any other index; every other indexing takes a pointer-width `usize`.
 INDEXED_FIELD = "params"
 FIELD_NAMES = frozenset(name for fields in FIELD_METHODS.values() for name in fields)
+# The one method that only server mode admits, as `text.as_str()`.
+SERVER_TEXT = "as_str"
 # Methods of `Option`, `Result`, fixed-width integers, `bool` and `Ordering` that take and return
 # no pointer-width value and no backend list.
 METHODS = frozenset((
@@ -337,7 +339,12 @@ def allowlisted(code, host_paths=None):
             continue
         if before == "." and tokens[i - 2:i - 1] != ["."]:
             if after in ("(", "::"):
-                if name not in METHODS:
+                # A server policy reads the text of a portable `String` with `as_str()`, to pass
+                # an owner value to a server function. A contract string has no such method, so
+                # the portable profile rejects it.
+                server_text = (name == SERVER_TEXT and host_paths is not None
+                               and tokens[i + 1:i + 3] == ["(", ")"])
+                if not server_text and name not in METHODS:
                     reject("the method `{}`, which is not on the portable allowlist".format(name))
                 if name in FIELD_METHODS and (i < 3 or tokens[i - 2] not in FIELD_METHODS[name] or tokens[i - 3] != "."):
                     reject("the method `{}` other than on the field {}".format(
