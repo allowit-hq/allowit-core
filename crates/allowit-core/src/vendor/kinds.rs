@@ -53,7 +53,15 @@ pub enum WalletCustody {
 pub struct WalletKindInfo {
     pub id: WalletKind,
     pub title: &'static str,
+    /// What the wallet is and who enforces the policy, in the owner's words.
     pub explanation: &'static str,
+    /// Hosts recommend this kind to an owner who deploys. Exactly one kind is recommended.
+    pub recommended: bool,
+    /// The sellers that a wallet of this kind pays, in the owner's words.
+    pub pays: &'static str,
+    /// What a payment costs the wallet in network fee, in the owner's words. A rail states the
+    /// amounts.
+    pub fee: &'static str,
     pub enforcement: Enforcement,
     pub custody: WalletCustody,
     /// The params this kind enforces onchain. Empty unless the kind has a fixed list.
@@ -62,12 +70,22 @@ pub struct WalletKindInfo {
     pub params_url: Option<&'static str>,
 }
 
-/// Every wallet kind, in selection order.
+/// The sellers that a contract wallet pays: its payment settles first, and the seller takes the
+/// settled transaction as proof. A seller whose own facilitator settles the payment needs the
+/// agent's own wallet.
+const PROOF_SELLERS: &str = "Sellers that accept a settled payment as proof.";
+/// The network fee of a payment from a contract wallet.
+const CONTRACT_FEE: &str = "Higher. Each payment runs the wallet contract on chain.";
+
+/// Every wallet kind, in selection order. The recommended kind is first.
 pub const WALLET_KINDS: [WalletKindInfo; 4] = [
     WalletKindInfo {
         id: WalletKind::Native,
         title: "Native",
-        explanation: "Allowit enforces the policy offchain, and a keypair account holds the funds.",
+        explanation: "Your agent's own wallet. Allowit checks each payment against your policy before it co-signs.",
+        recommended: true,
+        pays: "Every x402 seller.",
+        fee: "The lowest. None when the seller's facilitator settles the payment.",
         enforcement: Enforcement::Offchain,
         custody: WalletCustody::Keypair,
         supported_params: &[],
@@ -76,7 +94,10 @@ pub const WALLET_KINDS: [WalletKindInfo; 4] = [
     WalletKindInfo {
         id: WalletKind::Simple,
         title: "Simple",
-        explanation: "Allowit enforces the policy offchain, as for Native, and a smart-contract wallet holds the funds.",
+        explanation: "A contract wallet holds the funds. Allowit checks each payment against your policy, as for Native.",
+        recommended: false,
+        pays: PROOF_SELLERS,
+        fee: CONTRACT_FEE,
         enforcement: Enforcement::Offchain,
         custody: WalletCustody::Contract,
         supported_params: &[],
@@ -85,7 +106,10 @@ pub const WALLET_KINDS: [WalletKindInfo; 4] = [
     WalletKindInfo {
         id: WalletKind::Standard,
         title: "Standard",
-        explanation: "A smart-contract wallet enforces the standard policy onchain for the supported params.",
+        explanation: "A contract wallet enforces the standard rules of your policy on chain.",
+        recommended: false,
+        pays: PROOF_SELLERS,
+        fee: CONTRACT_FEE,
         enforcement: Enforcement::Onchain,
         custody: WalletCustody::Contract,
         supported_params: &STANDARD_PARAMS,
@@ -94,7 +118,10 @@ pub const WALLET_KINDS: [WalletKindInfo; 4] = [
     WalletKindInfo {
         id: WalletKind::Custom,
         title: "Custom",
-        explanation: "A custom contract, built from the policy source, enforces the policy onchain.",
+        explanation: "A contract built from your policy enforces all of it on chain.",
+        recommended: false,
+        pays: PROOF_SELLERS,
+        fee: CONTRACT_FEE,
         enforcement: Enforcement::Onchain,
         custody: WalletCustody::Contract,
         supported_params: &[],
@@ -170,6 +197,43 @@ mod tests {
             None
         );
         assert_eq!(WalletKind::from_binding(Custody::Policy, None), None);
+    }
+    /// Hosts recommend one kind, the agent's own wallet, and it is the first in the selection.
+    /// Every kind says in plain words what it is, which sellers it pays and what a payment
+    /// costs.
+    #[test]
+    fn one_kind_is_recommended_and_every_kind_states_its_sellers_and_its_fee() {
+        let recommended: Vec<_> = WALLET_KINDS.iter().filter(|k| k.recommended).collect();
+        assert_eq!(recommended.len(), 1);
+        assert_eq!(recommended[0].id, WalletKind::Native);
+        assert!(WALLET_KINDS[0].recommended);
+        assert_eq!(WALLET_KINDS[0].pays, "Every x402 seller.");
+        for kind in &WALLET_KINDS {
+            for text in [kind.explanation, kind.pays, kind.fee] {
+                assert!(!text.is_empty() && text.ends_with('.'), "{text}");
+                assert!(text.len() <= 120, "{text}");
+                // Owner words: no enforcement jargon and no amount, which a rail states.
+                for jargon in ["offchain", "onchain", "keypair", "smart-contract", "stroop"] {
+                    assert!(!text.contains(jargon), "{text}");
+                }
+                // `x402` is the name of the payment protocol.
+                let words = text.replace("x402", "");
+                assert!(!words.bytes().any(|b| b.is_ascii_digit()), "{text}");
+            }
+            // Only the agent's own wallet pays a seller whose facilitator settles.
+            assert_eq!(
+                kind.pays == PROOF_SELLERS,
+                kind.custody == WalletCustody::Contract
+            );
+            assert_eq!(
+                kind.fee == CONTRACT_FEE,
+                kind.custody == WalletCustody::Contract
+            );
+        }
+        let json = serde_json::to_value(WALLET_KINDS[0]).unwrap();
+        assert_eq!(json["recommended"], true);
+        assert_eq!(json["pays"], "Every x402 seller.");
+        assert!(json["fee"].is_string());
     }
     #[test]
     fn enforcement_and_custody_match_the_owner_selection() {

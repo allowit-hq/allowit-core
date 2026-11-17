@@ -177,14 +177,16 @@ The policy-source gate rejects every path that is not registered.
 ## Wallet kinds
 
 [`vendor::kinds`](crates/allowit-core/src/vendor/kinds.rs) describes the four wallet kinds that every host offers.
-`WALLET_KINDS` holds the title, explanation, enforcement and custody of each kind. Hosts show that text unchanged.
+`WALLET_KINDS` holds the title, explanation, enforcement and custody of each kind, the sellers that it pays (`pays`)
+and what a payment costs in network fee (`fee`). Hosts show that text unchanged. One kind is `recommended`: hosts
+offer it first to an owner who deploys.
 
-| Id | Enforcement | Custody | Explanation |
-| --- | --- | --- | --- |
-| `native` | offchain | keypair | Allowit enforces the policy offchain, and a keypair account holds the funds. |
-| `simple` | offchain | contract | Allowit enforces the policy offchain, as for Native, and a smart-contract wallet holds the funds. |
-| `standard` | onchain | contract | A smart-contract wallet enforces the standard policy onchain for the supported params. |
-| `custom` | onchain | contract | A custom contract, built from the policy source, enforces the policy onchain. |
+| Id | Enforcement | Custody | Explanation | Pays | Network fee |
+| --- | --- | --- | --- | --- | --- |
+| `native` (recommended) | offchain | keypair | Your agent's own wallet. Allowit checks each payment against your policy before it co-signs. | Every x402 seller. | The lowest. None when the seller's facilitator settles the payment. |
+| `simple` | offchain | contract | A contract wallet holds the funds. Allowit checks each payment against your policy, as for Native. | Sellers that accept a settled payment as proof. | Higher. Each payment runs the wallet contract on chain. |
+| `standard` | onchain | contract | A contract wallet enforces the standard rules of your policy on chain. | Sellers that accept a settled payment as proof. | Higher. Each payment runs the wallet contract on chain. |
+| `custom` | onchain | contract | A contract built from your policy enforces all of it on chain. | Sellers that accept a settled payment as proof. | Higher. Each payment runs the wallet contract on chain. |
 
 A rail advertises its kinds through `RailPlugin::wallet_kinds(network)`. `WalletKind::binding` and
 `WalletKind::from_binding` convert between a kind and the custody and tier of an installation.
