@@ -432,8 +432,8 @@ export interface OperationReports extends WalletLimits {
   readonly paidService?: PaidService;
   /** The fee that the spending limits count, in the installed asset. */
   readonly feeCharged?: Quantity;
-  /** The explorer link of the transaction. */
-  readonly explorer?: string;
+  /** The explorer link of the transaction, or null when the document names no transaction or its network has none. */
+  readonly explorer?: string | null;
 }
 /** The stable selection id of a wallet kind. */
 export type WalletKindId = 'native' | 'simple' | 'standard' | 'custom';

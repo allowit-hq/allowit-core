@@ -59,6 +59,8 @@ void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownStat
 const perPayment: PaymentLimit = { param: 'payment_limit', limit: five };
 const counters: WalletLimits = { paymentLimits: [perPayment] };
 const reports: OperationReports = { settlement: settled, paidService: paid, feeCharged: five, limits: [limit], paymentLimits: [perPayment], explorer: 'https://explorer.example/tx/1' };
+// A signed authorization that no ledger holds yet names no transaction to link.
+const unsettled: OperationReports = { paidService: paid, explorer: null };
 // @ts-expect-error A limit on one operation keeps no counter.
 const counted: PaymentLimit = { ...perPayment, spent: five };
-void [settled, limit, offer, proof, noAmount, roundedUnits, thirdParty, otherKind, counters, reports, counted];
+void [settled, limit, offer, proof, noAmount, roundedUnits, thirdParty, otherKind, counters, reports, unsettled, counted];
