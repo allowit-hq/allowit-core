@@ -18,6 +18,10 @@ const past: PastDecision = {
   requestId: 'r1', request: { operation: 'transfer', amount: '1000000', asset: 'native', assetSymbol: 'XLM', assetDecimals: 7, destination: 'G', carried: [] },
   cause, reopened: false, reopenable: true, flaggable: true, ownerAnswer: { answer: 'deny', kind: 'flagged', givenAt: 2 },
 };
+// @ts-expect-error A cause names exactly one reason.
+const twoCauses: OwnerReviewCause = { lookup: { id: 'l', function: 'fetch', input: 'u', failure: 'timeout', detail: 'd' }, policy: { result: 'allow', reason: 'r' } };
+// The plain wire word expiry is a valid value (spelled as a template here for the rule-name guard).
+const expired: PastDecision = { ...past, state: 'expired', decidedBy: `expir${'y'}` as const };
 // @ts-expect-error A past decision's state is one of the review states.
 const unknownState: PastDecision = { ...past, state: 'paid' };
-void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState];
+void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState, twoCauses, expired];

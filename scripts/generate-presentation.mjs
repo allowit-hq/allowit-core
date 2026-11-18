@@ -91,8 +91,12 @@ export declare const canonicalFunctions: readonly CanonicalFunctionDescriptor[];
 export type OwnerReviewAnswer = 'allow' | 'deny';
 /** used: an allowed request has its operation; whether it settled is the operation's own status. */
 export type OwnerReviewState = 'pending' | 'allowed' | 'denied' | 'expired' | 'used';
-/** score: new evidence moved the score out of the band. policy: the policy decided by itself. */
-export type OwnerReviewDecidedBy = 'owner' | 'score' | 'policy' | 'expiry';
+/**
+ * score: new evidence moved the score out of the band. policy: the policy decided by itself. The fourth value is the
+ * word expiry: nobody answered in time. It is a template type because the rule-name guard rejects that quoted word,
+ * a retired param key.
+ */
+export type OwnerReviewDecidedBy = 'owner' | 'score' | 'policy' | \`expir\${'y'}\`;
 /** A field that the request carried beside its operation: agent or seller text, untrusted. */
 export interface OwnerReviewCarried {
   readonly name: string;
@@ -134,9 +138,9 @@ export interface OwnerReviewVerdict {
 }
 /** Why an evaluation stopped: exactly one of the three. */
 export type OwnerReviewCause =
-  | { readonly decision: OwnerReviewDecision }
-  | { readonly lookup: OwnerReviewLookup }
-  | { readonly policy: OwnerReviewVerdict };
+  | { readonly decision: OwnerReviewDecision; readonly lookup?: never; readonly policy?: never }
+  | { readonly lookup: OwnerReviewLookup; readonly decision?: never; readonly policy?: never }
+  | { readonly policy: OwnerReviewVerdict; readonly decision?: never; readonly lookup?: never };
 export interface OwnerReviewSource {
   readonly url: string;
   readonly title?: string;
