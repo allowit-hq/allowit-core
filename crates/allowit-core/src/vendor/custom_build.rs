@@ -1,11 +1,12 @@
 //! The custom wallet build.
 //!
 //! A Custom wallet runs code that is built from the exact policy source. The owner's policy
-//! signature binds that source, and the wallet stores its hash. The server builds the code from
-//! the admitted source and uploads it; an upload gives no authority. The owner's one creation
-//! signature names the code by its hash, so it covers the build. A client that can build compares
-//! its own build with that hash before the owner signs ([`check_code_hash`]). The build is
-//! reproducible, so anyone can compare the code on the network with the source.
+//! signature binds that source, and the wallet stores its hash. The owner's client builds the
+//! code from that source and hands it to the server, which uploads it when the owner deploys; an
+//! upload gives no authority. The owner's one creation signature names the code by its hash, so
+//! it covers the build. A client that builds compares its own build with that hash
+//! ([`check_code_hash`]). The build is reproducible, so anyone can compare the code on the
+//! network with the source.
 //!
 //! The rail of the network supplies the build and the code hash through [`CustomWalletBuild`].
 //!

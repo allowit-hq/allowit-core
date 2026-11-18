@@ -98,11 +98,11 @@ A rail without the hook declares `Feature::PaidService` skipped.
 
 `allowit_core::vendor::custom_build` (feature `vendor`) defines the build of a Custom wallet. The wallet runs
 code that is built from the exact policy source. The owner's policy signature binds that source, and the
-wallet stores its hash. The server builds the code from the admitted source and uploads it with
-`RuntimeProvider::upload_code`, from its own account; an upload gives no authority. The owner's one
-creation signature (`OwnerAction::Create`) names the code by its hash, so it covers the build. A client
-that can build compares its own build with that hash before the owner signs. The build is reproducible, so
-anyone can compare the code on the network with the source.
+wallet stores its hash. The owner's client builds the code from that source and hands it to the server,
+which uploads it with `RuntimeProvider::upload_code`, from its own account, when the owner deploys; an
+upload gives no authority. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+hash, so it covers the build. A client that builds compares its own build with that hash. The build is
+reproducible, so anyone can compare the code on the network with the source.
 
 A rail implements `CustomWalletBuild`: `build` compiles the wallet code from the source, and `code_hash`
 gives the identity of code as the network records it. `check_code_hash` refuses code whose hash differs
