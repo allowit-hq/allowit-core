@@ -65,10 +65,11 @@
 //! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
 //! ASCII letters, digits or `_`, and a write of a standard figure.
 //!
-//! [`derive`] also refuses a source with a server part that the rule cannot follow by its
-//! names: one that takes a mutable reference (`&mut`, `ref mut`), which lets a statement
-//! assign a name that it does not mention; one that declares two local functions or
-//! constants with one name; and one that declares a local `Ok` or `Err`.
+//! [`derive`] also refuses a source that the rule cannot follow by its names, when a statement
+//! or a local item of it leaves: one that takes a mutable reference (`&mut`, `ref mut`), which
+//! lets a statement assign a name that it does not mention; one that declares two local
+//! functions or constants with one name; and one that declares a local `Ok` or `Err`. A source
+//! of which only an unused server import leaves has no such statement, so it is not refused.
 use super::{Result, gate, param_keys, source_shape};
 use std::{
     cell::RefCell,
@@ -188,6 +189,10 @@ pub struct StateEntry {
     /// Whether the value lives one daily window: the key starts with [`DAILY_PREFIX`]. The
     /// window opens with the first write after the last window ended, and the value reads as
     /// absent when it has ended. Any other value lives until a later write replaces it.
+    ///
+    /// The keeper enforces the window. The evaluator of this crate reads the state map as it
+    /// gets it and carries every key forward: the contract and the server each leave an
+    /// ended value out of the state that they give to an evaluation.
     pub daily: bool,
     /// Who stores the value.
     pub keeper: Keeper,
@@ -1335,27 +1340,48 @@ pub fn derive(source: &str) -> Result<Derived> {
     // The state calls of the source, and the keys that each local function can write, itself
     // or through a local function that it calls.
     let uses = p.state_uses()?;
+    // A call of a local function: its name, before `(`, that is no field, method, path segment
+    // or declaration. The gate admits no function value, so a function is only ever called.
+    let call_at = |i: usize| {
+        p.word(i).filter(|_| {
+            p.text(i + 1) == "(" && !matches!(p.text(i.wrapping_sub(1)), "." | "::" | "fn")
+        })
+    };
+    let local_fns: Vec<(usize, &str)> = named
+        .iter()
+        .filter(|id| p.nodes[**id].is_fn)
+        .filter_map(|id| Some((*id, p.nodes[*id].name.as_deref()?)))
+        .collect();
     let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
-    loop {
-        let before: usize = writers.values().map(BTreeSet::len).sum();
-        for id in named.iter().filter(|id| p.nodes[**id].is_fn) {
-            let (from, to) = range(*id);
-            let name = p.nodes[*id].name.clone().unwrap_or_default();
-            let mut keys: BTreeSet<String> = uses
-                .iter()
-                .filter(|state| state.writes && (from..to).contains(&state.at))
-                .map(|state| state.key.clone())
-                .collect();
-            for (other, written) in &writers {
-                let other: HashSet<String> = HashSet::from([other.clone()]);
-                if (from..to).any(|i| p.names(i, &other) && p.text(i + 1) == "(") {
-                    keys.extend(written.iter().cloned());
-                }
+    // The local local_fns that each function calls, read once.
+    let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (id, name) in &local_fns {
+        let (from, to) = range(*id);
+        let direct = uses
+            .iter()
+            .filter(|state| state.writes && (from..to).contains(&state.at))
+            .map(|state| state.key.clone());
+        writers
+            .entry((*name).to_owned())
+            .or_default()
+            .extend(direct);
+        for callee in (from..to).filter_map(call_at) {
+            if local_fns.iter().any(|(_, other)| *other == callee) {
+                callers_of.entry(callee).or_default().push(name);
             }
-            writers.entry(name).or_default().extend(keys);
         }
-        if writers.values().map(BTreeSet::len).sum::<usize>() == before {
-            break;
+    }
+    // Each written key goes from a function to its callers until no set grows.
+    let mut pending: Vec<&str> = local_fns.iter().map(|(_, name)| *name).collect();
+    while let Some(callee) = pending.pop() {
+        let written = writers.get(callee).cloned().unwrap_or_default();
+        for caller in callers_of.get(callee).into_iter().flatten() {
+            let keys = writers.entry((*caller).to_owned()).or_default();
+            let before = keys.len();
+            keys.extend(written.iter().cloned());
+            if keys.len() > before {
+                pending.push(caller);
+            }
         }
     }
 
@@ -1596,16 +1622,12 @@ pub fn derive(source: &str) -> Result<Derived> {
             .filter(|state| state.writes && left[state.at])
             .map(|state| state.key.clone())
             .collect();
-        // The source can only call a function: the gate admits no function value. Its
-        // declaration is no call.
-        for (name, written) in &writers {
-            let name: HashSet<String> = HashSet::from([name.clone()]);
-            let called = |i: usize| {
-                p.names(i, &name) && p.text(i + 1) == "(" && p.text(i.wrapping_sub(1)) != "fn"
-            };
-            if (0..count).any(|i| left[i] && called(i)) {
-                moved.extend(written.iter().cloned());
-            }
+        for written in (0..count)
+            .filter(|i| left[*i])
+            .filter_map(call_at)
+            .filter_map(|name| writers.get(name))
+        {
+            moved.extend(written.iter().cloned());
         }
         moved.retain(|key| !p.server_keys.borrow().contains(key));
         if moved.is_empty() {

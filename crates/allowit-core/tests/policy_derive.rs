@@ -644,6 +644,29 @@ fn a_local_function_that_writes_state_follows_its_calls() {
     );
 }
 
+/// A write reaches its callers through any number of local functions, also when a caller
+/// stands before the function that it calls.
+#[test]
+fn a_write_reaches_its_callers_through_a_chain_of_local_functions() {
+    let mut source = String::from("use allowit::prelude::*;\n");
+    for i in 0..30 {
+        source.push_str(&format!(
+            "fn step{i}(ctx: &AllowitContext) -> allowit::Result {{\n    step{}(ctx)\n}}\n",
+            i + 1
+        ));
+    }
+    source.push_str("fn step30(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"seen\", true)\n}\n");
+    let kept = format!(
+        "{source}pub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    step0(ctx)?;\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}}\n"
+    );
+    assert_eq!(keys(&kept), [("seen".to_owned(), Keeper::Chain, false)]);
+    let left = format!(
+        "{source}pub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    let score = allowit::decision(ctx, &allowit::AllowitDecision {{ id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 }})?;\n    if score > 5 {{\n        step0(ctx)?;\n    }}\n    Ok(())\n}}\n"
+    );
+    assert_eq!(keys(&left), [("seen".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(&left).unwrap().source.contains("fn step"));
+}
+
 /// The contract must know each key before it runs. A key that is no string literal, a key
 /// that is no valid name, a write of a standard figure and a state function that is not
 /// called are refused, with the line.
@@ -1098,21 +1121,38 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             .find(|(golden, ..)| *golden == name)
             .unwrap()
             .1;
-        let state = derive(source).unwrap().state;
-        let kept_by = |keeper: Keeper| -> Vec<String> {
-            state
-                .iter()
-                .filter(|entry| entry.keeper == keeper)
-                .map(|entry| entry.key.clone())
-                .collect()
-        };
-        let (server_keys, chain_keys) = (kept_by(Keeper::Server), kept_by(Keeper::Chain));
-        let on_chain_state = |state: &AllowitMap| {
-            let mut state = state.clone();
-            for key in &server_keys {
-                state.remove(key.as_str());
+        let derived = derive(source).unwrap();
+        let chain_keys: Vec<String> = derived
+            .state
+            .iter()
+            .filter(|entry| entry.keeper == Keeper::Chain)
+            .map(|entry| entry.key.clone())
+            .collect();
+        // What the contract holds: the keys that it keeps and the figures that the derivation
+        // names. It holds no key of the server, no other figure and no key of another policy.
+        let held: Vec<&str> = chain_keys
+            .iter()
+            .map(String::as_str)
+            .chain(derived.figures.iter().map(|figure| figure.key))
+            .collect();
+        let project = |state: &AllowitMap| {
+            let mut kept = AllowitMap::new();
+            for key in &held {
+                if let Some(value) = state.get(*key) {
+                    kept.insert((*key).into(), value.clone());
+                }
             }
-            state
+            kept
+        };
+        // The contract's state for one evaluation. The stored day is no policy-visible value of
+        // a contract: a statement that reads it leaves. The evaluator's own accounting of the
+        // daily figures still needs it, as a contract knows the window of its daily entry.
+        let on_chain_state = |state: &AllowitMap| {
+            let mut kept = project(state);
+            if let Some(day) = state.get("day") {
+                kept.insert("day".into(), day.clone());
+            }
+            kept
         };
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {
@@ -1165,8 +1205,8 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
                                 *wrote.entry(name).or_default() += usize::from(changed);
                                 let state = after;
                                 assert_eq!(
-                                    on_chain.as_ref(),
-                                    Ok(&on_chain_state(state)),
+                                    on_chain.as_ref().map(&project),
+                                    Ok(project(state)),
                                     "{name}: {operation:?} of {amount} to {recipient}, limit {limit}, server {answer:?}"
                                 );
                             }
