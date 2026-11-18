@@ -14,9 +14,9 @@
 //! A statement of `execute` leaves when:
 //!
 //! 1. it makes a server call, names a server request type, reads owner text with `as_str()`,
-//!    which only the server can read, or reads stored policy state with `allowit::get_state`.
-//!    A server call is a call of a server function, of a registered package function, or of a
-//!    local function that makes one;
+//!    which only the server can read, or uses policy state that the server keeps (see
+//!    [Policy state](#policy-state)). A server call is a call of a server function, of a
+//!    registered package function, or of a local function that makes one;
 //! 2. it reads a name that a leaving statement binds, or a name that a leaving statement can
 //!    assign: a `mut` name, or a name that its `let` declares without a value;
 //! 3. it is an `if`, `match`, `while` or `for` whose condition, matched value, pattern guard
@@ -37,18 +37,41 @@
 //! or a block that ends with `;`, or that is the last expression of `execute`, stays whole or
 //! leaves whole.
 //!
-//! A contract wallet stores no policy state of its own: it keeps only the cumulated figures
-//! that its kept canonical rules read ([`Derived::figures`]). So a statement that reads stored
-//! state leaves (rule 1), and the server reads the same figures when it evaluates the whole
-//! source. [`derive`] refuses a source that writes policy state (`allowit::set_state`)
-//! anywhere: neither the chain nor the server stores such a write.
+//! # Policy state
+//!
+//! A policy may keep its own state: `allowit::get_state(ctx, "key")` reads the value that the
+//! last admitted operation wrote, and `allowit::set_state(ctx, "key", value)` writes when the
+//! operation is admitted. Each key has one keeper, so a statement reads the same value on the
+//! chain and on the server:
+//!
+//! - the chain keeps a key when every statement that writes it stays. The contract stores the
+//!   key, the kept statements read and write it there, and the server reads it from the
+//!   contract when it evaluates the whole source;
+//! - the server keeps a key when a statement that writes it leaves. Then every statement that
+//!   reads or writes the key leaves too (rule 1), and the contract never stores it. A key that
+//!   only leaving statements read is the server's as well.
+//!
+//! A call of a local function that writes a key counts as a write of that key. A key whose name
+//! starts with `day_` lives one daily window; any other key lives until a later write replaces
+//! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
+//!
+//! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
+//! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
+//! writes a standard figure.
+//!
+//! The contract must know each key before it runs, and Rust source cannot pass a state function
+//! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
+//! ASCII letters, digits or `_`, and a write of a standard figure.
 //!
 //! [`derive`] also refuses a source with a server part that the rule cannot follow by its
 //! names: one that takes a mutable reference (`&mut`, `ref mut`), which lets a statement
 //! assign a name that it does not mention; one that declares two local functions or
 //! constants with one name; and one that declares a local `Ok` or `Err`.
 use super::{Result, gate, param_keys, source_shape};
-use std::collections::HashSet;
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, HashMap, HashSet},
+};
 
 /// Why a statement runs only on the server.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,10 +80,10 @@ pub enum Cause {
     ServerCall,
     /// The statement reads a value that a server call gave.
     ServerValue,
-    /// The statement reads stored policy state, which only the server reads.
+    /// The statement reads or writes policy state that the server keeps.
     StoredState,
     /// The statement is in a branch whose condition depends on a server function or on
-    /// stored state.
+    /// policy state that the server keeps.
     ServerBranch,
     /// The statement comes after an early exit that depends on a server function.
     AfterServerExit,
@@ -125,9 +148,76 @@ pub struct Derived {
     /// The deterministic checks that stay, in source order and without repetition. An empty
     /// list means that the contract enforces nothing of the policy beyond its signatures.
     pub kept: Vec<String>,
-    /// The cumulated figures that the kept checks read, in a fixed order and without
-    /// repetition. A contract wallet keeps these figures and no other state.
+    /// The cumulated figures that the kept statements read, in a fixed order and without
+    /// repetition: those of the kept canonical rules, and those that a kept statement reads
+    /// with `allowit::get_state`. A contract wallet keeps these figures.
     pub figures: Vec<Figure>,
+    /// The policy's own state keys, sorted by key and without repetition, each with its
+    /// keeper. An empty list means that the policy keeps no state of its own.
+    pub state: Vec<StateEntry>,
+}
+
+/// Who keeps one state key of a policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keeper {
+    /// The contract stores the key. Every statement that writes it stays in the on-chain part.
+    Chain,
+    /// The server stores the key. Every statement that reads or writes it runs only on the
+    /// server.
+    Server,
+}
+
+impl Keeper {
+    /// The stable code of this keeper.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Chain => "chain",
+            Self::Server => "server",
+        }
+    }
+}
+
+/// One state key of a policy: a key of its `allowit::get_state` and `allowit::set_state`
+/// calls that is no standard figure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateEntry {
+    /// The key, as the source names it.
+    pub key: String,
+    /// Whether the value lives one daily window: the key starts with [`DAILY_PREFIX`]. The
+    /// window opens with the first write after the last window ended, and the value reads as
+    /// absent when it has ended. Any other value lives until a later write replaces it.
+    pub daily: bool,
+    /// Who stores the value.
+    pub keeper: Keeper,
+}
+
+/// The prefix of a state key whose value lives one daily window.
+pub const DAILY_PREFIX: &str = "day_";
+/// The most bytes of a state key.
+pub const MAX_STATE_KEY_BYTES: usize = 32;
+
+/// The standard state keys, each with the canonical rules whose figures a read of the key
+/// keeps. `day` is derived from the request's time, so it keeps no figure.
+const STANDARD: &[(&str, &[&str])] = &[
+    (allowit::CALLS, &["call_limit"]),
+    (allowit::SPENT, &["lifetime_spending_limit"]),
+    (allowit::UNPRICED, &["lifetime_spending_limit"]),
+    (allowit::DAY_SPENT, &["daily_spending_limit"]),
+    (allowit::DAY_TOTAL, &["daily_volume_limit"]),
+    (
+        allowit::DAY_UNPRICED,
+        &["daily_spending_limit", "daily_volume_limit"],
+    ),
+    (allowit::DAY_KEY, &[]),
+];
+
+/// The rules whose figures a read of the standard key `key` keeps, or `None` for a key of the
+/// policy's own.
+fn standard(key: &str) -> Option<&'static [&'static str]> {
+    STANDARD
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, rules)| *rules)
 }
 
 /// One cumulated figure that a kept canonical rule reads: a key of the standard state.
@@ -187,11 +277,16 @@ const FIGURES: &[(Figure, &[&str])] = &[
     ),
 ];
 
-/// The figures that the checks in `kept` read.
-fn figures(kept: &[String]) -> Vec<Figure> {
+/// The figures that the checks in `kept` read, with those of the rules in `read`: the rules
+/// whose figures a kept statement reads with `allowit::get_state`.
+fn figures(kept: &[String], read: &BTreeSet<&str>) -> Vec<Figure> {
     FIGURES
         .iter()
-        .filter(|(_, rules)| rules.iter().any(|rule| kept.iter().any(|k| k == rule)))
+        .filter(|(_, rules)| {
+            rules
+                .iter()
+                .any(|rule| read.contains(rule) || kept.iter().any(|k| k == rule))
+        })
         .map(|(figure, _)| *figure)
         .collect()
 }
@@ -366,6 +461,16 @@ struct Parsed<'a> {
     source: &'a str,
     tokens: Vec<Token>,
     nodes: Vec<Node>,
+    /// The state keys that the server keeps. [`derive`] finds them step by step.
+    server_keys: RefCell<HashSet<String>>,
+}
+
+/// One call of `allowit::get_state` or `allowit::set_state`.
+struct StateUse {
+    /// The token of `allowit`.
+    at: usize,
+    writes: bool,
+    key: String,
 }
 
 /// The extent of one branch statement.
@@ -857,7 +962,7 @@ impl<'a> Parsed<'a> {
             return true;
         }
         if let Some(function) = self.allowit_path(i) {
-            return gate::SERVER_FUNCTIONS.contains(&function) || function == "get_state";
+            return gate::SERVER_FUNCTIONS.contains(&function) || self.state_at(i);
         }
         let package = self.text(i + 1) == "::"
             && self.text(i + 3) == "("
@@ -877,17 +982,108 @@ impl<'a> Parsed<'a> {
             && self.text(i + 1) == "("
     }
 
-    /// Whether token `i` reads stored policy state: `allowit::get_state`.
+    /// The state call that token `i` starts, `allowit::get_state(ctx, "key")` or
+    /// `allowit::set_state(ctx, "key", value)`: whether it writes, and its key. `None` for
+    /// another token and for a call whose key is not a plain string literal.
+    fn state_use(&self, i: usize) -> Option<(bool, &'a str)> {
+        let writes = match self.allowit_path(i)? {
+            "get_state" => false,
+            "set_state" => true,
+            _ => return None,
+        };
+        // An explicit type: `get_state::<u64>(...)`.
+        let mut open = i + 3;
+        if self.text(open) == "::" && self.text(open + 1) == "<" {
+            let mut depth = 0i64;
+            open += 1;
+            loop {
+                match self.text(open) {
+                    "<" => depth += 1,
+                    ">" => depth -= 1,
+                    "" => return None,
+                    _ => {}
+                }
+                open += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+        }
+        if self.text(open) != "(" {
+            return None;
+        }
+        let close = self.close(open)?;
+        // The key is the second argument, and the literal alone.
+        let key = self.find(open + 1, close, &[","])? + 1;
+        let token = self
+            .tokens
+            .get(key)
+            .filter(|token| token.kind == Kind::Literal)?;
+        let ends = key + 1 == close || (self.text(key + 1) == "," && key + 1 < close);
+        let text = &self.source[token.start..token.end];
+        text.strip_prefix('"')
+            .and_then(|text| text.strip_suffix('"'))
+            .filter(|_| ends)
+            .map(|key| (writes, key))
+    }
+
+    /// Every state call of the source. A use of `get_state` or `set_state` that is no such
+    /// call, a key that is no valid literal and a write of a standard figure are refused.
+    fn state_uses(&self) -> Result<Vec<StateUse>> {
+        let mut uses = vec![];
+        for i in 0..self.tokens.len() {
+            let Some(name) = self
+                .word(i)
+                .filter(|name| matches!(*name, "get_state" | "set_state"))
+            else {
+                continue;
+            };
+            let line = self.line(self.tokens[i].start);
+            let at = i.wrapping_sub(2);
+            let call = (i >= 2 && self.allowit_path(at) == Some(name))
+                .then(|| self.state_use(at))
+                .flatten();
+            let Some((writes, key)) = call else {
+                return Err(format!(
+                    "A policy for a contract wallet names each state key as a string literal: `allowit::{name}(ctx, \"key\"{})` (line {line}). The wallet must know each key before it runs.",
+                    if name == "set_state" { ", value" } else { "" }
+                ));
+            };
+            let valid = !key.is_empty()
+                && key.len() <= MAX_STATE_KEY_BYTES
+                && key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_');
+            if !valid {
+                return Err(format!(
+                    "The state key {key:?} (line {line}) is not 1 to {MAX_STATE_KEY_BYTES} ASCII letters, digits or `_`."
+                ));
+            }
+            if writes && standard(key).is_some() {
+                return Err(format!(
+                    "A policy cannot write the standard figure {key:?} (`allowit::set_state`, line {line}): the wallet keeps it. Use another key."
+                ));
+            }
+            uses.push(StateUse {
+                at,
+                writes,
+                key: key.to_owned(),
+            });
+        }
+        Ok(uses)
+    }
+
+    /// Whether token `i` starts a call that reads or writes policy state that the server
+    /// keeps.
     fn state_at(&self, i: usize) -> bool {
-        self.allowit_path(i) == Some("get_state")
+        self.state_use(i)
+            .is_some_and(|(_, key)| self.server_keys.borrow().contains(key))
     }
 
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {
         (from..to).any(|i| self.server_at(i) || self.server_text_at(i) || self.names(i, helpers))
     }
 
-    /// Whether the tokens make a server call other than a read of stored state. `callers` are
-    /// the local functions that make one.
+    /// Whether the tokens make a server call other than a use of state that the server keeps.
+    /// `callers` are the local functions that make one.
     fn calls(&self, from: usize, to: usize, callers: &HashSet<String>) -> bool {
         (from..to).any(|i| {
             (self.server_at(i) && !self.state_at(i))
@@ -1079,6 +1275,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         source,
         tokens: lex(source)?,
         nodes: vec![],
+        server_keys: RefCell::default(),
     };
     let count = parsed.tokens.len();
     // The file is a list of items. `execute` is the one function that is split.
@@ -1104,8 +1301,8 @@ pub fn derive(source: &str) -> Result<Derived> {
     let all: Vec<usize> = (0..p.nodes.len()).collect();
     let in_execute = |id: usize| p.nodes[id].first > open && p.nodes[id].last < last;
 
-    // Local functions and constants that make a server call, and local functions that write
-    // state. A function is one statement here, whether it stands in the file or in a block.
+    // Local functions and constants. A function is one statement here, whether it stands in the
+    // file or in a block.
     let named: Vec<usize> = all
         .iter()
         .copied()
@@ -1129,19 +1326,32 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
         }
     };
-    let helpers = closure(&|from, to, found| p.server(from, to, found));
-    // The helpers that make a server call other than a read of stored state. The others only
-    // read stored state.
-    let callers = closure(&|from, to, found| p.calls(from, to, found));
-    let readers: HashSet<String> = helpers.difference(&callers).cloned().collect();
 
-    // Neither a contract wallet nor the server stores a policy's own state: the wallet keeps
-    // only the figures of its canonical rules.
-    if let Some(write) = (0..count).find(|i| p.allowit_path(*i) == Some("set_state")) {
-        return Err(format!(
-            "A policy for a contract wallet cannot write policy state (`allowit::set_state`, line {}). The wallet keeps only the cumulated figures that its canonical rules read, and no policy state of its own. State the limit with a canonical rule.",
-            p.line(p.tokens[write].start)
-        ));
+    // The state calls of the source, and the keys that each local function can write, itself
+    // or through a local function that it calls.
+    let uses = p.state_uses()?;
+    let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
+    loop {
+        let before: usize = writers.values().map(BTreeSet::len).sum();
+        for id in named.iter().filter(|id| p.nodes[**id].is_fn) {
+            let (from, to) = range(*id);
+            let name = p.nodes[*id].name.clone().unwrap_or_default();
+            let mut keys: BTreeSet<String> = uses
+                .iter()
+                .filter(|state| state.writes && (from..to).contains(&state.at))
+                .map(|state| state.key.clone())
+                .collect();
+            for (other, written) in &writers {
+                let other: HashSet<String> = HashSet::from([other.clone()]);
+                if p.mentions(from, to, &other) {
+                    keys.extend(written.iter().cloned());
+                }
+            }
+            writers.entry(name).or_default().extend(keys);
+        }
+        if writers.values().map(BTreeSet::len).sum::<usize>() == before {
+            break;
+        }
     }
 
     let mut mutable: HashSet<String> = (open..last)
@@ -1177,8 +1387,6 @@ pub fn derive(source: &str) -> Result<Derived> {
     let mut order = vec![];
     walk(&p.nodes, &body, &mut order);
 
-    let mut cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
-    let mut tainted: HashSet<String> = HashSet::new();
     // The tokens that decide whether a statement leaves: all of a statement that is not split,
     // and the conditions of a split one.
     let own = |id: usize| match p.nodes[id].shape {
@@ -1267,50 +1475,6 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
 
-    loop {
-        let before = cause.iter().flatten().count() + tainted.len();
-        for id in &order {
-            if cause[*id].is_some() {
-                continue;
-            }
-            // A `use` item is no step: it keeps the names that the kept code reads.
-            if p.nodes[*id].shape == Shape::Item && p.text(p.nodes[*id].key) == "use" {
-                continue;
-            }
-            let ranges = own(*id);
-            let calls = ranges
-                .iter()
-                .any(|(from, to)| p.server(*from, *to, &helpers));
-            // An item cannot read a local name: a function or constant that has the name of a
-            // server value is not that value.
-            let reads = p.nodes[*id].shape != Shape::Item
-                && ranges
-                    .iter()
-                    .any(|(from, to)| p.mentions(*from, *to, &tainted));
-            let why = match (calls, reads) {
-                (false, false) => continue,
-                _ if p.nodes[*id].braced => Cause::NotSplit,
-                (true, _) => Cause::ServerCall,
-                (false, true) => Cause::ServerValue,
-            };
-            leave(&p, &scope, &mut cause, &mut tainted, *id, why);
-        }
-        if cause.iter().flatten().count() + tainted.len() == before {
-            break;
-        }
-    }
-
-    // Items of the file that make a server call leave.
-    let mut gone: Vec<bool> = cause.iter().map(Option::is_some).collect();
-    for id in &named {
-        if helpers.contains(p.nodes[*id].name.as_deref().unwrap_or_default()) {
-            gone[*id] = true;
-        }
-    }
-    let changed = gone.iter().any(|left| *left);
-
-    // What only leaving code read leaves too: a `let` that only reads, a local function, a
-    // constant.
     let functions: HashSet<String> = named
         .iter()
         .filter(|id| p.nodes[**id].is_fn)
@@ -1326,43 +1490,119 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
         left
     };
-    loop {
-        let left = covered(&gone);
-        let mut more = vec![];
-        for id in &all {
-            let node = &p.nodes[*id];
-            if gone[*id] || *id == execute {
-                continue;
+
+    // A key whose write leaves is the server's, and then every statement that uses the key
+    // leaves. That can make another write leave, so the steps repeat until no key moves.
+    let (callers, readers, cause, gone, changed) = loop {
+        // Local functions and constants that make a server call or use state that the server
+        // keeps.
+        let helpers = closure(&|from, to, found| p.server(from, to, found));
+        // The helpers that make a server call. The others only use state that the server keeps.
+        let callers = closure(&|from, to, found| p.calls(from, to, found));
+        let readers: HashSet<String> = helpers.difference(&callers).cloned().collect();
+        let mut cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
+        let mut tainted: HashSet<String> = HashSet::new();
+        loop {
+            let before = cause.iter().flatten().count() + tainted.len();
+            for id in &order {
+                if cause[*id].is_some() {
+                    continue;
+                }
+                // A `use` item is no step: it keeps the names that the kept code reads.
+                if p.nodes[*id].shape == Shape::Item && p.text(p.nodes[*id].key) == "use" {
+                    continue;
+                }
+                let ranges = own(*id);
+                let calls = ranges
+                    .iter()
+                    .any(|(from, to)| p.server(*from, *to, &helpers));
+                // An item cannot read a local name: a function or constant that has the name of a
+                // server value is not that value.
+                let reads = p.nodes[*id].shape != Shape::Item
+                    && ranges
+                        .iter()
+                        .any(|(from, to)| p.mentions(*from, *to, &tainted));
+                let why = match (calls, reads) {
+                    (false, false) => continue,
+                    _ if p.nodes[*id].braced => Cause::NotSplit,
+                    (true, _) => Cause::ServerCall,
+                    (false, true) => Cause::ServerValue,
+                };
+                leave(&p, &scope, &mut cause, &mut tainted, *id, why);
             }
-            let wanted: HashSet<String> = match node.shape {
-                Shape::Let if in_execute(*id) => match node.init {
-                    Some((from, to)) if p.reads_only(from, to, &functions) => {
-                        node.names.iter().cloned().collect()
-                    }
+            if cause.iter().flatten().count() + tainted.len() == before {
+                break;
+            }
+        }
+
+        // Items of the file that make a server call leave.
+        let mut gone: Vec<bool> = cause.iter().map(Option::is_some).collect();
+        for id in &named {
+            if helpers.contains(p.nodes[*id].name.as_deref().unwrap_or_default()) {
+                gone[*id] = true;
+            }
+        }
+        let changed = gone.iter().any(|left| *left);
+
+        // What only leaving code read leaves too: a `let` that only reads, a local function,
+        // a constant.
+        loop {
+            let left = covered(&gone);
+            let mut more = vec![];
+            for id in &all {
+                let node = &p.nodes[*id];
+                if gone[*id] || *id == execute {
+                    continue;
+                }
+                let wanted: HashSet<String> = match node.shape {
+                    Shape::Let if in_execute(*id) => match node.init {
+                        Some((from, to)) if p.reads_only(from, to, &functions) => {
+                            node.names.iter().cloned().collect()
+                        }
+                        _ => continue,
+                    },
+                    Shape::Item => node.name.iter().cloned().collect(),
                     _ => continue,
-                },
-                Shape::Item => node.name.iter().cloned().collect(),
-                _ => continue,
-            };
-            if wanted.is_empty() {
-                continue;
+                };
+                if wanted.is_empty() {
+                    continue;
+                }
+                let (from, to) = range(*id);
+                let outside = |i: &usize| *i < from || *i >= to;
+                let read = |i: &usize| p.names(*i, &wanted);
+                let kept = (0..count).filter(outside).any(|i| !left[i] && read(&i));
+                let dropped = (0..count).filter(outside).any(|i| left[i] && read(&i));
+                if !kept && dropped {
+                    more.push(*id);
+                }
             }
-            let (from, to) = range(*id);
-            let outside = |i: &usize| *i < from || *i >= to;
-            let read = |i: &usize| p.names(*i, &wanted);
-            let kept = (0..count).filter(outside).any(|i| !left[i] && read(&i));
-            let dropped = (0..count).filter(outside).any(|i| left[i] && read(&i));
-            if !kept && dropped {
-                more.push(*id);
+            if more.is_empty() {
+                break;
+            }
+            for id in more {
+                gone[id] = true;
             }
         }
-        if more.is_empty() {
-            break;
+
+        // The keys that a leaving statement writes, itself or through a local function.
+        let left = covered(&gone);
+        let mut moved: BTreeSet<String> = uses
+            .iter()
+            .filter(|state| state.writes && left[state.at])
+            .map(|state| state.key.clone())
+            .collect();
+        for (name, written) in &writers {
+            let name: HashSet<String> = HashSet::from([name.clone()]);
+            if (0..count).any(|i| left[i] && p.names(i, &name)) {
+                moved.extend(written.iter().cloned());
+            }
         }
-        for id in more {
-            gone[id] = true;
+        moved.retain(|key| !p.server_keys.borrow().contains(key));
+        if moved.is_empty() {
+            break (callers, readers, cause, gone, changed);
         }
-    }
+        p.server_keys.borrow_mut().extend(moved);
+    };
 
     // The derivation reads `return Err(...)` as a denial and ends a derived `execute` with
     // `Ok(())`. A local item with one of these names would change both.
@@ -1503,7 +1743,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     if edits.is_empty() && !changed {
-        return finish(source, source.to_owned(), vec![], vec![]);
+        return finish(source, source.to_owned(), vec![], vec![], &uses);
     }
 
     edits.sort_by_key(|edit| edit.start);
@@ -1669,15 +1909,17 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     server_only.sort_by_key(|check| check.line);
-    finish(source, derived, left, server_only)
+    finish(source, derived, left, server_only, &uses)
 }
 
-/// Check the derived policy and list the checks that it keeps.
+/// Check the derived policy, list the checks that it keeps and name the keeper of each state
+/// key. `uses` are the state calls of the owner's source.
 fn finish(
     original: &str,
     source: String,
     left: Vec<(u32, u32)>,
     server_only: Vec<ServerOnly>,
+    uses: &[StateUse],
 ) -> Result<Derived> {
     let defect = |what: &str| {
         format!(
@@ -1688,6 +1930,7 @@ fn finish(
         source: &source,
         tokens: lex(&source)?,
         nodes: vec![],
+        server_keys: RefCell::default(),
     };
     let count = parsed.tokens.len();
     if source != original {
@@ -1702,11 +1945,37 @@ fn finish(
             kept.push(check);
         }
     }
+    // The state calls that stay: the contract keeps their keys, and the figures that they read.
+    let stays = parsed.state_uses().map_err(|error| defect(&error))?;
+    let read: BTreeSet<&str> = stays
+        .iter()
+        .filter_map(|state| standard(&state.key))
+        .flatten()
+        .copied()
+        .collect();
+    let chain: BTreeSet<&str> = stays.iter().map(|state| state.key.as_str()).collect();
+    let state = uses
+        .iter()
+        .map(|state| state.key.as_str())
+        .filter(|key| standard(key).is_none())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|key| StateEntry {
+            key: key.to_owned(),
+            daily: key.starts_with(DAILY_PREFIX),
+            keeper: if chain.contains(key) {
+                Keeper::Chain
+            } else {
+                Keeper::Server
+            },
+        })
+        .collect();
     Ok(Derived {
         source,
         left,
         server_only,
-        figures: figures(&kept),
+        figures: figures(&kept, &read),
         kept,
+        state,
     })
 }
