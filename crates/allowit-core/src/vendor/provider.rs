@@ -191,6 +191,22 @@ pub trait RuntimeProvider {
             "This rail does not upload wallet code within a fee ceiling",
         ))
     }
+    /// Make the installation's wallet code live again when it lapsed, from the server's sending
+    /// account, with the network fee bounded by `max_fee` as for `upload_code_within`. `None` when
+    /// the code is live. A restoration names the code by its hash, so it needs no code bytes, and
+    /// it gives no authority. The server pays it: a wallet operation that restored its code would
+    /// repay the code's rent for the network's minimum lifetime. A rail whose code does not lapse
+    /// restores nothing.
+    fn restore_code_within(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        max_fee: u64,
+        poll: crate::vendor::runtime::Poll,
+        now: u64,
+    ) -> Result<Option<crate::vendor::runtime::Receipt>> {
+        let _ = (i, max_fee, poll, now);
+        Err(Error::unsupported("This rail does not restore wallet code"))
+    }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
     /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
     /// A rail refuses an update whose expected revision is not the installed one.
