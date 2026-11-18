@@ -602,6 +602,14 @@ impl<'a> Parsed<'a> {
         let mut depth = 0i64;
         let mut i = from;
         while i < end {
+            // A branch or a loop inside the header is a whole value with its own blocks, as
+            // in `if ok && loop { break true; } { ... }`.
+            let nested = self.tokens[i].kind == Kind::Word
+                && matches!(self.text(i), "if" | "match" | "while" | "for" | "loop");
+            if depth == 0 && nested {
+                i = self.block_like_end(i, end)? + 1;
+                continue;
+            }
             match self.text(i) {
                 "let" if depth == 0 => i = self.find(i + 1, end, &["="])?,
                 "(" | "[" => depth += 1,
@@ -887,8 +895,12 @@ impl<'a> Parsed<'a> {
                 // A `const` block that a method call continues is no item: it is a statement.
                 let last = plain(self);
                 let id = self.node(Shape::Item, first, last, parent);
+                // `const _` binds no name.
                 if self.text(item) == "const" {
-                    self.nodes[id].name = self.word(item + 1).map(str::to_owned);
+                    self.nodes[id].name = self
+                        .word(item + 1)
+                        .filter(|name| *name != "_")
+                        .map(str::to_owned);
                 }
                 id
             } else if self.text(p) == "let" {
@@ -1782,6 +1794,7 @@ pub fn derive(source: &str) -> Result<Derived> {
             (0..count)
                 .filter(|i| matches!(p.text(*i), "fn" | "const") && p.text(i + 1) != "fn")
                 .filter_map(|i| p.word(i + 1))
+                .filter(|name| *name != "_")
                 .find(|name| !declared.insert(name))
         })
         .filter(|_| changed)

@@ -126,6 +126,7 @@ golden!(
     negated_block_condition => "negated-block-condition",
     shadowed_after_macro => "shadowed-after-macro",
     statement_after_branch => "statement-after-branch",
+    loop_in_condition => "loop-in-condition",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -860,6 +861,48 @@ fn a_statement_after_a_block_like_statement_is_a_step_of_its_own() {
     assert!(!derived.source.contains("max(") && derived.source.contains("const LIMIT"));
 }
 
+/// A branch or a loop inside the condition of a branch is a value with its own blocks. The
+/// body of the outer branch is the block after that value, so the body leaves with the
+/// condition that asks the server.
+#[test]
+fn a_branch_or_a_loop_in_a_condition_keeps_the_body_with_its_condition() {
+    let source = include_str!("fixtures/derive/loop-in-condition.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("seen".to_owned(), Keeper::Server, false)]);
+    for value in [
+        "loop { break true; }",
+        "if ctx.request.amount > 1 { true } else { false }",
+        "match ctx.request.amount { 0 => false, _ => true }",
+        "'a: loop { break 'a true; }",
+        "{ while false {} true }",
+    ] {
+        let other = source.replace("loop { break true; }", value);
+        assert_eq!(other == source, value == "loop { break true; }");
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        let derived = derive(&other).unwrap();
+        assert_eq!(
+            keys(&other),
+            [("seen".to_owned(), Keeper::Server, false)],
+            "{value}"
+        );
+        assert!(!derived.source.contains("seen"), "{value}");
+    }
+    // Without the server function in the condition, the branch stays whole on chain.
+    let local = source.replace(" && allowit::new_decision_context(ctx, None).is_ok()", "");
+    let derived = derive(&local).unwrap();
+    assert_eq!(derived.source, local);
+    assert_eq!(keys(&local), [("seen".to_owned(), Keeper::Chain, false)]);
+}
+
+/// `const _` binds no name: two of them are no two items with one name.
+#[test]
+fn anonymous_constants_are_no_duplicate_names() {
+    let source = "use allowit::prelude::*;\nfn check() -> u64 {\n    const _: u64 = 0;\n    const _: u64 = 1;\n    1\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    assert!(check() == 1);\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("assert!(check() == 1)") && derived.source.contains("const _"));
+}
+
 /// A function that leaves writes nothing by that: only a call of it writes. A function that
 /// no statement calls moves no key to the server.
 #[test]
@@ -1424,6 +1467,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("negated-block-condition", negated_block_condition::BOTH),
         ("shadowed-after-macro", shadowed_after_macro::BOTH),
         ("statement-after-branch", statement_after_branch::BOTH),
+        ("loop-in-condition", loop_in_condition::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN
