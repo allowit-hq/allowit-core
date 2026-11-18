@@ -203,29 +203,21 @@ pub const DAILY_PREFIX: &str = "day_";
 /// The most bytes of a state key.
 pub const MAX_STATE_KEY_BYTES: usize = 32;
 
-/// The standard state keys, each with the canonical rules whose figures a read of the key
-/// keeps. `day` is the day of the last admitted operation. A contract wallet stores no day, so
-/// a statement that reads it leaves, and the key keeps no figure.
-const STANDARD: &[(&str, &[&str])] = &[
-    (allowit::CALLS, &["call_limit"]),
-    (allowit::SPENT, &["lifetime_spending_limit"]),
-    (allowit::UNPRICED, &["lifetime_spending_limit"]),
-    (allowit::DAY_SPENT, &["daily_spending_limit"]),
-    (allowit::DAY_TOTAL, &["daily_volume_limit"]),
-    (
-        allowit::DAY_UNPRICED,
-        &["daily_spending_limit", "daily_volume_limit"],
-    ),
-    (allowit::DAY_KEY, &[]),
+/// The standard state keys: the figures, and `day`, the day of the last admitted operation. A
+/// contract wallet stores no day, so a statement that reads it leaves.
+const STANDARD: &[&str] = &[
+    allowit::CALLS,
+    allowit::SPENT,
+    allowit::UNPRICED,
+    allowit::DAY_SPENT,
+    allowit::DAY_TOTAL,
+    allowit::DAY_UNPRICED,
+    allowit::DAY_KEY,
 ];
 
-/// The rules whose figures a read of the standard key `key` keeps, or `None` for a key of the
-/// policy's own.
-fn standard(key: &str) -> Option<&'static [&'static str]> {
-    STANDARD
-        .iter()
-        .find(|(name, _)| *name == key)
-        .map(|(_, rules)| *rules)
+/// Whether `key` is a standard state key, and no key of the policy's own.
+fn standard(key: &str) -> bool {
+    STANDARD.contains(&key)
 }
 
 /// One cumulated figure that a kept canonical rule reads: a key of the standard state.
@@ -285,15 +277,13 @@ const FIGURES: &[(Figure, &[&str])] = &[
     ),
 ];
 
-/// The figures that the checks in `kept` read, with those of the rules in `read`: the rules
-/// whose figures a kept statement reads with `allowit::get_state`.
+/// The figures that the checks in `kept` read, with the figures in `read`: the standard keys
+/// that a kept statement reads with `allowit::get_state`.
 fn figures(kept: &[String], read: &BTreeSet<&str>) -> Vec<Figure> {
     FIGURES
         .iter()
-        .filter(|(_, rules)| {
-            rules
-                .iter()
-                .any(|rule| read.contains(rule) || kept.iter().any(|k| k == rule))
+        .filter(|(figure, rules)| {
+            read.contains(figure.key) || rules.iter().any(|rule| kept.iter().any(|k| k == rule))
         })
         .map(|(figure, _)| *figure)
         .collect()
@@ -872,7 +862,10 @@ impl<'a> Parsed<'a> {
                 let semi = self.text(end + 1) == ";" && end + 1 < close;
                 let last = if semi { end + 1 } else { end };
                 self.node(Shape::Whole, first, last, parent)
-            } else if matches!(self.text(item), "use" | "const") {
+            } else if self.text(item) == "use"
+                || (self.text(item) == "const" && self.word(item + 1).is_some())
+            {
+                // A `const` block that a method call continues is no item: it is a statement.
                 let last = plain(self);
                 let id = self.node(Shape::Item, first, last, parent);
                 if self.text(item) == "const" {
@@ -1109,7 +1102,7 @@ impl<'a> Parsed<'a> {
                     "The state key {key:?} (line {line}) is not 1 to {MAX_STATE_KEY_BYTES} ASCII letters, digits or `_`."
                 ));
             }
-            if writes && standard(key).is_some() {
+            if writes && standard(key) {
                 return Err(format!(
                     "A policy cannot write the standard figure {key:?} (`allowit::set_state`, line {line}): the wallet keeps it. Use another key."
                 ));
@@ -2039,15 +2032,14 @@ fn finish(
     let stays = parsed.state_uses().map_err(|error| defect(&error))?;
     let read: BTreeSet<&str> = stays
         .iter()
-        .filter_map(|state| standard(&state.key))
-        .flatten()
-        .copied()
+        .map(|state| state.key.as_str())
+        .filter(|key| standard(key))
         .collect();
     let chain: BTreeSet<&str> = stays.iter().map(|state| state.key.as_str()).collect();
     let state = uses
         .iter()
         .map(|state| state.key.as_str())
-        .filter(|key| standard(key).is_none())
+        .filter(|key| !standard(key))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|key| StateEntry {

@@ -122,6 +122,7 @@ golden!(
     state_on_server => "state-on-server",
     state_helpers => "state-helpers",
     state_braced_macro => "state-braced-macro",
+    state_after_approval => "state-after-approval",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -684,6 +685,37 @@ fn a_function_after_a_statement_with_braces_follows_its_calls() {
     assert!(!derive(&constant).unwrap().source.contains("fn remember("));
 }
 
+/// A `const` block that a method call continues is a statement, and no item. After an early
+/// approval on a server value it leaves as every later statement does, and the server keeps
+/// the key that it writes.
+#[test]
+fn a_continued_const_block_after_an_early_approval_leaves() {
+    let source = include_str!("fixtures/derive/state-after-approval.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("marked".to_owned(), Keeper::Server, false),
+            ("visits".to_owned(), Keeper::Chain, false)
+        ]
+    );
+    assert!(!derived.source.contains("marked") && !derived.source.contains("const"));
+    assert_eq!(derived.kept, ["payment_limit"]);
+    // Before the server function, the statement stays and the contract keeps its key.
+    let early = source
+        .replace(
+            "    const { true }.then_some(allowit::set_state(ctx, \"marked\", true)?);\n",
+            "",
+        )
+        .replace(
+            "    let visits",
+            "    const { true }.then_some(allowit::set_state(ctx, \"marked\", true)?);\n    let visits",
+        );
+    assert!(keys(&early).contains(&("marked".to_owned(), Keeper::Chain, false)));
+    assert!(derive(&early).unwrap().source.contains("\"marked\""));
+}
+
 /// A write reaches its callers through any number of local functions, also when a caller
 /// stands before the function that it calls.
 #[test]
@@ -835,26 +867,22 @@ fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
             ("day_unpriced", true)
         ]
     );
-    // Each standard key keeps the figures of the rules that read it; `day` keeps none.
+    // A read of a standard key keeps that figure and no other; `day` keeps none.
     let read = |key: &str| {
         figures(&format!(
             "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    let _figure: Option<AllowitValue> = allowit::get_state(ctx, \"{key}\")?;\n    Ok(())\n}}\n"
         ))
     };
-    assert_eq!(read("spent"), [("spent", false), ("unpriced", false)]);
-    assert_eq!(read("unpriced"), read("spent"));
-    assert_eq!(
-        read("day_total"),
-        [("day_total", true), ("day_unpriced", true)]
-    );
-    assert_eq!(
-        read("day_unpriced"),
-        [
-            ("day_spent", true),
-            ("day_total", true),
-            ("day_unpriced", true)
-        ]
-    );
+    for (key, daily) in [
+        ("calls", false),
+        ("spent", false),
+        ("unpriced", false),
+        ("day_spent", true),
+        ("day_total", true),
+        ("day_unpriced", true),
+    ] {
+        assert_eq!(read(key), [(key, daily)]);
+    }
     assert!(read("day").is_empty());
     // The stored day is the day of the last admitted operation. A contract wallet stores no
     // day, so a statement that reads it leaves: only the server evaluates it.
@@ -1114,6 +1142,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         set("passed", AllowitValue::Int(1));
         set("flagged", AllowitValue::Bool(flagged));
         set("visits", AllowitValue::Int(paid));
+        set("marked", AllowitValue::Bool(flagged));
         state
     };
     let states = [
@@ -1162,6 +1191,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("state-on-server", state_on_server::BOTH),
         ("state-helpers", state_helpers::BOTH),
         ("state-braced-macro", state_braced_macro::BOTH),
+        ("state-after-approval", state_after_approval::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN
@@ -1277,9 +1307,10 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             "state-on-server",
             "state-helpers",
             "state-braced-macro",
+            "state-after-approval",
         ]
         .contains(name);
         assert_eq!(*count > 0, stateful, "{name}: {count}");
     }
-    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 4);
+    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 5);
 }
