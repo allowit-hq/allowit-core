@@ -433,6 +433,29 @@ export interface PaymentProof {
   readonly header: string;
   readonly value: string;
 }
+/** One limit on the amount of one operation. The policy checks it against each request, so it keeps no counter. */
+export interface PaymentLimit {
+  /** The policy param that holds the limit, such as payment_limit. */
+  readonly param: string;
+  readonly limit: Quantity;
+}
+/** The limits of a wallet: a limits document, or the limit fields of a receipt or wallet document. */
+export interface WalletLimits {
+  /** The counted spending limits. Absent when their counters could not be read. */
+  readonly limits?: readonly LimitReport[];
+  /** The limits on one operation. Absent when the document reports none. */
+  readonly paymentLimits?: readonly PaymentLimit[];
+}
+/** The reports that a status, receipt or wallet document may carry at its top level. */
+export interface OperationReports extends WalletLimits {
+  readonly settlement?: Settlement;
+  /** What the payment bought, when the operation paid a seller's challenge. */
+  readonly paidService?: PaidService;
+  /** The fee that the spending limits count, in the installed asset. */
+  readonly feeCharged?: Quantity;
+  /** The explorer link of the transaction. */
+  readonly explorer?: string;
+}
 /** The stable selection id of a wallet kind. */
 export type WalletKindId = 'native' | 'simple' | 'standard' | 'custom';
 /** The owner-facing description of one wallet kind. Every host shows its texts unchanged. */
