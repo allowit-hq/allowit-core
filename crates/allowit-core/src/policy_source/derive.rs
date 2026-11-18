@@ -643,19 +643,20 @@ impl<'a> Parsed<'a> {
 
     /// The last token of the statement that token `p` starts, when it is a macro with braces,
     /// such as `assert! { ok }`, or a `const { ... }` block. Such a statement ends at its `}`
-    /// with no `;`. Only the name of a macro counts: `if ! { ok } { ... }` negates a block.
-    /// When a token that can continue an expression follows, the statement is not ended here:
-    /// the parser ends a statement early only where the end is certain, because two
-    /// statements read as one leave or stay together, while one statement read as two can
-    /// keep a denial without its condition.
+    /// with no `;`, unless a method call or `?` continues it: that is the rule of the Rust
+    /// parser. Only the name of a macro counts, plain or raw (`r#assert`):
+    /// `if ! { ok } { ... }` negates a block.
     fn braced_end(&self, p: usize, end: usize) -> Option<usize> {
+        let macro_name = self
+            .word(p)
+            .is_some_and(|name| gate::MACROS.contains(&name));
         let open = match (self.text(p), self.text(p + 1), self.text(p + 2)) {
             ("const", "{", _) => p + 1,
-            (name, "!", "{") if gate::MACROS.contains(&name) => p + 2,
+            (_, "!", "{") if macro_name => p + 2,
             _ => return None,
         };
         self.close(open)
-            .filter(|last| *last < end && !self.continues(last + 1))
+            .filter(|last| *last < end && !matches!(self.text(last + 1), "." | "?"))
     }
 
     /// The last token of the branch statement whose keyword or `{` is token `p`, also when its
@@ -1407,6 +1408,11 @@ pub fn derive(source: &str) -> Result<Derived> {
     // The local functions that each function calls, read once.
     let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
     let fn_names: HashSet<&str> = local_fns.iter().map(|(_, name)| *name).collect();
+    let in_local_fn = |i: usize| {
+        local_fns
+            .iter()
+            .any(|((from, to), _)| (*from..*to).contains(&i))
+    };
     for ((from, to), name) in &local_fns {
         let (from, to) = (*from, *to);
         // A function that stands inside this one runs only when it is called: its tokens
@@ -1511,6 +1517,16 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
             cause[id] = Some(why);
             tainted.extend(p.nodes[id].names.iter().cloned());
+            // Every name that a `let` inside the statement binds leaves with it. Such a name
+            // is seen after the statement only when the parser read two statements as one,
+            // and then a later statement must not read an earlier value of that name.
+            if p.nodes[id].shape != Shape::Split {
+                let (from, to) = (p.nodes[id].first, p.nodes[id].last + 1);
+                for i in (from..to).filter(|i| p.text(*i) == "let") {
+                    let end = p.find(i + 1, to, &["=", ":", ";"]).unwrap_or(i + 1);
+                    tainted.extend(p.bound(i + 1, end));
+                }
+            }
             let inside = match why {
                 Cause::ServerCall | Cause::ServerValue => Cause::ServerBranch,
                 other => other,
@@ -1677,15 +1693,18 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
         }
 
-        // The keys that a leaving statement writes, itself or through a local function.
+        // The keys that a leaving step of `execute` writes, itself or through a local
+        // function that it calls. A function that leaves writes nothing by that: its calls
+        // write, and they are steps of `execute` or of a function that such a step calls.
         let left = covered(&gone);
+        let step = |i: usize| left[i] && (open..last).contains(&i) && !in_local_fn(i);
         let mut moved: BTreeSet<String> = uses
             .iter()
-            .filter(|state| state.writes && left[state.at])
+            .filter(|state| state.writes && step(state.at))
             .map(|state| state.key.clone())
             .collect();
         for written in (0..count)
-            .filter(|i| left[*i])
+            .filter(|i| step(*i))
             .filter_map(call_at)
             .filter_map(|name| writers.get(name))
         {

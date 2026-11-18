@@ -124,6 +124,7 @@ golden!(
     state_braced_macro => "state-braced-macro",
     state_after_approval => "state-after-approval",
     negated_block_condition => "negated-block-condition",
+    shadowed_after_macro => "shadowed-after-macro",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -719,6 +720,71 @@ fn a_negated_block_condition_is_no_macro() {
     }
 }
 
+/// A name that a leaving `let` binds leaves with it, also when the `let` stands after a
+/// statement that needs no `;`: a later statement never reads an earlier value of the name.
+#[test]
+fn a_shadowed_name_after_a_statement_with_braces_leaves() {
+    let source = include_str!("fixtures/derive/shadowed-after-macro.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    for (from, to) in [
+        ("", ""),
+        // A plain macro name, and an empty block after it.
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "assert! { ctx.request.amount > 0 } {}",
+        ),
+        // A `const` block, and a branch with a block after it.
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "const { assert!(true) }",
+        ),
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "if ctx.request.amount > 0 {} {}",
+        ),
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "if ctx.request.amount > 0 {} - 1;",
+        ),
+    ] {
+        let other = source.replace(from, to);
+        assert_eq!(other == source, from.is_empty());
+        let derived = derive(&other).unwrap();
+        assert_eq!(
+            keys(&other),
+            [("last_score".to_owned(), Keeper::Server, false)],
+            "{to}"
+        );
+        assert!(!derived.source.contains("last_score"), "{to}");
+    }
+}
+
+/// A function that leaves writes nothing by that: only a call of it writes. A function that
+/// no statement calls moves no key to the server.
+#[test]
+fn a_function_that_no_statement_calls_moves_no_key() {
+    let source = "use allowit::prelude::*;\nfn ask(ctx: &AllowitContext) -> allowit::Result {\n    fn reset(ctx: &AllowitContext) -> allowit::Result {\n        allowit::set_state(ctx, \"n\", 0u64)\n    }\n    allowit::new_decision_context(ctx, None)\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let n: u64 = allowit::get_state(ctx, \"n\")?.unwrap_or(0);\n    assert!(n < 3);\n    allowit::set_state(ctx, \"n\", n + 1)?;\n    ask(ctx)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("n".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("assert!(n < 3)") && derived.source.contains("n + 1"));
+    assert!(!derived.source.contains("fn ask(") && !derived.source.contains("fn reset("));
+    // With a call of the inner function, the leaving call of the outer one moves the key.
+    let called = source.replace(
+        "    allowit::new_decision_context(ctx, None)\n",
+        "    reset(ctx)?;\n    allowit::new_decision_context(ctx, None)\n",
+    );
+    assert_ne!(called, source);
+    assert_eq!(keys(&called), [("n".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(&called).unwrap().source.contains("\"n\""));
+    // A function at the file level that no statement calls moves no key either.
+    let unused = source.replace(
+        "pub fn execute",
+        "fn unused(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    allowit::set_state(ctx, \"n\", 9u64)\n}\npub fn execute",
+    );
+    assert_eq!(keys(&unused), [("n".to_owned(), Keeper::Chain, false)]);
+}
+
 /// A function that stands inside another function runs only where it is called. Its write is
 /// no write of the function around it.
 #[test]
@@ -1244,6 +1310,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("state-braced-macro", state_braced_macro::BOTH),
         ("state-after-approval", state_after_approval::BOTH),
         ("negated-block-condition", negated_block_condition::BOTH),
+        ("shadowed-after-macro", shadowed_after_macro::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN
