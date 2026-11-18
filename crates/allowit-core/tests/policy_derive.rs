@@ -125,6 +125,7 @@ golden!(
     state_after_approval => "state-after-approval",
     negated_block_condition => "negated-block-condition",
     shadowed_after_macro => "shadowed-after-macro",
+    statement_after_branch => "statement-after-branch",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -808,21 +809,55 @@ fn a_const_block_in_a_condition_is_an_operand() {
     assert!(derived.source.contains("\"paid\"") && !derived.source.contains("const"));
 }
 
-/// The parser can read two statements as one, as after `if ok {} {}`. A function that such a
-/// group declares leaves with the group, and so does every statement that names it: the name
-/// never falls back to another item, such as the `Some` of the language.
+/// A block-like statement ends at its last `}`, as the Rust parser ends it: a block, a
+/// declaration or an operator after it starts the next statement. So the statements after
+/// `if ok {} {}` are steps of their own, and a block that asks the server leaves alone.
 #[test]
-fn a_function_in_a_group_of_statements_leaves_with_every_statement_that_names_it() {
-    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if ctx.request.amount > 0 {} {}\n    fn Some(ctx: &AllowitContext) -> Option<bool> {\n        allowit::set_state(ctx, \"n\", true).is_ok();\n        None\n    }\n    Some(ctx);\n    assert!(Some(ctx).is_none());\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        Some(ctx);\n    }\n    Ok(())\n}\n";
+fn a_statement_after_a_block_like_statement_is_a_step_of_its_own() {
+    let source = include_str!("fixtures/derive/statement-after-branch.rs");
     source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("limit".to_owned(), Keeper::Chain, false)]);
     let derived = derive(source).unwrap();
-    assert_eq!(keys(source), [("n".to_owned(), Keeper::Server, false)]);
+    assert!(derived.source.contains("    const LIMIT: i128 = 3;\n"));
+    assert!(
+        derived
+            .source
+            .contains("assert!(ctx.request.amount < limit() * 1_000_000)")
+    );
+    assert!(!derived.source.contains("new_decision_context"));
+    // A function after such a statement: a leaving call of it moves its key, and every
+    // statement that names it leaves with it.
+    let function = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if ctx.request.amount > 0 {} {}\n    fn Some(ctx: &AllowitContext) -> Option<bool> {\n        allowit::set_state(ctx, \"n\", true).is_ok();\n        None\n    }\n    Some(ctx);\n    assert!(Some(ctx).is_none());\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        Some(ctx);\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(function, REGISTRY).unwrap();
+    assert_eq!(keys(function), [("n".to_owned(), Keeper::Server, false)]);
+    let derived = derive(function).unwrap();
     assert!(!derived.source.contains("Some"), "{}", derived.source);
-    // A constant of such a group: no kept statement reads another constant of that name.
-    let constant = "use allowit::prelude::*;\nconst LIMIT: i128 = 5;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if ctx.request.amount > 0 {} { allowit::new_decision_context(ctx, None)?; }\n    const LIMIT: i128 = 3;\n    assert!(ctx.request.amount < LIMIT);\n    Ok(())\n}\n";
-    source_shape_with_host_calls(constant, REGISTRY).unwrap();
-    let derived = derive(constant).unwrap();
-    assert!(!derived.source.contains("assert"), "{}", derived.source);
+    assert!(
+        derived
+            .source
+            .contains("    if ctx.request.amount > 0 {} {}\n")
+    );
+    // A constant that shadows a constant of the file is refused: the rule cannot tell which
+    // one a statement reads.
+    let shadowed = source.replace("pub fn execute", "const LIMIT: i128 = 2;\npub fn execute");
+    let error = derive(&shadowed).unwrap_err();
+    assert!(error.contains("declare `LIMIT` twice"), "{error}");
+    // So is one inside a statement that is not split.
+    let nested = source.replace(
+        "    const LIMIT: i128 = 3;\n",
+        "    while { const LIMIT: i128 = 4; ctx.request.amount > LIMIT } {\n        return Err(AllowitError::DestinationNotAllowed);\n    }\n    const LIMIT: i128 = 3;\n",
+    );
+    assert_ne!(nested, source);
+    let error = derive(&nested).unwrap_err();
+    assert!(error.contains("declare `LIMIT` twice"), "{error}");
+    // A method call after the last `}` continues the statement, as in Rust.
+    let continued = source.replace(
+        "    if ctx.request.amount > 0 {} {\n        allowit::new_decision_context(ctx, None)?;\n    }\n",
+        "    if ctx.request.amount > 0 { 1 } else { 2 }.max(allowit::new_decision_context(ctx, None).map_or(0, |_| 1));\n",
+    );
+    assert_ne!(continued, source);
+    let derived = derive(&continued).unwrap();
+    assert!(!derived.source.contains("max(") && derived.source.contains("const LIMIT"));
 }
 
 /// A function that leaves writes nothing by that: only a call of it writes. A function that
@@ -1388,6 +1423,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("state-after-approval", state_after_approval::BOTH),
         ("negated-block-condition", negated_block_condition::BOTH),
         ("shadowed-after-macro", shadowed_after_macro::BOTH),
+        ("statement-after-branch", statement_after_branch::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN
@@ -1504,9 +1540,10 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             "state-helpers",
             "state-braced-macro",
             "state-after-approval",
+            "statement-after-branch",
         ]
         .contains(name);
         assert_eq!(*count > 0, stateful, "{name}: {count}");
     }
-    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 5);
+    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 6);
 }

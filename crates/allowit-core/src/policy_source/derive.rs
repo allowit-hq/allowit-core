@@ -63,10 +63,10 @@
 //! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
 //! policy writes a standard figure.
 //!
-//! The derivation reads tokens, not a syntax tree. Where it cannot tell that a statement has
-//! ended, as after `if ok {} {}`, it reads the next statement with it. Such a group stays or
-//! leaves as one, and every name that it declares (a value, a function, a constant, an import)
-//! leaves with it, so no later statement reads another item of that name.
+//! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
+//! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
+//! `const` block) ends at its last `}` unless `.` or `?` follows, and any other statement ends
+//! at its `;`. So each statement and each item of a block is a step of its own.
 //!
 //! The contract must know each key before it runs, and Rust source cannot pass a state function
 //! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
@@ -901,15 +901,18 @@ impl<'a> Parsed<'a> {
                 }
                 id
             } else {
+                // A block-like statement ends at its last `}`, as the Rust parser ends it: only
+                // `.` or `?` after that `}` continues the expression, so a `{`, an operator or
+                // a declaration after it starts the next statement. `block_like_end` finds the
+                // body after a header that holds a block, as in `while { ok } { ... }`.
+                let exact = self.block_like_end(p, close).filter(|last| *last < close);
+                let continued = |last: usize| matches!(self.text(last + 1), "." | "?");
+                // `branch` takes the first block of a header as the body. It splits the
+                // statement only when that is the statement's own last block.
                 let branch = self
                     .branch(p, close)
-                    .filter(|branch| !self.continues(branch.end + 1));
-                // A branch statement that is not split, such as one whose condition is a block,
-                // ends with its own last block, not at the next `;`.
-                let unsplit = || {
-                    self.block_like_end(p, close)
-                        .filter(|last| *last < close && !self.continues(last + 1))
-                };
+                    .filter(|branch| Some(branch.end) == exact && !continued(branch.end));
+                let unsplit = || exact.filter(|last| !continued(*last));
                 match branch {
                     None => match unsplit() {
                         Some(end) => {
@@ -1558,38 +1561,6 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
             cause[id] = Some(why);
             tainted.extend(p.nodes[id].names.iter().cloned());
-            // Every name that a `let` inside the statement binds leaves with it. Such a name
-            // is seen after the statement only when the parser read two statements as one,
-            // and then a later statement must not read an earlier value of that name.
-            if p.nodes[id].shape != Shape::Split {
-                let (from, to) = (p.nodes[id].first, p.nodes[id].last + 1);
-                for i in (from..to).filter(|i| p.text(*i) == "let") {
-                    let end = p.find(i + 1, to, &["=", ":", ";"]).unwrap_or(i + 1);
-                    tainted.extend(p.bound(i + 1, end));
-                }
-            }
-            // The same holds for a function, a constant or an import that such a group of
-            // statements declares in its own block: a statement that names it leaves too, so
-            // that the name never falls back to another item, such as `Some`.
-            if p.nodes[id].shape == Shape::Whole {
-                let (from, to) = (p.nodes[id].first, p.nodes[id].last + 1);
-                let mut i = from;
-                while i < to {
-                    match p.text(i) {
-                        "{" => i = p.close(i).unwrap_or(to),
-                        "fn" | "const" => tainted.extend(p.word(i + 1).map(str::to_owned)),
-                        "use" => {
-                            let end = p.find(i + 1, to, &[";"]).unwrap_or(to);
-                            tainted.extend(
-                                (i + 1..end).filter_map(|at| p.word(at)).map(str::to_owned),
-                            );
-                            i = end;
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
-            }
             let inside = match why {
                 Cause::ServerCall | Cause::ServerValue => Cause::ServerBranch,
                 other => other,
@@ -1798,8 +1769,9 @@ pub fn derive(source: &str) -> Result<Derived> {
         return Err("A policy for a contract wallet that depends on a server function cannot take a mutable reference (`&mut` or `ref mut`). Assign the name itself.".into());
     }
     // Two local functions or constants with one name: the rule cannot tell which one a
-    // statement calls. A function can also stand inside another function, where it is no
-    // statement of its own, so every `fn` of the file counts.
+    // statement calls. A function or a constant can also stand inside another function or a
+    // statement that is not split, where it is no statement of its own, so every `fn` and
+    // every `const` of the file counts.
     let mut seen: HashSet<&str> = HashSet::new();
     let mut declared: HashSet<&str> = HashSet::new();
     if let Some(twice) = named
@@ -1808,7 +1780,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         .find(|name| !seen.insert(name))
         .or_else(|| {
             (0..count)
-                .filter(|i| p.text(*i) == "fn")
+                .filter(|i| matches!(p.text(*i), "fn" | "const") && p.text(i + 1) != "fn")
                 .filter_map(|i| p.word(i + 1))
                 .find(|name| !declared.insert(name))
         })
