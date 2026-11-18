@@ -129,6 +129,7 @@ golden!(
     loop_in_condition => "loop-in-condition",
     range_loop => "range-loop",
     iterator_break => "iterator-break",
+    inferred_number => "inferred-number",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -920,30 +921,49 @@ fn a_block_after_an_open_range_is_the_body_of_the_loop() {
     );
 }
 
-/// Where the parser cannot tell where a statement ends, it reads the next statement with it.
-/// A `let` or an item after a `}` of such a group would stay seen by later statements, so a
-/// source with a server part is refused there.
+/// Where a `;` is missing, the parser reads the next statement with the one before. A `let`
+/// or an item inside such a group would stay seen by later statements while it left with the
+/// group, so a source with a server part is refused there.
 #[test]
 fn a_declaration_that_the_parser_reads_with_the_statement_before_is_refused() {
-    let source = include_str!("fixtures/derive/range-loop.rs").replace(
+    let source = include_str!("fixtures/derive/range-loop.rs");
+    for (from, to, line) in [
+        // After a call.
+        (
+            "PAYMENT_LIMIT])?;\n    let passed: bool",
+            "PAYMENT_LIMIT])?\n    let passed: bool",
+            5,
+        ),
+        // After a `let`, with a loop between.
+        ("let passed: bool = false;", "let passed: bool = false", 11),
+        // An attribute before the `let`.
+        (
+            "PAYMENT_LIMIT])?;\n    let passed: bool",
+            "PAYMENT_LIMIT])?\n    #[allow(unused_variables)]\n    let passed: bool",
+            6,
+        ),
+    ] {
+        let other = source.replace(from, to);
+        assert_ne!(other, source);
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        let error = derive(&other).unwrap_err();
+        let expected = format!("must end the statement before line {line} with `;`");
+        assert!(error.contains(&expected), "{to}: {error}");
+        // Without a server part, the source is its own on-chain part.
+        let local = other.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
+        assert_eq!(derive(&local).unwrap().source, local);
+    }
+    // Generic arguments end where they close: the loop is a statement of its own.
+    let generic = source.replace(
         "    for i in 0u64.. {\n        if i > 2 {\n            break;\n        }\n    }\n",
         "    while ctx.request.amount == u64::MAX::<> {}\n",
     );
-    source_shape_with_host_calls(&source, REGISTRY).unwrap();
-    let error = derive(&source).unwrap_err();
-    assert!(
-        error.contains("must end the statement before line 7 with `;`"),
-        "{error}"
-    );
-    // With the `;`, the statements are two.
-    let ended = source.replace("u64::MAX::<> {}\n", "u64::MAX::<> {};\n");
+    assert_ne!(generic, source);
     assert_eq!(
-        keys(&ended),
+        keys(&generic),
         [("passed_last".to_owned(), Keeper::Server, false)]
     );
-    // Without a server part, the source is its own on-chain part.
-    let local = source.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
-    assert_eq!(derive(&local).unwrap().source, local);
+    assert!(!derive(&generic).unwrap().source.contains("passed"));
 }
 
 /// The iterated value of a `for` runs before the loop: a `break` there ends the enclosing loop.
@@ -994,6 +1014,87 @@ fn a_helper_is_named_only_in_the_block_that_declares_it() {
     let derived = derive(source).unwrap();
     assert!(derived.source.contains("let seen = Some(true);"));
     assert!(!derived.source.contains("fn Some") && !derived.source.contains("\"flag\""));
+}
+
+/// A number without a type takes its type from the code that uses it, and `i32` when no code
+/// does. A leaving statement can give that type, so a kept statement that reads a name of such
+/// a number, or a name that shares its type, leaves too. A stated type keeps it on chain.
+#[test]
+fn a_number_whose_type_a_leaving_statement_gives_is_followed() {
+    let source = include_str!("fixtures/derive/inferred-number.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(source).unwrap().source.contains("flag"));
+    let flag = |other: &str| keys(other).into_iter().next().map(|(_, keeper, _)| keeper);
+    for (from, to, keeper) in [
+        // A stated type, or a suffix, fixes the type on both sides.
+        ("let n = ", "let n: u64 = ", Keeper::Chain),
+        (
+            "if ctx.request.amount > 0 { 1 } else { 2 }",
+            "if ctx.request.amount > 0i128 { 1u64 } else { 2u64 }",
+            Keeper::Chain,
+        ),
+        // A value of the request has its own type.
+        (
+            "if ctx.request.amount > 0 { 1 } else { 2 }",
+            "ctx.request.amount",
+            Keeper::Chain,
+        ),
+        // A name that takes its type from the number shares it.
+        (
+            "    let n = if",
+            "    let m = 1;\n    let n = m + if",
+            Keeper::Server,
+        ),
+        // So does a name that one statement uses with it.
+        (
+            "    allowit::set_state(ctx, \"flag\", (n << 31) > 0)?;",
+            "    let k = 1;\n    assert!(k <= n);\n    allowit::set_state(ctx, \"flag\", (k << 31) > 0)?;",
+            Keeper::Server,
+        ),
+    ] {
+        let other = source.replace(from, to);
+        assert_ne!(other, source, "{to}");
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        assert_eq!(flag(&other), Some(keeper), "{to}");
+    }
+    // A name that a `for` binds from numbers without a type.
+    let looped = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    for i in 0..2 {\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            assert!(i < 2u64);\n        }\n        allowit::set_state(ctx, \"flag\", (i << 31) > 0)?;\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(looped, REGISTRY).unwrap();
+    assert_eq!(flag(looped), Some(Keeper::Server));
+    assert_eq!(
+        flag(&looped.replace("0..2", "0u64..2u64")),
+        Some(Keeper::Chain)
+    );
+}
+
+/// The `const` parameters of generic functions are no items: two of them with one name are
+/// no two items with one name, and none of them is a declaration inside a statement.
+#[test]
+fn const_parameters_are_no_items() {
+    let source = "use allowit::prelude::*;\nfn first<const N: u64>() -> u64 {\n    N\n}\nfn second<const N: u64>() -> u64 {\n    N\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}\n";
+    derive(source).unwrap();
+}
+
+/// A check outside the block of a helper that left names another item of the helper's name.
+/// It leaves because of its own branch, so the report says that the owner can move it out.
+#[test]
+fn a_check_that_names_another_item_of_a_helpers_name_reports_its_own_cause() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    {\n        fn Some(ctx: &AllowitContext) -> allowit::Result {\n            allowit::set_state(ctx, \"flag\", true)\n        }\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            Some(ctx)?;\n        }\n    }\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert!(Some(true).is_some());\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves: {:?}", derived.server_only);
+    };
+    assert_eq!(
+        (
+            check.line,
+            check.check.as_str(),
+            check.cause,
+            check.movable()
+        ),
+        (12, "assert", Cause::ServerBranch, true)
+    );
 }
 
 /// `const _` binds no name: two of them are no two items with one name.
@@ -1572,6 +1673,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("loop-in-condition", loop_in_condition::BOTH),
         ("range-loop", range_loop::BOTH),
         ("iterator-break", iterator_break::BOTH),
+        ("inferred-number", inferred_number::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN

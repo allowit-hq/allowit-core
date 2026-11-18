@@ -63,6 +63,15 @@
 //! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
 //! policy writes a standard figure.
 //!
+//! A number without a type takes its type from the code that uses it, and Rust gives it `i32`
+//! when no code does. A statement that leaves can be that code, so a name bound without a
+//! stated type from such a number or from another such name is followed like
+//! a value of the server: when a leaving statement mentions it, or a name that one statement
+//! uses together with it, a kept statement that reads those names leaves too. The rule reads
+//! tokens, so every number without a suffix in the value counts, also one that a typed
+//! operand fixes. A stated type (`let n: u64`) or a suffix (`1u64`) keeps the statements on
+//! chain.
+//!
 //! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
 //! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
 //! `const` block) ends at its last `}` unless `.` or `?` follows, and any other statement ends
@@ -607,6 +616,8 @@ impl<'a> Parsed<'a> {
     fn body_after(&self, from: usize, end: usize) -> Option<usize> {
         let mut depth = 0i64;
         let mut i = from;
+        // The token after the generic arguments of a path: a `{` there opens the body.
+        let mut after_generics = None;
         while i < end {
             // A branch or a loop inside the header is a whole value with its own blocks, as
             // in `if ok && loop { break true; } { ... }`.
@@ -618,37 +629,45 @@ impl<'a> Parsed<'a> {
             }
             match self.text(i) {
                 "let" if depth == 0 => i = self.find(i + 1, end, &["="])?,
+                // The generic arguments of a path, as in `u64::MAX::<>`: their `>` is no
+                // operator.
+                "::" if self.text(i + 1) == "<" => {
+                    let next = self.after_generics(i + 1)?;
+                    after_generics = Some(next);
+                    i = next - 1;
+                }
                 "(" | "[" => depth += 1,
                 ")" | "]" => depth -= 1,
                 "{" if depth == 0 => {
-                    let operand = i == from
-                        || matches!(
-                            self.text(i - 1),
-                            "if" | "while"
-                                | "match"
-                                | "in"
-                                | "return"
-                                | "const"
-                                | "=="
-                                | "!="
-                                | "&&"
-                                | "||"
-                                | "<"
-                                | ">"
-                                | "="
-                                | "+"
-                                | "-"
-                                | "*"
-                                | "/"
-                                | "%"
-                                | "!"
-                                | "&"
-                                | "|"
-                                | "^"
-                                | ","
-                                | "=>"
-                                | ":"
-                        );
+                    let operand = after_generics != Some(i)
+                        && (i == from
+                            || matches!(
+                                self.text(i - 1),
+                                "if" | "while"
+                                    | "match"
+                                    | "in"
+                                    | "return"
+                                    | "const"
+                                    | "=="
+                                    | "!="
+                                    | "&&"
+                                    | "||"
+                                    | "<"
+                                    | ">"
+                                    | "="
+                                    | "+"
+                                    | "-"
+                                    | "*"
+                                    | "/"
+                                    | "%"
+                                    | "!"
+                                    | "&"
+                                    | "|"
+                                    | "^"
+                                    | ","
+                                    | "=>"
+                                    | ":"
+                            ));
                     if !operand {
                         return Some(i);
                     }
@@ -1325,6 +1344,9 @@ struct Scope<'a> {
     body: &'a [usize],
     /// Every name of `execute` that a later statement can assign.
     mutable: &'a HashSet<String>,
+    /// Each name of `execute` whose type a number without a type can leave open, with every
+    /// name whose type the same statements can tie to it.
+    inferred: &'a HashMap<String, BTreeSet<String>>,
 }
 
 /// One change of the source text.
@@ -1567,9 +1589,117 @@ pub fn derive(source: &str) -> Result<Derived> {
             mutable.extend(p.bound(i + 1, pattern));
         }
     }
+    // A number without a type takes its type from the code that uses it, and Rust gives it
+    // `i32` when no code does. A statement that leaves can be the code that gives the type, so
+    // the on-chain part would compute with another type. The names whose value can hold such
+    // a number are found here: those bound with no type from a number without a suffix or
+    // from another such name. The source gate admits no closure. Names that one statement uses together can share a type,
+    // so they form one group, and a leaving statement that mentions one marks the group.
+    let inferred = {
+        const SUFFIXES: &[&str] = &[
+            "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
+        ];
+        let open = |from: usize, to: usize, names: &HashSet<String>| {
+            (from..to).any(|i| {
+                let text = p.text(i);
+                let number = p.tokens[i].kind == Kind::Literal
+                    && text.starts_with(|c: char| c.is_ascii_digit())
+                    && !SUFFIXES.iter().any(|suffix| text.ends_with(suffix));
+                number || p.names(i, names)
+            })
+        };
+        // The bindings of `execute`: each pattern with the value that it takes.
+        type Tokens = (usize, usize);
+        let mut bindings: Vec<(Tokens, Option<Tokens>)> = vec![];
+        for id in all.iter().copied().filter(|id| in_execute(*id)) {
+            let node = &p.nodes[id];
+            let key = node.key;
+            match node.shape {
+                Shape::Let => {
+                    let end = p.find(key + 1, node.last, &["=", ":"]).unwrap_or(node.last);
+                    // A stated type with no `_` in it fixes the type.
+                    let typed = p.text(end) == ":"
+                        && !(end..node.init.map_or(node.last, |(from, _)| from))
+                            .any(|i| p.text(i) == "_");
+                    if !typed {
+                        bindings.push(((key + 1, end), node.init));
+                    }
+                }
+                Shape::Split => {
+                    let headers = &node.headers;
+                    if p.text(key) == "match" {
+                        for pattern in headers.iter().skip(1) {
+                            bindings.push((*pattern, headers.first().copied()));
+                        }
+                    } else if p.text(key) == "for"
+                        && let Some((from, to)) = headers.first().copied()
+                    {
+                        let at = p.find(from, to, &["in"]).unwrap_or(to);
+                        bindings.push(((from, at), Some((at + 1, to))));
+                    }
+                    for (from, to) in headers {
+                        for at in (*from..*to).filter(|i| p.text(*i) == "let") {
+                            let equals = p.find(at + 1, *to, &["="]).unwrap_or(*to);
+                            let end = p.find(equals + 1, *to, &["&&", "||"]).unwrap_or(*to);
+                            bindings.push(((at + 1, equals), Some((equals + 1, end))));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut names: HashSet<String> = HashSet::new();
+        loop {
+            let before = names.len();
+            for ((from, to), value) in &bindings {
+                if value.is_none_or(|(start, end)| open(start, end, &names)) {
+                    names.extend(p.bound(*from, *to));
+                }
+            }
+            if names.len() == before {
+                break;
+            }
+        }
+        // The groups: the names that one statement or one binding uses together.
+        let mut groups: HashMap<String, BTreeSet<String>> = names
+            .iter()
+            .map(|name| (name.clone(), BTreeSet::from([name.clone()])))
+            .collect();
+        let ranges: Vec<(usize, usize)> = all
+            .iter()
+            .copied()
+            .filter(|id| in_execute(*id) || *id == execute)
+            .flat_map(|id| match p.nodes[id].shape {
+                Shape::Split => p.nodes[id].headers.clone(),
+                _ if id == execute => vec![],
+                _ => vec![range(id)],
+            })
+            .collect();
+        loop {
+            let mut grew = false;
+            for (from, to) in &ranges {
+                let together: BTreeSet<String> = (*from..*to)
+                    .filter(|i| p.names(*i, &names))
+                    .filter_map(|i| groups.get(p.word(i)?).cloned())
+                    .flatten()
+                    .collect();
+                for name in &together {
+                    let group = groups.get_mut(name).expect("a name of a group");
+                    if group.len() < together.len() {
+                        *group = together.clone();
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break groups;
+            }
+        }
+    };
     let scope = Scope {
         body: &body,
         mutable: &mutable,
+        inferred: &inferred,
     };
 
     // The statements of `execute` in source order, with the statements of their blocks.
@@ -1636,6 +1766,13 @@ pub fn derive(source: &str) -> Result<Derived> {
         for i in from..to {
             if p.names(i, scope.mutable) {
                 tainted.extend(p.word(i).map(str::to_owned));
+            }
+            // A leaving statement can give the type of a number without one: then every name
+            // that shares that type can hold another value on chain.
+            if let Some(group) = p.word(i).and_then(|name| scope.inferred.get(name))
+                && p.names(i, &group.iter().cloned().collect())
+            {
+                tainted.extend(group.iter().cloned());
             }
         }
         let returns = p.returns(from, to);
@@ -1830,23 +1967,40 @@ pub fn derive(source: &str) -> Result<Derived> {
         return Err("A policy that depends on a server function cannot define a local `Ok` or `Err`. Rename that function or constant.".into());
     }
     // The parser ends each statement where Rust ends it. A statement that it still read with
-    // the next one shows a `let` or an item right after a `}` at its own level. The name that
-    // such a declaration binds would stay seen by later statements while it left with the
-    // group, so the derivation refuses the source.
+    // the next one, as after a missing `;`, shows a `let` or an item at its own level, where
+    // no expression holds one: only a condition holds a `let`, after `if`, `while`, `&&` or
+    // `||`. The name that such a declaration binds would stay seen by later statements while
+    // it left with the group, so the derivation refuses the source.
     let grouped = all
         .iter()
-        .filter(|id| p.nodes[**id].shape == Shape::Whole)
+        .filter(|id| matches!(p.nodes[**id].shape, Shape::Whole | Shape::Let | Shape::Item))
         .find_map(|id| {
-            let (from, to) = (p.nodes[*id].first, p.nodes[*id].last + 1);
+            // From the statement's own first token, past its attributes.
+            let (from, to) = (p.nodes[*id].key, p.nodes[*id].last + 1);
             let mut i = from;
             while i < to {
                 if matches!(p.text(i), "(" | "[" | "{") {
                     i = p.close(i)?;
-                } else if i > from
-                    && p.text(i - 1) == "}"
-                    && matches!(p.text(i), "let" | "fn" | "const" | "use")
-                {
-                    return Some(p.line(p.tokens[i].start));
+                } else if i > from {
+                    // Attributes can stand before the declaration.
+                    let mut at = i;
+                    while p.text(at) == "#" && p.text(at + 1) == "[" {
+                        at = p.close(at + 1)? + 1;
+                    }
+                    let declaration = match p.text(at) {
+                        "let" => !matches!(p.text(at - 1), "if" | "while" | "&&" | "||"),
+                        "fn" | "use" => true,
+                        // A `const` parameter of a generic function is no item.
+                        "const" => p.text(at + 1) != "{" && !matches!(p.text(at - 1), "<" | ","),
+                        _ => false,
+                    };
+                    if declaration && p.tokens[at].kind == Kind::Word {
+                        return Some(p.line(p.tokens[at].start));
+                    }
+                    if at > i {
+                        i = at;
+                        continue;
+                    }
                 }
                 i += 1;
             }
@@ -1878,6 +2032,8 @@ pub fn derive(source: &str) -> Result<Derived> {
         .or_else(|| {
             (0..count)
                 .filter(|i| matches!(p.text(*i), "fn" | "const") && p.text(i + 1) != "fn")
+                // A `const` parameter of a generic function is no item.
+                .filter(|i| !matches!(p.text(i.wrapping_sub(1)), "<" | ","))
                 .filter_map(|i| p.word(i + 1))
                 .filter(|name| *name != "_")
                 .find(|name| !declared.insert(name))
@@ -2069,8 +2225,9 @@ pub fn derive(source: &str) -> Result<Derived> {
                 Cause::ServerCall
             } else if !item && any(&|from, to| p.mentions(from, to, &served)) {
                 Cause::ServerValue
-            } else if any(&|from, to| (from..to).any(|i| p.state_at(i) || p.names(i, &readers)))
-                || (!item && any(&|from, to| p.mentions(from, to, &stored)))
+            } else if any(&|from, to| {
+                (from..to).any(|i| p.state_at(i) || p.names_item(i, &readers))
+            }) || (!item && any(&|from, to| p.mentions(from, to, &stored)))
             {
                 Cause::StoredState
             } else {
@@ -2153,7 +2310,7 @@ pub fn derive(source: &str) -> Result<Derived> {
                         Cause::ServerValue
                     } else if p.mentions(i, end, local) {
                         *local_cause
-                    } else if (i..end).any(|k| p.state_at(k) || p.names(k, &readers))
+                    } else if (i..end).any(|k| p.state_at(k) || p.names_item(k, &readers))
                         || p.mentions(i, end, &stored)
                     {
                         Cause::StoredState
