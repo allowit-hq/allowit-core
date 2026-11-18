@@ -68,6 +68,7 @@ fn server(
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn strict_identity_and_legacy_null_semantics_are_preserved() {
     let (url, server) = server(
         200,
@@ -124,6 +125,7 @@ fn strict_identity_and_legacy_null_semantics_are_preserved() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn strict_envelope_rejects_simultaneous_result_and_error() {
     for body in [
         json!({"jsonrpc":"2.0","id":7,"result":{"accepted":true},"error":null}),
@@ -172,6 +174,7 @@ fn strict_envelope_rejects_simultaneous_result_and_error() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn retry_metadata_has_no_upstream_body_or_credential_and_never_resubmits() {
     let (url, server) = server(
         429,
@@ -206,6 +209,7 @@ fn retry_metadata_has_no_upstream_body_or_credential_and_never_resubmits() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn byte_bound_and_expired_deadline_fail_closed() {
     let (url, server) = server(200, json!({"result":"x".repeat(1024)}), Duration::ZERO, "");
     assert_eq!(
@@ -239,6 +243,7 @@ fn byte_bound_and_expired_deadline_fail_closed() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn remaining_deadline_bounds_the_entire_response() {
     let (url, server) = server(200, json!({"result":true}), Duration::from_millis(150), "");
     let rpc = RpcClient::with_options(
@@ -261,6 +266,7 @@ fn remaining_deadline_bounds_the_entire_response() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn endpoint_rebinding_preserves_the_new_origin_and_response_policy() {
     let (one, first) = server(200, json!({"result":"first"}), Duration::ZERO, "");
     let (two, second) = server(201, json!({"result":"second"}), Duration::ZERO, "");
@@ -313,6 +319,7 @@ fn endpoint_rebinding_preserves_the_new_origin_and_response_policy() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn neutral_refusal_metadata_preserves_shape_without_vendor_retry_policy() {
     for (body, valid) in [
         (json!({"error":{"code":-1,"message":"refused"}}), true),
@@ -333,6 +340,7 @@ fn neutral_refusal_metadata_preserves_shape_without_vendor_retry_policy() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn http_preserves_duplicate_headers_exact_body_and_never_follows_redirects() {
     use allowit_core::transport::http::{HttpClient, Method, Request as HttpRequest};
     let options = Options {
@@ -400,6 +408,7 @@ fn http_preserves_duplicate_headers_exact_body_and_never_follows_redirects() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn http_response_bounds_and_expired_deadlines_fail_before_any_retry() {
     use allowit_core::transport::http::{HttpClient, Method, Request as HttpRequest};
     let client = HttpClient::new(Options {
