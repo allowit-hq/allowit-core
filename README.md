@@ -44,8 +44,9 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   subtracts it from the next repayment, down to zero.
 - Gas due: a fee that the server paid for an operation outside its transaction, such as the
   restoration of the wallet's lapsed code (`RuntimeProvider::restore_code_within`), is part of that
-  operation's fee. The server passes it as `Terms::gas_due_units`; the rail adds it to the repayment
-  within the wallet's gas cap, and the server charges the rest to the operation's request.
+  operation's fee. The server passes it as `Terms::gas_due_units`; the rail adds it to the repayment,
+  up to the most gas that the wallet's owner lets one operation repay, and the server charges the
+  rest to the operation's request.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
