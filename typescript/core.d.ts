@@ -438,14 +438,26 @@ export interface PolicyCredits {
   readonly evaluation: { readonly credits: string; readonly tariff: string; readonly lines: readonly CreditChargeLine[] };
   readonly allowance: CreditAllowance;
 }
-/** The price of one kind of call: a rate per million input and output tokens, or a price for each call. */
-export interface CreditCallPrice {
+/** A call that model tokens price: a rate per million input tokens and one per million output tokens. */
+export interface CreditTokenPrice {
   readonly item: string;
-  readonly inputPerMillionTokens?: string;
-  readonly outputPerMillionTokens?: string;
-  readonly call?: string;
-  readonly countsInAllowance?: boolean;
+  readonly inputPerMillionTokens: string;
+  readonly outputPerMillionTokens: string;
+  readonly call?: never;
+  /** The call counts against the policy's analysis allowance. */
+  readonly countsInAllowance: boolean;
 }
+/** A call with one price for each call. */
+export interface CreditFlatPrice {
+  readonly item: string;
+  readonly call: string;
+  readonly inputPerMillionTokens?: never;
+  readonly outputPerMillionTokens?: never;
+  /** The call counts against the policy's analysis allowance. */
+  readonly countsInAllowance: boolean;
+}
+/** The price of one kind of call: either both token rates or a price for each call, never a mix. */
+export type CreditCallPrice = CreditTokenPrice | CreditFlatPrice;
 /** The price list as the server publishes it. */
 export interface CreditPrices {
   readonly version: string;

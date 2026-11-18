@@ -1,7 +1,7 @@
 import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord } from '@allowit/core';
 import type { Quantity, Settlement, LimitReport, PaidService, PaymentChallenge, PaymentProof, WalletKindInfo } from '@allowit/core';
 import type { PaymentLimit, WalletLimits, OperationReports } from '@allowit/core';
-import type { CreditBalance, CreditCharge, CreditEntries, CreditFee, CreditPrices, PolicyCredits } from '@allowit/core';
+import type { CreditBalance, CreditCallPrice, CreditCharge, CreditEntries, CreditFee, CreditPrices, PolicyCredits } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
@@ -86,4 +86,16 @@ const prices: CreditPrices = {
 const roundedCharge: CreditCharge = { ...charge, charged: 2 };
 // @ts-expect-error A charged request ended allowed, denied, held or failed.
 const unknownOutcome: CreditEntries = { entries: [{ ...page.entries[0]!, outcome: 'paid' }], next: null };
-void [balance, usage, prices, roundedCharge, unknownOutcome];
+// A call price that the server writes has both token rates or one price per call, and always says whether it counts.
+const tokenRate = prices.calls[0]!;
+const counts: boolean = tokenRate.countsInAllowance;
+const rates: [string, string] | null = tokenRate.call === undefined ? [tokenRate.inputPerMillionTokens, tokenRate.outputPerMillionTokens] : null;
+// @ts-expect-error A call price has a price.
+const noPrice: CreditCallPrice = { item: 'fetch', countsInAllowance: false };
+// @ts-expect-error Token rates come in pairs.
+const halfRate: CreditCallPrice = { item: 'decision_api', inputPerMillionTokens: '30.0', countsInAllowance: true };
+// @ts-expect-error A call has token rates or a price for each call, not both.
+const mixed: CreditCallPrice = { item: 'fetch', call: '0.0', inputPerMillionTokens: '30.0', outputPerMillionTokens: '120.0', countsInAllowance: false };
+// @ts-expect-error The server always says whether a call counts against the allowance.
+const uncounted: CreditCallPrice = { item: 'fetch', call: '0.0' };
+void [balance, usage, prices, roundedCharge, unknownOutcome, counts, rates, noPrice, halfRate, mixed, uncounted];
