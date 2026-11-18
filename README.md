@@ -104,8 +104,8 @@ A rail without the hook declares `Feature::PaidService` skipped.
 `allowit_core::vendor::custom_build` (feature `vendor`) defines the build of a Custom wallet. The wallet runs
 code that is built from the exact policy source. The owner's policy signature binds that source, and the
 wallet stores its hash. The owner's client builds the code from that source and hands it to the server,
-which uploads it with `RuntimeProvider::upload_code`, from its own account, when the owner deploys; an
-upload gives no authority. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+which uploads it with `RuntimeProvider::upload_code_within`, from its own account and within its fee ceiling, when the
+owner deploys; an upload gives no authority. The owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
@@ -414,7 +414,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.3", version = "0.12", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.4", version = "0.12", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
