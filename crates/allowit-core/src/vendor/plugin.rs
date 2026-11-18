@@ -128,6 +128,18 @@ pub trait RailPlugin: Sync {
         network: &str,
         transport: Arc<dyn Transport>,
     ) -> Result<Box<dyn RuntimeProvider>>;
+    /// The server's runtime over a transport, whose contract-wallet operations and code uploads
+    /// the server's own `sender` accounts send and pay for. A rail whose wallets need no sending
+    /// account returns its plain runtime.
+    fn sending_runtime(
+        &self,
+        network: &str,
+        transport: Arc<dyn Transport>,
+        sender: Arc<dyn super::runtime::SendingAccounts>,
+    ) -> Result<Box<dyn RuntimeProvider>> {
+        let _ = sender;
+        self.runtime(network, transport)
+    }
     /// Bind a portable policy installation to its native encoding.
     fn install(&self, installation: PolicyInstallation) -> Result<Installation>;
     /// Restore a retained native packet. The SDK stores `{rail: id(), packet}`.

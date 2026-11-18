@@ -128,6 +128,16 @@ pub trait Signer {
     fn identity(&self) -> &str;
     fn sign_hash(&self, digest: &[u8; 32]) -> Result<Vec<u8>>;
 }
+/// The server's own accounts that send contract-wallet operations and code uploads and pay their
+/// network fees. The server holds their keys; a rail signs each transaction that one of them
+/// sends through this capability. A sending account sends one transaction of a ledger at a time,
+/// so a server keeps several and hands out the next free one.
+pub trait SendingAccounts: Send + Sync {
+    /// The native identity of the account that sends the next transaction.
+    fn account(&self) -> Result<String>;
+    /// The signature of `hash` by the key of `account`, as the rail's transaction signature.
+    fn sign(&self, account: &str, hash: &[u8; 32]) -> Result<Vec<u8>>;
+}
 /// Existing portable Core evaluator. The server supplies only its admitted compiled policy.
 pub type Evaluator<'a> = &'a dyn Fn(&allowit::AllowitContext) -> allowit::Result;
 

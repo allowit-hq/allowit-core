@@ -109,6 +109,11 @@ asset; the wallet repays the network fee of each operation from it. `owner::Depl
 amounts as decimal text. The server's account sends each agent operation and pays its fee, and the wallet
 repays it, so the deployment needs no other owner signature.
 
+A server builds its runtime with `RailPlugin::sending_runtime(network, transport, sender)`. `sender` is its
+`SendingAccounts`: the accounts that send contract-wallet operations and code uploads and pay their network fees.
+`account()` names the next free one, and `sign(account, hash)` signs a transaction hash with its key. A rail whose
+wallets need no sending account returns its plain `runtime`.
+
 ### Owner updates and verification
 
 An owner changes installed params on an active wallet with the owner action `ParamsUpdate`.
@@ -368,7 +373,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.9.0", version = "0.9", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.9.1", version = "0.9", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
