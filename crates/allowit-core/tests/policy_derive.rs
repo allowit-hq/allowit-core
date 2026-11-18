@@ -121,6 +121,7 @@ golden!(
     state_on_chain => "state-on-chain",
     state_on_server => "state-on-server",
     state_helpers => "state-helpers",
+    state_braced_macro => "state-braced-macro",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -644,6 +645,45 @@ fn a_local_function_that_writes_state_follows_its_calls() {
     );
 }
 
+/// A macro with braces is a statement that needs no `;`. A function that stands after it is
+/// a function of its own: when one of its calls leaves, the server keeps the key that it
+/// writes, and the other call leaves too. The same holds after a `const` block.
+#[test]
+fn a_function_after_a_statement_with_braces_follows_its_calls() {
+    let source = include_str!("fixtures/derive/state-braced-macro.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("seen".to_owned(), Keeper::Server, false),
+            ("visits".to_owned(), Keeper::Chain, false)
+        ]
+    );
+    for gone in ["fn remember(", "remember(ctx", "\"seen\""] {
+        assert!(!derived.source.contains(gone), "{gone}");
+    }
+    assert_eq!(derived.kept, ["payment_limit", "assert"]);
+    // With every call of the function before the server function, the contract keeps the key.
+    let kept = source.replace("        remember(ctx, true)?;\n", "");
+    assert!(keys(&kept).contains(&("seen".to_owned(), Keeper::Chain, false)));
+    assert!(derive(&kept).unwrap().source.contains("fn remember("));
+    // A macro with braces that a method call continues is one statement with that call.
+    let continued = source.replace(
+        "    assert! { ctx.request.amount > 0 }\n",
+        "    matches! { ctx.request.amount, 1 }.then_some(());\n",
+    );
+    assert!(keys(&continued).contains(&("seen".to_owned(), Keeper::Server, false)));
+    assert!(!derive(&continued).unwrap().source.contains("fn remember("));
+    // A `const` block is such a statement too.
+    let constant = source.replace(
+        "    assert! { ctx.request.amount > 0 }\n",
+        "    const { assert!(u8::MAX == 255) }\n",
+    );
+    assert!(keys(&constant).contains(&("seen".to_owned(), Keeper::Server, false)));
+    assert!(!derive(&constant).unwrap().source.contains("fn remember("));
+}
+
 /// A write reaches its callers through any number of local functions, also when a caller
 /// stands before the function that it calls.
 #[test]
@@ -718,6 +758,12 @@ fn a_state_call_that_the_contract_cannot_declare_is_refused() {
     // An explicit type on the read.
     let typed = with("    let n = allowit::get_state::<u64>(ctx, \"count\")?;\n");
     assert_eq!(keys(&typed), [("count".to_owned(), Keeper::Chain, false)]);
+    // A `,` between the generic arguments of a path ends no argument of the call.
+    let generic = with(
+        "    let n = allowit::get_state::<u64>(Result::Ok::<_, AllowitError>(ctx).unwrap(), \"count\")?;\n    allowit::set_state(Result::Ok::<&AllowitContext, AllowitError>(ctx).unwrap(), \"count\", n.unwrap_or(0) + 1)?;\n",
+    );
+    source_shape_with_host_calls(&generic, REGISTRY).unwrap();
+    assert_eq!(keys(&generic), [("count".to_owned(), Keeper::Chain, false)]);
     // A raw string names a key as a plain string does.
     let raw = with(
         "    let seen: Option<bool> = allowit::get_state(ctx, r\"seen\")?;\n    allowit::set_state(ctx, r#\"seen\"#, true)?;\n",
@@ -1067,6 +1113,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         set("paid", AllowitValue::Int(paid));
         set("passed", AllowitValue::Int(1));
         set("flagged", AllowitValue::Bool(flagged));
+        set("visits", AllowitValue::Int(paid));
         state
     };
     let states = [
@@ -1114,6 +1161,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("state-on-chain", state_on_chain::BOTH),
         ("state-on-server", state_on_server::BOTH),
         ("state-helpers", state_helpers::BOTH),
+        ("state-braced-macro", state_braced_macro::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN
@@ -1224,8 +1272,14 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
     // Each source that keeps a key in the contract wrote it in some allowed runs, and no other
     // source wrote one.
     for (name, count) in &wrote {
-        let stateful = ["state-on-chain", "state-on-server", "state-helpers"].contains(name);
+        let stateful = [
+            "state-on-chain",
+            "state-on-server",
+            "state-helpers",
+            "state-braced-macro",
+        ]
+        .contains(name);
         assert_eq!(*count > 0, stateful, "{name}: {count}");
     }
-    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 3);
+    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 4);
 }

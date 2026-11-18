@@ -647,6 +647,19 @@ impl<'a> Parsed<'a> {
         None
     }
 
+    /// The last token of the statement that token `p` starts, when it is a macro with braces,
+    /// such as `assert! { ok }`, or a `const { ... }` block. Such a statement ends at its `}`
+    /// with no `;`, unless a method call or `?` continues it.
+    fn braced_end(&self, p: usize, end: usize) -> Option<usize> {
+        let open = match (self.text(p), self.text(p + 1), self.text(p + 2)) {
+            ("const", "{", _) => p + 1,
+            (_, "!", "{") if self.word(p).is_some() => p + 2,
+            _ => return None,
+        };
+        self.close(open)
+            .filter(|last| *last < end && !matches!(self.text(last + 1), "." | "?"))
+    }
+
     /// The last token of the branch statement whose keyword or `{` is token `p`, also when its
     /// header holds a block, which [`Parsed::branch`] does not split.
     fn block_like_end(&self, p: usize, end: usize) -> Option<usize> {
@@ -854,6 +867,11 @@ impl<'a> Parsed<'a> {
                 self.nodes[id].name = self.word(name).map(str::to_owned);
                 self.nodes[id].is_fn = true;
                 id
+            } else if let Some(end) = self.braced_end(p, close) {
+                // A macro with braces or a `const` block is a statement that needs no `;`.
+                let semi = self.text(end + 1) == ";" && end + 1 < close;
+                let last = if semi { end + 1 } else { end };
+                self.node(Shape::Whole, first, last, parent)
             } else if matches!(self.text(item), "use" | "const") {
                 let last = plain(self);
                 let id = self.node(Shape::Item, first, last, parent);
@@ -990,6 +1008,44 @@ impl<'a> Parsed<'a> {
             && self.text(i + 1) == "("
     }
 
+    /// The token after the generic arguments that the `<` at token `open` starts, as in
+    /// `get_state::<Option<u64>>`.
+    fn after_generics(&self, open: usize) -> Option<usize> {
+        let mut depth = 0i64;
+        let mut i = open;
+        loop {
+            match self.text(i) {
+                "<" => depth += 1,
+                ">" => depth -= 1,
+                // A type can hold brackets: a tuple, an array with its length.
+                "(" | "[" | "{" => i = self.close(i)?,
+                "" | ")" | "]" | "}" | ";" => return None,
+                _ => {}
+            }
+            i += 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+
+    /// The `,` that ends the call argument that starts at token `from`, before the closing
+    /// bracket `end`. A `,` in brackets or between the generic arguments of a path, as in
+    /// `Ok::<_, AllowitError>(ctx)`, ends no argument.
+    fn argument_end(&self, from: usize, end: usize) -> Option<usize> {
+        let mut i = from;
+        while i < end {
+            match self.text(i) {
+                "," => return Some(i),
+                "(" | "[" | "{" => i = self.close(i)?,
+                "::" if self.text(i + 1) == "<" => i = self.after_generics(i + 1)? - 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
     /// The state call that token `i` starts, `allowit::get_state(ctx, "key")` or
     /// `allowit::set_state(ctx, "key", value)`: whether it writes, and its key. `None` for
     /// another token and for a call whose key is no string literal.
@@ -1002,27 +1058,14 @@ impl<'a> Parsed<'a> {
         // An explicit type: `get_state::<u64>(...)`.
         let mut open = i + 3;
         if self.text(open) == "::" && self.text(open + 1) == "<" {
-            let mut depth = 0i64;
-            open += 1;
-            loop {
-                match self.text(open) {
-                    "<" => depth += 1,
-                    ">" => depth -= 1,
-                    "" => return None,
-                    _ => {}
-                }
-                open += 1;
-                if depth == 0 {
-                    break;
-                }
-            }
+            open = self.after_generics(open + 1)?;
         }
         if self.text(open) != "(" {
             return None;
         }
         let close = self.close(open)?;
         // The key is the second argument, and the literal alone.
-        let key = self.find(open + 1, close, &[","])? + 1;
+        let key = self.argument_end(open + 1, close)? + 1;
         let token = self
             .tokens
             .get(key)
@@ -1347,16 +1390,23 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.text(i + 1) == "(" && !matches!(p.text(i.wrapping_sub(1)), "." | "::" | "fn")
         })
     };
-    let local_fns: Vec<(usize, &str)> = named
-        .iter()
-        .filter(|id| p.nodes[**id].is_fn)
-        .filter_map(|id| Some((*id, p.nodes[*id].name.as_deref()?)))
+    // Every local function with its tokens, read from each `fn` of the file: a function can
+    // stand inside a statement that is not split, where it is no statement of its own.
+    // `execute` itself is no local function.
+    let local_fns: Vec<((usize, usize), &str)> = (0..count)
+        .filter(|i| p.text(*i) == "fn" && !(first..open).contains(i))
+        .filter_map(|i| {
+            let body = p
+                .find(i + 1, count, &["{", ";"])
+                .filter(|at| p.text(*at) == "{");
+            Some(((i, p.close(body?)? + 1), p.word(i + 1)?))
+        })
         .collect();
     let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
-    // The local local_fns that each function calls, read once.
+    // The local functions that each function calls, read once.
     let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
-    for (id, name) in &local_fns {
-        let (from, to) = range(*id);
+    for ((from, to), name) in &local_fns {
+        let (from, to) = (*from, *to);
         let direct = uses
             .iter()
             .filter(|state| state.writes && (from..to).contains(&state.at))
