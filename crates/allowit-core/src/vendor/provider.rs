@@ -127,6 +127,14 @@ pub trait RuntimeProvider {
         &self,
         p: &[crate::vendor::runtime::Prepared],
     ) -> Result<Vec<crate::vendor::runtime::ObservedAuthorization>>;
+    /// Whether the prepared operation `p` lapsed: it did not execute, and no envelope that
+    /// carries its authorization can execute it any more. The server releases an open operation
+    /// only on this proof or on a terminal receipt. `false` means not proven, and the operation
+    /// stays open. A rail without such a proof keeps this default.
+    fn lapsed(&self, p: &crate::vendor::runtime::Prepared) -> Result<bool> {
+        let _ = p;
+        Ok(false)
+    }
     fn prepare_owner(
         &self,
         i: &crate::vendor::runtime::Installation,

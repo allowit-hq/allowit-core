@@ -133,6 +133,11 @@ A server builds its runtime with `RailPlugin::sending_runtime(network, transport
 `account()` names the next free one, and `sign(account, hash)` signs a transaction hash with its key. A rail whose
 wallets need no sending account returns its plain `runtime`.
 
+An agent's authorization of a contract-wallet operation can run in any envelope until it expires, not only in the one
+that the server sent. So the server releases an open operation only on its terminal receipt or on
+`RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run. `false` means not
+proven, and the operation stays open. The method has a default that proves nothing.
+
 ### Owner updates and verification
 
 An owner changes installed params on an active wallet with the owner action `ParamsUpdate`.
@@ -402,7 +407,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.0", version = "0.12", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.1", version = "0.12", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
