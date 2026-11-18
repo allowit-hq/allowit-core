@@ -265,32 +265,6 @@ pub trait OwnerProvider {
             "This rail does not verify an installation on the ledger",
         ))
     }
-    /// The owner's view of the build of a Custom policy on the backend: the build ticket, the
-    /// hash of the source that the owner signed and the build that the backend holds. A rail
-    /// without the build hook declares `Feature::CustomBuild` skipped.
-    fn custom_build(
-        &self,
-        cx: &super::owner::Context<'_>,
-        policy_id: &str,
-    ) -> super::error::Result<serde_json::Value> {
-        let _ = (cx, policy_id);
-        Err(Error::unsupported(
-            "This rail does not build a custom wallet",
-        ))
-    }
-    /// The owner's session with the backend: the rail verifies the exact sign-in challenge and
-    /// signs it with the owner's signer, as for its other owner calls. The SDK sends the owner
-    /// routes that need no rail step, such as a reputation vote, under this session. A rail
-    /// without it declares `Feature::OwnerSession` skipped.
-    fn owner_session(
-        &self,
-        cx: &super::owner::Context<'_>,
-    ) -> super::error::Result<super::owner_session::Client> {
-        let _ = cx;
-        Err(Error::unsupported(
-            "This rail does not sign the owner in for the SDK",
-        ))
-    }
     /// The host and native placements of a draft or installed policy document.
     fn paired_export(
         &self,

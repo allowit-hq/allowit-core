@@ -58,6 +58,12 @@ pub enum Action {
 pub struct Terms {
     pub args: BTreeMap<String, PolicyValue>,
     pub expense: Option<Expense>,
+    /// Native units that the wallet repaid above the network fees of its earlier confirmed
+    /// operations, as the server's account of [`Fee::repaid_native_units`] less
+    /// [`Fee::native_units`] keeps them. A rail whose wallet repays the network fee subtracts them
+    /// from the gas that this operation repays, down to zero; the wallet counts what it repays.
+    /// Zero for a wallet that repays no gas.
+    pub gas_carry_units: u128,
 }
 #[derive(Clone, Debug)]
 pub struct Expense {
@@ -382,8 +388,14 @@ pub struct ReceiptInfo {
 /// spending and volume limits.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Fee {
+    /// The network fee that the ledger charged the transaction's source.
     pub native_units: u128,
     pub charged_units: i128,
+    /// The native units that the wallet repaid to the transaction's source for the network fee
+    /// in the same transaction. Zero for a failed transaction and for a wallet that repays no
+    /// gas. A confirmed operation moves the server's gas carry by this amount less
+    /// `native_units`.
+    pub repaid_native_units: u128,
 }
 impl Receipt {
     pub fn verify_operation(&self, signed: &Signed) -> Result<()> {

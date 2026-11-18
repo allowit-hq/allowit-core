@@ -37,6 +37,11 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `ServerHooks`: per-network configuration, wallet profiles, sign-in verification and the charged
   fee. `ReceiptInfo.fee.charged_units` is in installed-asset units and counts against spending and
   volume limits.
+- Gas carry: a contract wallet repays the network fee of its operation to the server's sending account
+  in the same transaction, and the signed repayment can exceed the fee that the ledger charges. The
+  server keeps the difference per wallet: a confirmed operation adds `Fee::repaid_native_units` and
+  subtracts `Fee::native_units`. It passes that carry as `Terms::gas_carry_units`, and the rail
+  subtracts it from the next repayment, down to zero.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
@@ -148,7 +153,6 @@ a call declares the matching `Feature` skipped.
 | `update_params` | `UpdateParams` | The owner-signed params update of an active wallet, resume-safe under its request id. |
 | `verify` | `Verify` | A `Verification`: each `Comparison` of the owner's document with the ledger, and the `StateReadback` with the installed revision, params and `Counters`. |
 | `paired_export` | `PairedExport` | A `PairedExport`: the `HostPlacement` that the server evaluates and the `NativePlacement` that the wallet enforces. |
-| `owner_session` | `OwnerSession` | The owner's signed-in `owner_session::Client`. The SDK sends the owner routes that need no rail step, such as a reputation vote, under it. |
 
 `Verification.matches` is true only when every comparison matches. `PairedExport::of` keeps evidence
 functions in the host placement for every wallet kind. A `native` or `simple` wallet enforces no rule
@@ -393,7 +397,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.11.1", version = "0.11", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.0", version = "0.12", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
