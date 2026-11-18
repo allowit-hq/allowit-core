@@ -351,6 +351,111 @@ export interface RequestReputation {
 }
 
 /*
+ * Payments and wallet kinds: the values that rails, the server and hosts exchange in operation, receipt and wallet
+ * documents. An amount is base units as decimal text, so no JSON reader rounds it. A rail supplies every unit.
+ */
+/** What a host shows for an asset. The rail supplies it; shared code holds no unit. */
+export interface AssetDisplay {
+  /** The unit symbol or asset code that follows an amount. */
+  readonly symbol: string;
+  readonly decimals: number;
+  /** The human name of the asset. */
+  readonly name: string;
+  readonly native: boolean;
+}
+/** Base units of an asset with the rail's display metadata and the printed text. */
+export interface Quantity {
+  /** Base units as decimal text. */
+  readonly units: string;
+  readonly asset: AssetDisplay;
+  /** The amount with its unit, such as 5 XYZ. */
+  readonly text: string;
+}
+/** What a settled operation cost: the settlement of a status or receipt document. */
+export interface Settlement {
+  /** The block or ledger that holds the transaction. */
+  readonly height: number;
+  /** The network fee that the transaction paid, in the fee asset. */
+  readonly fee: Quantity;
+  /** The amount that the operation moved, or null when the rail reports none. */
+  readonly amount: Quantity | null;
+}
+/** One spending limit of a policy: what it allows, what the policy has spent and what remains. */
+export interface LimitReport {
+  /** The policy param that holds the limit, such as daily_spending_limit. */
+  readonly param: string;
+  readonly limit: Quantity;
+  readonly spent: Quantity;
+  readonly remaining: Quantity;
+}
+/**
+ * Who settles a payment. payer: the wallet settles it and presents the settled transaction. seller: the wallet signs a
+ * payment authorization for exactly this challenge, and the seller's facilitator submits it. A document omits payer.
+ */
+export type SettledBy = 'payer' | 'seller';
+/** What a payment buys: the operation context of a paid call, which the server checks and records in the receipt. */
+export interface PaidService {
+  /** The URL of the resource. */
+  readonly resource: string;
+  /** The seller's challenge id, when it issued one. */
+  readonly challengeId?: string;
+  /** The address that the challenge names as the recipient. */
+  readonly payTo: string;
+  /** The challenge amount in base units, as decimal text. */
+  readonly amount: string;
+  /** The asset reference of the challenge. */
+  readonly asset: string;
+  readonly settledBy?: SettledBy;
+  /** The seller's bound, in seconds, from the authorization to its settlement. Only when the seller settles. */
+  readonly settleWithin?: number;
+}
+/** A seller's payment challenge for one resource, as the rail of its network read it. */
+export interface PaymentChallenge {
+  /** The seller's challenge id or nonce, when it issues one. */
+  readonly id?: string;
+  readonly resource: string;
+  /** The CAIP-2 network of the payment. */
+  readonly network: string;
+  readonly scheme: string;
+  readonly payTo: string;
+  readonly amount: Quantity;
+  /** The asset reference in the rail's own format. */
+  readonly asset: string;
+  /** The Unix time after which the seller no longer accepts the payment. */
+  readonly expiresAt?: number;
+  readonly settledBy?: SettledBy;
+  readonly settleWithin?: number;
+  /** The seller's accepted terms as the rail read them. Shared code never interprets them. */
+  readonly terms?: unknown;
+}
+/** The proof of payment that a client presents to the seller: one request header. */
+export interface PaymentProof {
+  readonly header: string;
+  readonly value: string;
+}
+/** The stable selection id of a wallet kind. */
+export type WalletKindId = 'native' | 'simple' | 'standard' | 'custom';
+/** The owner-facing description of one wallet kind. Every host shows its texts unchanged. */
+export interface WalletKindInfo {
+  readonly id: WalletKindId;
+  readonly title: string;
+  /** What the wallet is and who enforces the policy, in the owner's words. */
+  readonly explanation: string;
+  /** Hosts recommend this kind to an owner who deploys. Exactly one kind is recommended. */
+  readonly recommended: boolean;
+  /** The sellers that a wallet of this kind pays, in the owner's words. */
+  readonly pays: string;
+  /** What a payment costs the wallet in network fee, in the owner's words. */
+  readonly fee: string;
+  readonly enforcement: 'offchain' | 'onchain';
+  readonly custody: 'keypair' | 'contract';
+  /** The params this kind enforces onchain. Empty unless the kind has a fixed list. */
+  readonly supportedParams: readonly string[];
+  /** The public list of supportedParams, or null. */
+  readonly paramsUrl: string | null;
+}
+
+/*
  * Owner workflows: the hooks that a rail gives the SDK's install, fund and params-update workflows. The SDK holds the
  * workflows, their journal and their recovery rules; a rail builds, sends and reads its own transactions and checks
  * its own signatures. Every hook takes the canonical network id that the SDK resolved.
