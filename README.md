@@ -298,6 +298,9 @@ const entry = errorEntry(code); // null for a code that this release does not kn
 const page = errorHelpPath(code); // "/help/policy_denied"
 ```
 
+The catalogue holds Allowit's own refusal codes. The reason codes of the payment protocol that a facilitator sends
+a seller, such as `invalidReason` and `errorReason`, belong to that protocol and are not in the catalogue.
+
 A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
 missing or overlong text, a second entry for a code, or an unknown field. Catalogue text is printable
 ASCII, so a page, a terminal and a Rust host show it as written, and a title or a cause names no reader ("you"): an
