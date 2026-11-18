@@ -111,6 +111,10 @@ from the client's own build. The `code` module lists the typed refusal codes: `c
 
 A rail without the hook declares `Feature::CustomBuild` skipped.
 
+`RailPlugin::message_signature` gives a rail's text-message signature (`wallet::MessageSignature`): the
+signature that its browser wallets make of a text message. A server signs its own statements with it, such
+as the request of a signed fetch, and anyone verifies them with the server's public identity.
+
 ### Contract wallet deployment
 
 `OwnerAction::Create` creates a contract wallet and funds it in one owner transaction: `units` of the
@@ -144,7 +148,7 @@ a call declares the matching `Feature` skipped.
 | `update_params` | `UpdateParams` | The owner-signed params update of an active wallet, resume-safe under its request id. |
 | `verify` | `Verify` | A `Verification`: each `Comparison` of the owner's document with the ledger, and the `StateReadback` with the installed revision, params and `Counters`. |
 | `paired_export` | `PairedExport` | A `PairedExport`: the `HostPlacement` that the server evaluates and the `NativePlacement` that the wallet enforces. |
-| `owner_call` | `OwnerCall` | The server's JSON reply to one owner route that needs no rail step, such as a reputation vote, sent under the rail's owner session. |
+| `owner_session` | `OwnerSession` | The owner's signed-in `owner_session::Client`. The SDK sends the owner routes that need no rail step, such as a reputation vote, under it. |
 
 `Verification.matches` is true only when every comparison matches. `PairedExport::of` keeps evidence
 functions in the host placement for every wallet kind. A `native` or `simple` wallet enforces no rule
@@ -384,7 +388,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.9.1", version = "0.9", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.11.0", version = "0.11", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

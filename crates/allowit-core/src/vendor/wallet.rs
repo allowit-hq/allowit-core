@@ -9,6 +9,21 @@ pub trait Signer: Send + Sync {
     }
     fn sign_hash(&self, digest: &[u8]) -> Result<Vec<u8>>;
 }
+/// The text-message signature of a rail: the signature that its browser wallets make of a text
+/// message. A server signs its own statements with it, such as the request of a signed fetch,
+/// and anyone verifies them with the server's public identity.
+pub trait MessageSignature: Sync {
+    /// Sign `message` as a wallet of this rail signs a text message.
+    fn sign_message(&self, signer: &dyn Signer, message: &str) -> Result<Vec<u8>>;
+    /// Verify the signature of `address` over `message`, as [`Self::sign_message`] made it.
+    fn verify_message(
+        &self,
+        network: &str,
+        address: &str,
+        message: &str,
+        signature: &[u8],
+    ) -> Result<()>;
+}
 pub trait PrivateSigner: Send + Sync {
     fn address(&self) -> &str;
     fn public_key(&self) -> &str;

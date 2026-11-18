@@ -278,18 +278,18 @@ pub trait OwnerProvider {
             "This rail does not build a custom wallet",
         ))
     }
-    /// One request to an owner route of the backend that needs no rail step of its own, such
-    /// as the owner's reputation vote on a settled request: the rail signs the owner in, as for
-    /// its other owner calls, and posts `body` to `path` under that session. The reply is the
-    /// server's JSON. A rail without it declares `Feature::OwnerCall` skipped.
-    fn owner_call(
+    /// The owner's session with the backend: the rail verifies the exact sign-in challenge and
+    /// signs it with the owner's signer, as for its other owner calls. The SDK sends the owner
+    /// routes that need no rail step, such as a reputation vote, under this session. A rail
+    /// without it declares `Feature::OwnerSession` skipped.
+    fn owner_session(
         &self,
         cx: &super::owner::Context<'_>,
-        path: &str,
-        body: &serde_json::Value,
-    ) -> super::error::Result<serde_json::Value> {
-        let _ = (cx, path, body);
-        Err(Error::unsupported("This rail does not send an owner call"))
+    ) -> super::error::Result<super::owner_session::Client> {
+        let _ = cx;
+        Err(Error::unsupported(
+            "This rail does not sign the owner in for the SDK",
+        ))
     }
     /// The host and native placements of a draft or installed policy document.
     fn paired_export(

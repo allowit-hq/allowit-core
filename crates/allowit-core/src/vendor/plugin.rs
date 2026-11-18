@@ -176,6 +176,12 @@ pub trait RailPlugin: Sync {
         None
     }
 
+    /// The rail's text-message signature, with which a server signs its own statements. A rail
+    /// without it gives a server no message signature.
+    fn message_signature(&self) -> Option<&'static dyn super::wallet::MessageSignature> {
+        None
+    }
+
     /// Vendor evidence functions, by name, that policies may call.
     fn policy_functions(&self) -> &'static [(&'static str, PolicyFunction)] {
         &[]
@@ -383,8 +389,8 @@ pub enum Feature {
     PaidService,
     /// Typed param edits and revisions of an unsigned draft.
     EditParams,
-    /// An owner call to a backend route that needs no rail step of its own.
-    OwnerCall,
+    /// The owner's signed-in session, for owner routes that need no rail step of their own.
+    OwnerSession,
     /// The owner-signed params update of an active wallet.
     UpdateParams,
     /// Ledger verification with the comparison and the state read-back.
