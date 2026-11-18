@@ -127,6 +127,7 @@ golden!(
     shadowed_after_macro => "shadowed-after-macro",
     statement_after_branch => "statement-after-branch",
     loop_in_condition => "loop-in-condition",
+    range_loop => "range-loop",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -894,6 +895,56 @@ fn a_branch_or_a_loop_in_a_condition_keeps_the_body_with_its_condition() {
     assert_eq!(keys(&local), [("seen".to_owned(), Keeper::Chain, false)]);
 }
 
+/// In a header, a `{` after `..` opens the body, as the Rust parser reads it. The loop ends
+/// at that body, and the `let` after it is a statement of its own: when it leaves, the write
+/// that reads its name leaves too.
+#[test]
+fn a_block_after_an_open_range_is_the_body_of_the_loop() {
+    let source = include_str!("fixtures/derive/range-loop.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(
+        keys(source),
+        [("passed_last".to_owned(), Keeper::Server, false)]
+    );
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("for i in 0u64.. {") && !derived.source.contains("passed"));
+    let header = source.replace(
+        "    for i in 0u64.. {\n        if i > 2 {\n            break;\n        }\n    }\n",
+        "    while ctx.request.amount > 0.. {\n        break;\n    }\n",
+    );
+    assert_ne!(header, source);
+    assert_eq!(
+        keys(&header),
+        [("passed_last".to_owned(), Keeper::Server, false)]
+    );
+}
+
+/// Where the parser cannot tell where a statement ends, it reads the next statement with it.
+/// A `let` or an item after a `}` of such a group would stay seen by later statements, so a
+/// source with a server part is refused there.
+#[test]
+fn a_declaration_that_the_parser_reads_with_the_statement_before_is_refused() {
+    let source = include_str!("fixtures/derive/range-loop.rs").replace(
+        "    for i in 0u64.. {\n        if i > 2 {\n            break;\n        }\n    }\n",
+        "    while ctx.request.amount == u64::MAX::<> {}\n",
+    );
+    source_shape_with_host_calls(&source, REGISTRY).unwrap();
+    let error = derive(&source).unwrap_err();
+    assert!(
+        error.contains("must end the statement before line 7 with `;`"),
+        "{error}"
+    );
+    // With the `;`, the statements are two.
+    let ended = source.replace("u64::MAX::<> {}\n", "u64::MAX::<> {};\n");
+    assert_eq!(
+        keys(&ended),
+        [("passed_last".to_owned(), Keeper::Server, false)]
+    );
+    // Without a server part, the source is its own on-chain part.
+    let local = source.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
+    assert_eq!(derive(&local).unwrap().source, local);
+}
+
 /// `const _` binds no name: two of them are no two items with one name.
 #[test]
 fn anonymous_constants_are_no_duplicate_names() {
@@ -1468,6 +1519,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("shadowed-after-macro", shadowed_after_macro::BOTH),
         ("statement-after-branch", statement_after_branch::BOTH),
         ("loop-in-condition", loop_in_condition::BOTH),
+        ("range-loop", range_loop::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN

@@ -75,8 +75,10 @@
 //! [`derive`] also refuses a source that the rule cannot follow by its names, when a statement
 //! or a local item of it leaves: one that takes a mutable reference (`&mut`, `ref mut`), which
 //! lets a statement assign a name that it does not mention; one that declares two local
-//! functions or constants with one name; and one that declares a local `Ok` or `Err`. A source
-//! of which only an unused server import leaves has no such statement, so it is not refused.
+//! functions or constants with one name; one that declares a local `Ok` or `Err`; and one in
+//! which the parser cannot tell where a statement ends, which it shows by a `let` or an item
+//! right after a `}` of that statement. A source of which only an unused server import leaves
+//! has no such statement, so it is not refused.
 use super::{Result, gate, param_keys, source_shape};
 use std::{
     cell::RefCell,
@@ -597,7 +599,8 @@ impl<'a> Parsed<'a> {
     /// The `{` that opens the body after the header that starts at `from`. A block can also
     /// stand as an operand of the header, as in `if { a } { ... }` or `if x == { 1 } { ... }`:
     /// a `{` opens an operand at the start of the header and after an operator, and the body
-    /// after a name, a literal or a closing bracket.
+    /// after a name, a literal or a closing bracket. After `..` it opens the body, as the Rust
+    /// parser reads a header: `for i in 0.. { ... }`.
     fn body_after(&self, from: usize, end: usize) -> Option<usize> {
         let mut depth = 0i64;
         let mut i = from;
@@ -640,8 +643,6 @@ impl<'a> Parsed<'a> {
                                 | "|"
                                 | "^"
                                 | ","
-                                | ".."
-                                | "..="
                                 | "=>"
                                 | ":"
                         );
@@ -1771,6 +1772,34 @@ pub fn derive(source: &str) -> Result<Derived> {
     });
     if changed && shadowed {
         return Err("A policy that depends on a server function cannot define a local `Ok` or `Err`. Rename that function or constant.".into());
+    }
+    // The parser ends each statement where Rust ends it. A statement that it still read with
+    // the next one shows a `let` or an item right after a `}` at its own level. The name that
+    // such a declaration binds would stay seen by later statements while it left with the
+    // group, so the derivation refuses the source.
+    let grouped = all
+        .iter()
+        .filter(|id| p.nodes[**id].shape == Shape::Whole)
+        .find_map(|id| {
+            let (from, to) = (p.nodes[*id].first, p.nodes[*id].last + 1);
+            let mut i = from;
+            while i < to {
+                if matches!(p.text(i), "(" | "[" | "{") {
+                    i = p.close(i)?;
+                } else if i > from
+                    && p.text(i - 1) == "}"
+                    && matches!(p.text(i), "let" | "fn" | "const" | "use")
+                {
+                    return Some(p.line(p.tokens[i].start));
+                }
+                i += 1;
+            }
+            None
+        });
+    if let Some(line) = grouped.filter(|_| changed) {
+        return Err(format!(
+            "A policy for a contract wallet that depends on a server function must end the statement before line {line} with `;`: the derivation cannot tell where it ends."
+        ));
     }
     // A mutable reference lets a statement assign a name that it does not mention. The rule
     // follows names, not references, so it derives no part of such a policy.
