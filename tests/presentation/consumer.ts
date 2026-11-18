@@ -1,6 +1,7 @@
 import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord } from '@allowit/core';
 import type { Quantity, Settlement, LimitReport, PaidService, PaymentChallenge, PaymentProof, WalletKindInfo } from '@allowit/core';
 import type { PaymentLimit, WalletLimits, OperationReports } from '@allowit/core';
+import type { CreditBalance, CreditCharge, CreditEntries, CreditFee, CreditPrices, PolicyCredits } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
@@ -64,3 +65,25 @@ const unsettled: OperationReports = { paidService: paid, explorer: null };
 // @ts-expect-error A limit on one operation keeps no counter.
 const counted: PaymentLimit = { ...perPayment, spent: five };
 void [settled, limit, offer, proof, noAmount, roundedUnits, thirdParty, otherKind, counters, reports, unsettled, counted];
+// Credits as the server sends them: every amount is decimal text.
+const networkFee: CreditFee = { asset: 'XYZ', units: '11154', amount: '0.0011154', usdPerAsset: '0.14', repaid: '0.0011154', network: 'example:testnet', transaction: 'h' };
+const charge: CreditCharge = {
+  charged: '2.0', tariff: '2026-11-18.1',
+  lines: [{ item: 'base', credits: '1.0' }, { item: 'decision_api', credits: '0.0', cost: '0.24', provider: 'p', model: 'm', inputTokens: 10, outputTokens: 2 }, { item: 'network_fee', credits: '0.0', cost: '0.000156', fee: networkFee }, { item: 'inference', credits: '1.0', cost: '0.24', carried: '0.5' }],
+};
+const balance: CreditBalance = { owner: 'G', balance: '10.0', held: '0.0', available: '10.0', tariff: '2026-11-18.1', evaluation: '1.0', exhausted: false, grantsUrl: null };
+const page: CreditEntries = { entries: [{ id: 'e1', kind: 'charge', at: '2026-11-18T10:00:00Z', amount: '-2.0', tariff: charge.tariff, lines: charge.lines, policyId: 'p', requestId: 'r', outcome: 'held' }], next: null };
+const usage: PolicyCredits = {
+  policyId: 'p', evaluation: { credits: '1.0', tariff: charge.tariff, lines: [charge.lines[0]!] },
+  allowance: { policyId: 'p', calls: 200, credits: '200.0', period: 'utc_day', isDefault: true, usedCalls: 0, usedCredits: '0.0', resetsAt: null },
+};
+const prices: CreditPrices = {
+  version: charge.tariff, usdPerCredit: '0.01', request: { base: '1.0', inference: 'whole_credits_rounded_down', fees: 'added_before_the_rounding' },
+  calls: [{ item: 'decision_api', inputPerMillionTokens: '30.0', outputPerMillionTokens: '120.0', countsInAllowance: true }, { item: 'fetch', call: '0.0', countsInAllowance: false }],
+  searchFee: { perSearch: '0.9' }, assetUsd: { XYZ: '0.14' }, startingGrant: '100.0', allowance: { calls: 200, credits: '200.0', period: 'utc_day' }, grantsUrl: 'https://grants.example',
+};
+// @ts-expect-error A credit amount is decimal text, never a JavaScript number.
+const roundedCharge: CreditCharge = { ...charge, charged: 2 };
+// @ts-expect-error A charged request ended allowed, denied, held or failed.
+const unknownOutcome: CreditEntries = { entries: [{ ...page.entries[0]!, outcome: 'paid' }], next: null };
+void [balance, usage, prices, roundedCharge, unknownOutcome];

@@ -330,6 +330,137 @@ export interface RequestReputation {
 }
 
 /*
+ * Credits: what Allowit charges an owner for the agent requests of their policies. The server sends every amount as
+ * decimal text, so no JSON reader rounds it: credits with at most three decimal places, an exact cost with at most
+ * nine. A time is ISO 8601 text.
+ */
+/** How the evaluation of a charged request ended. */
+export type CreditOutcome = 'allowed' | 'denied' | 'held' | 'failed';
+/** A fee as an asset paid it, such as the network fee of a settlement. */
+export interface CreditFee {
+  /** The symbol of the fee's asset. */
+  readonly asset: string;
+  /** The fee in base units of the asset. */
+  readonly units: string;
+  /** The fee in units of the asset. */
+  readonly amount: string;
+  /** The US dollar value of one unit of the asset in the price list of the entry. */
+  readonly usdPerAsset: string;
+  /** The part of the fee that the wallet repaid on chain, in units of the asset. Absent when it repaid nothing. */
+  readonly repaid?: string;
+  /** The network of the transaction that paid the fee. */
+  readonly network?: string;
+  /** The hash of that transaction. */
+  readonly transaction?: string;
+}
+/**
+ * One item of a charge. credits is what the item adds. A call that tokens price and a fee add nothing by themselves:
+ * cost is their exact amount in credits, and the item inference charges the whole credits of the request's calls and
+ * fees together, with carried, what earlier charges of the same request used and did not cover.
+ */
+export interface CreditChargeLine {
+  readonly item: string;
+  readonly credits: string;
+  readonly cost?: string;
+  readonly carried?: string;
+  /** How many times the item counts, when more than once. */
+  readonly count?: number;
+  /** What the provider lists for the item, in billionths of a US dollar. */
+  readonly usdNanos?: number;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  /** The searches that the provider bills for the call. */
+  readonly searches?: number;
+  /** On an entry of an early price list: the item counts the call's reservation. */
+  readonly capped?: boolean;
+  readonly fee?: CreditFee;
+}
+/** What one request cost: the credits, the price list that priced them and each item. */
+export interface CreditCharge {
+  readonly charged: string;
+  readonly tariff: string;
+  readonly lines: readonly CreditChargeLine[];
+}
+/** The owner's credits. */
+export interface CreditBalance {
+  /** The owner's address. */
+  readonly owner: string;
+  /** The sum of the owner's ledger. */
+  readonly balance: string;
+  /** Reserved by evaluations that run now. */
+  readonly held: string;
+  /** What a new evaluation can spend. */
+  readonly available: string;
+  /** The version of the price list. */
+  readonly tariff: string;
+  /** The price of one request, before its inference. */
+  readonly evaluation: string;
+  /** The owner cannot pay one request: Allowit refuses each agent request before it evaluates the policy. */
+  readonly exhausted: boolean;
+  /** Where the owner asks Allowit for credits. */
+  readonly grantsUrl: string | null;
+}
+/** One ledger entry: a grant, positive, or a charge, negative. */
+export interface CreditEntry {
+  readonly id: string;
+  readonly kind: 'grant' | 'charge';
+  readonly at: string;
+  readonly amount: string;
+  readonly tariff: string;
+  readonly lines: readonly CreditChargeLine[];
+  readonly policyId?: string;
+  readonly requestId?: string;
+  readonly outcome?: CreditOutcome;
+  readonly note?: string;
+}
+/** One page of the owner's ledger, newest entry first. next is the cursor of the following page. */
+export interface CreditEntries {
+  readonly entries: readonly CreditEntry[];
+  readonly next: string | null;
+}
+/** The analysis allowance of one policy: the ceiling of its calls that use model tokens in one period. */
+export interface CreditAllowance {
+  readonly policyId: string;
+  readonly calls: number;
+  readonly credits: string;
+  readonly period: string;
+  /** The owner set no allowance: the ceiling is the configured default. */
+  readonly isDefault: boolean;
+  readonly usedCalls: number;
+  readonly usedCredits: string;
+  readonly resetsAt: string | null;
+}
+/** What one request of a policy costs before its inference, and the policy's allowance. */
+export interface PolicyCredits {
+  readonly policyId: string;
+  readonly evaluation: { readonly credits: string; readonly tariff: string; readonly lines: readonly CreditChargeLine[] };
+  readonly allowance: CreditAllowance;
+}
+/** The price of one kind of call: a rate per million input and output tokens, or a price for each call. */
+export interface CreditCallPrice {
+  readonly item: string;
+  readonly inputPerMillionTokens?: string;
+  readonly outputPerMillionTokens?: string;
+  readonly call?: string;
+  readonly countsInAllowance?: boolean;
+}
+/** The price list as the server publishes it. */
+export interface CreditPrices {
+  readonly version: string;
+  readonly usdPerCredit: string;
+  readonly request: { readonly base: string; readonly inference: string; readonly fees: string };
+  readonly calls: readonly CreditCallPrice[];
+  readonly searchFee: { readonly perSearch: string };
+  /** The US dollar value of one unit of each fee asset, by symbol. */
+  readonly assetUsd: Readonly<Record<string, string>>;
+  readonly startingGrant: string;
+  readonly allowance: { readonly calls: number; readonly credits: string; readonly period: string };
+  readonly grantsUrl: string | null;
+}
+
+/*
  * Payments and wallet kinds: the values that rails, the server and hosts exchange in operation, receipt and wallet
  * documents. An amount is base units as decimal text, so no JSON reader rounds it. A rail supplies every unit.
  */
