@@ -43,7 +43,7 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   subtracts `Fee::native_units`. It passes that carry as `Terms::gas_carry_units`, and the rail
   subtracts it from the next repayment, down to zero.
 - Gas due: a fee that the server paid for an operation outside its transaction, such as the
-  restoration of the wallet's lapsed code (`RuntimeProvider::restore_code_within`), is part of that
+  restoration of the wallet's lapsed code (`RuntimeProvider::prepare_code_within`), is part of that
   operation's fee. The server passes it as `Terms::gas_due_units`; the rail adds it to the repayment,
   up to the most gas that the wallet's owner lets one operation repay, and the server charges the
   rest to the operation's request.
@@ -109,9 +109,10 @@ A rail without the hook declares `Feature::PaidService` skipped.
 `allowit_core::vendor::custom_build` (feature `vendor`) defines the build of a Custom wallet. The wallet runs
 code that is built from the exact policy source. The owner's policy signature binds that source, and the
 wallet stores its hash. The owner's client builds the code from that source and hands it to the server,
-which uploads it with `RuntimeProvider::upload_code_within`, from its own account and within its fee ceiling, when the
-owner deploys; an upload gives no authority. Code that lapsed later is the server's to restore, with
-`RuntimeProvider::restore_code_within`, so no wallet operation pays its rent. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+which uploads it from its own account and within its fee ceiling when the owner deploys; an upload gives no
+authority. Code that lapsed later is the server's to restore, so no wallet operation pays its rent. Both are
+the transaction of `RuntimeProvider::prepare_code_within`, which a sending account signs: the rail prepares
+it and sends nothing, and the SDK engine sends it and follows it to its receipt like any signed operation. The owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
@@ -420,7 +421,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.5", version = "0.12", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.6", version = "0.12", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

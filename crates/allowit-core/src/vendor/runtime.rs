@@ -439,8 +439,8 @@ pub enum OwnerAction {
     /// Create the wallet with the code `wasm` and fund it in the same transaction: `units` of
     /// the installed asset, and `fee_asset_units` of the network's fee asset, from which the
     /// wallet repays the network fee of its operations, when the installed asset is another
-    /// asset. The network holds the code already: the server uploads it with
-    /// `RuntimeProvider::upload_code`, and an upload gives no authority.
+    /// asset. The network holds the code already: the server uploads it with the transaction
+    /// of `RuntimeProvider::prepare_code_within`, and an upload gives no authority.
     Create {
         wasm: Vec<u8>,
         units: i128,

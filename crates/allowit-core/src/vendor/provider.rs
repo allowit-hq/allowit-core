@@ -113,6 +113,10 @@ pub trait RuntimeProvider {
         now: u64,
     ) -> Result<crate::vendor::runtime::Signed>;
     fn validate_signed(&self, p: &crate::vendor::runtime::Signed, now: u64) -> Result<()>;
+    /// Send `p` once. `Submitted` once the network accepted it. `Prepared` when the network did
+    /// not accept it yet: nothing is pending, and the caller can send the same bytes again.
+    /// `SubmissionUnknown` when the outcome is uncertain: the caller looks the transaction up
+    /// with `status` before any replacement.
     fn broadcast(
         &self,
         p: &crate::vendor::runtime::Signed,
@@ -160,52 +164,38 @@ pub trait RuntimeProvider {
         fee: u64,
         now: u64,
     ) -> Result<crate::vendor::runtime::OwnerPacket>;
-    /// Upload the wallet code `wasm` of an installation from the server's own account, which
-    /// pays the network's fee and rent. An upload gives no authority: the owner's creation
-    /// names the code by its hash. Returns the receipt of the upload, or `None` when the network
-    /// holds the code already. A rail without uploads refuses.
-    fn upload_code(
+    /// Prepare the transaction that makes the installation's wallet code live, from one of the
+    /// server's sending accounts and signed by it, with the network fee bounded by `max_fee` in
+    /// the rail's native units: the upload of `wasm`, when the network does not have the code,
+    /// or the restoration of the installation's lapsed code by its hash, which needs no bytes.
+    /// A fee above `max_fee` is refused before anything is signed. `None` when the code is live:
+    /// nothing is needed. The server pays the transaction, and it gives no authority: the
+    /// owner's creation names the code by its hash, and a wallet operation that restored its
+    /// code would repay the code's rent for the network's minimum lifetime.
+    ///
+    /// The rail sends nothing. The caller submits the transaction as any signed operation, with
+    /// `broadcast`, and follows it with `status` and `observe`; its receipt's fee is what the
+    /// sending account paid, also for a transaction that the ledger included and failed. A rail
+    /// without code transactions refuses.
+    fn prepare_code_within(
         &self,
         i: &crate::vendor::runtime::Installation,
-        wasm: &[u8],
-        poll: crate::vendor::runtime::Poll,
-        now: u64,
-    ) -> Result<Option<crate::vendor::runtime::Receipt>> {
-        let _ = (i, wasm, poll, now);
-        Err(Error::unsupported("This rail does not upload wallet code"))
-    }
-    /// As `upload_code`, with the network fee bounded by `max_fee`, in the rail's native units:
-    /// an upload whose fee would exceed it is refused before anything is signed. The server pays
-    /// an upload, so it bounds what one upload can cost. A rail without the bound uploads
-    /// nothing.
-    fn upload_code_within(
-        &self,
-        i: &crate::vendor::runtime::Installation,
-        wasm: &[u8],
+        wasm: Option<&[u8]>,
         max_fee: u64,
-        poll: crate::vendor::runtime::Poll,
         now: u64,
-    ) -> Result<Option<crate::vendor::runtime::Receipt>> {
-        let _ = (i, wasm, max_fee, poll, now);
+    ) -> Result<Option<crate::vendor::runtime::Signed>> {
+        let _ = (i, wasm, max_fee, now);
         Err(Error::unsupported(
-            "This rail does not upload wallet code within a fee ceiling",
+            "This rail does not prepare wallet code transactions",
         ))
     }
-    /// Make the installation's wallet code live again when it lapsed, from the server's sending
-    /// account, with the network fee bounded by `max_fee` as for `upload_code_within`. `None` when
-    /// the code is live. A restoration names the code by its hash, so it needs no code bytes, and
-    /// it gives no authority. The server pays it: a wallet operation that restored its code would
-    /// repay the code's rent for the network's minimum lifetime. A rail whose code does not lapse
-    /// restores nothing.
-    fn restore_code_within(
-        &self,
-        i: &crate::vendor::runtime::Installation,
-        max_fee: u64,
-        poll: crate::vendor::runtime::Poll,
-        now: u64,
-    ) -> Result<Option<crate::vendor::runtime::Receipt>> {
-        let _ = (i, max_fee, poll, now);
-        Err(Error::unsupported("This rail does not restore wallet code"))
+    /// Whether the code transaction `p` from `prepare_code_within` is still needed: false once
+    /// the code that it uploads or restores is live. A caller sends again a code transaction
+    /// that the network did not accept only while it is needed, since another transaction can
+    /// make the code live while it waits.
+    fn code_needed(&self, p: &crate::vendor::runtime::Signed) -> Result<bool> {
+        let _ = p;
+        Ok(true)
     }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
     /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
