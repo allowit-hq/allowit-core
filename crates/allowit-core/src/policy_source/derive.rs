@@ -63,6 +63,11 @@
 //! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
 //! policy writes a standard figure.
 //!
+//! The derivation reads tokens, not a syntax tree. Where it cannot tell that a statement has
+//! ended, as after `if ok {} {}`, it reads the next statement with it. Such a group stays or
+//! leaves as one, and every name that it declares (a value, a function, a constant, an import)
+//! leaves with it, so no later statement reads another item of that name.
+//!
 //! The contract must know each key before it runs, and Rust source cannot pass a state function
 //! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
 //! ASCII letters, digits or `_`, and a write of a standard figure.
@@ -1563,6 +1568,28 @@ pub fn derive(source: &str) -> Result<Derived> {
                     tainted.extend(p.bound(i + 1, end));
                 }
             }
+            // The same holds for a function, a constant or an import that such a group of
+            // statements declares in its own block: a statement that names it leaves too, so
+            // that the name never falls back to another item, such as `Some`.
+            if p.nodes[id].shape == Shape::Whole {
+                let (from, to) = (p.nodes[id].first, p.nodes[id].last + 1);
+                let mut i = from;
+                while i < to {
+                    match p.text(i) {
+                        "{" => i = p.close(i).unwrap_or(to),
+                        "fn" | "const" => tainted.extend(p.word(i + 1).map(str::to_owned)),
+                        "use" => {
+                            let end = p.find(i + 1, to, &[";"]).unwrap_or(to);
+                            tainted.extend(
+                                (i + 1..end).filter_map(|at| p.word(at)).map(str::to_owned),
+                            );
+                            i = end;
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
             let inside = match why {
                 Cause::ServerCall | Cause::ServerValue => Cause::ServerBranch,
                 other => other,
@@ -1624,6 +1651,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         .iter()
         .filter(|id| p.nodes[**id].is_fn)
         .filter_map(|id| p.nodes[*id].name.clone())
+        .chain(local_fns.iter().map(|f| f.name.to_owned()))
         .collect();
     let covered = |gone: &[bool]| {
         let mut left = vec![false; count];

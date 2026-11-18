@@ -808,6 +808,23 @@ fn a_const_block_in_a_condition_is_an_operand() {
     assert!(derived.source.contains("\"paid\"") && !derived.source.contains("const"));
 }
 
+/// The parser can read two statements as one, as after `if ok {} {}`. A function that such a
+/// group declares leaves with the group, and so does every statement that names it: the name
+/// never falls back to another item, such as the `Some` of the language.
+#[test]
+fn a_function_in_a_group_of_statements_leaves_with_every_statement_that_names_it() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if ctx.request.amount > 0 {} {}\n    fn Some(ctx: &AllowitContext) -> Option<bool> {\n        allowit::set_state(ctx, \"n\", true).is_ok();\n        None\n    }\n    Some(ctx);\n    assert!(Some(ctx).is_none());\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        Some(ctx);\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert_eq!(keys(source), [("n".to_owned(), Keeper::Server, false)]);
+    assert!(!derived.source.contains("Some"), "{}", derived.source);
+    // A constant of such a group: no kept statement reads another constant of that name.
+    let constant = "use allowit::prelude::*;\nconst LIMIT: i128 = 5;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if ctx.request.amount > 0 {} { allowit::new_decision_context(ctx, None)?; }\n    const LIMIT: i128 = 3;\n    assert!(ctx.request.amount < LIMIT);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(constant, REGISTRY).unwrap();
+    let derived = derive(constant).unwrap();
+    assert!(!derived.source.contains("assert"), "{}", derived.source);
+}
+
 /// A function that leaves writes nothing by that: only a call of it writes. A function that
 /// no statement calls moves no key to the server.
 #[test]
