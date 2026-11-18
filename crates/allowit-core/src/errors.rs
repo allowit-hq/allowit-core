@@ -174,6 +174,50 @@ mod tests {
         assert!(!names_reader("The owner's young account"));
     }
 
+    /// The rule that a text of an entry breaks, as the generator (`scripts/error-catalogue.mjs`)
+    /// applies it: an entry states no outcome, which only the sender knows, and a step that sends a
+    /// new request ID reads the original request first.
+    fn unsafe_text(text: &str) -> Option<&'static str> {
+        let lower = text.to_ascii_lowercase();
+        let outcome = [
+            "nothing was",
+            "nothing is",
+            "nothing were",
+            "no draft changed",
+            "was not made",
+        ];
+        if outcome.iter().any(|claim| lower.contains(claim)) {
+            return Some("an outcome");
+        }
+        if text.contains("new request ID")
+            && !(text.contains("allowit status") || text.contains("original request"))
+        {
+            return Some("a new request ID without the original");
+        }
+        None
+    }
+
+    #[test]
+    fn no_entry_states_an_outcome_or_retries_without_the_original() {
+        assert_eq!(unsafe_text("Nothing was paid."), Some("an outcome"));
+        assert_eq!(
+            unsafe_text("Send it with a new request ID."),
+            Some("a new request ID without the original")
+        );
+        assert_eq!(
+            unsafe_text("Read the original request first, then use a new request ID."),
+            None
+        );
+        for entry in catalogue() {
+            for text in [&entry.title, &entry.cause, &entry.next]
+                .into_iter()
+                .chain(entry.agent.as_ref())
+            {
+                assert_eq!(unsafe_text(text), None, "{}: {text}", entry.code);
+            }
+        }
+    }
+
     #[test]
     fn titles_and_causes_name_no_reader() {
         for entry in catalogue() {

@@ -98,6 +98,10 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
     { extra: 'field' },
     // An entry for the agent states the agent's step apart from the owner's.
     { for: 'agent' },
+    // An entry states no outcome, which only the sender knows.
+    { cause: 'The server refused it. Nothing was paid.' },
+    // A step that sends a new request ID reads the original request first.
+    { next: 'Send the request again with a new request ID.' },
   ]) {
     assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
   }
