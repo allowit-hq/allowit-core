@@ -68,16 +68,38 @@ pub struct Expense {
     pub observed_height: u64,
     pub day: u64,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The server's account of a wallet's standard figures, from the operations that settled. A
+/// wallet that keeps a figure itself reads it from the network; the server's account gives the
+/// others. The figures are those of `allowit::AllowitStandardState`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Accounting {
     pub nonce: u64,
     #[serde(alias = "revision")]
     pub deployment_version: u64,
+    /// Irreversible expenses on `spent_day` (`day_spent`).
     pub spent_daily: i128,
+    /// Lifetime irreversible expenses (`spent`).
     pub spent_total: i128,
+    /// The UTC day of the daily figures (`day`).
     pub spent_day: u64,
+    /// Gross amounts plus separate attributable gas on `spent_day` (`day_total`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub volume_daily: i128,
+    /// An operation lacked price facts in the wallet's lifetime (`unpriced`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unpriced_total: bool,
+    /// An operation on `spent_day` lacked price facts (`day_unpriced`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unpriced_daily: bool,
+    /// Successful operations (`calls`).
     pub calls: u64,
+}
+fn is_zero(value: &i128) -> bool {
+    *value == 0
+}
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Validity {
@@ -691,6 +713,33 @@ mod tests {
             request_document(r#"{ "amount": 1, "id": "a" }"#),
             request_document(r#"{"id":"a","amount":1}"#)
         );
+    }
+    #[test]
+    fn an_account_without_volume_or_unpriced_figures_keeps_its_wire_form() {
+        let earlier = r#"{"nonce":1,"deploymentVersion":2,"spentDaily":3,"spentTotal":4,"spentDay":5,"calls":6}"#;
+        let account: Accounting = serde_json::from_str(earlier).unwrap();
+        assert_eq!(
+            account,
+            Accounting {
+                nonce: 1,
+                deployment_version: 2,
+                spent_daily: 3,
+                spent_total: 4,
+                spent_day: 5,
+                calls: 6,
+                ..Accounting::default()
+            }
+        );
+        assert_eq!(serde_json::to_string(&account).unwrap(), earlier);
+        let full = Accounting {
+            volume_daily: 7,
+            unpriced_total: true,
+            unpriced_daily: true,
+            ..account
+        };
+        let text = serde_json::to_string(&full).unwrap();
+        assert!(text.contains(r#""volumeDaily":7,"unpricedTotal":true,"unpricedDaily":true"#));
+        assert_eq!(serde_json::from_str::<Accounting>(&text).unwrap(), full);
     }
     #[test]
     fn request_equality_never_equates_parse_failures() {
