@@ -136,7 +136,9 @@ wallets need no sending account returns its plain `runtime`.
 An agent's authorization of a contract-wallet operation can run in any envelope until it expires, not only in the one
 that the server sent. So the server releases an open operation only on its terminal receipt or on
 `RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run. `false` means not
-proven, and the operation stays open. The method has a default that proves nothing.
+proven, and the operation stays open. The method has a default that proves nothing. `RuntimeProvider::owner_lapsed`
+gives the same proof for a sent owner transaction, by its hash, the height at which the server prepared it and its
+expiry: the server drops the owner's pending step only on this proof or on its receipt.
 
 A server keeps the figures that a contract wallet does not keep itself, such as every figure of a Simple wallet.
 `RuntimeProvider::usage` gives what an operation adds to them when it executes, as the wallet counts it (`Usage`:
@@ -412,7 +414,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.2", version = "0.12", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.3", version = "0.12", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

@@ -135,6 +135,14 @@ pub trait RuntimeProvider {
         let _ = p;
         Ok(false)
     }
+    /// Whether the owner transaction with hash `hash` lapsed: it never applied and can no longer
+    /// apply. The server prepared it at height `since`, valid until `expires_at` (Unix seconds).
+    /// The server drops a sent owner step only on this proof or on its receipt. `false` means
+    /// not proven, and the step stays pending. A rail without such a proof keeps this default.
+    fn owner_lapsed(&self, hash: &[u8; 32], expires_at: u64, since: u64) -> Result<bool> {
+        let _ = (hash, expires_at, since);
+        Ok(false)
+    }
     /// What the operation `p` adds to its wallet's figures when it executes, as the wallet
     /// counts it. A server keeps the figures that a wallet does not keep itself, and adds this
     /// once the operation's receipt confirms it. `None` for a rail without such a count.
