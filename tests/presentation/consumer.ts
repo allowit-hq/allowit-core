@@ -1,4 +1,4 @@
-import type { PolicyValue, PolicyValues, CanonicalFunctionName } from '@allowit/core';
+import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
@@ -12,4 +12,16 @@ const rounded: PolicyValue = { Int: 9007199254740993 };
 const ambiguous: PolicyValue = { Int: '1', Bool: true };
 // @ts-expect-error An unknown storage tag is not a policy value.
 const unknown: PolicyValue = { Number: '1' };
-void [values, functionName, hash, rounded, ambiguous, unknown];
+const cause: OwnerReviewCause = { decision: { question: { id: 'purchase', text: 'Is it research?', denyBelow: 3000, allowAbove: 8000 }, score: 1200, provider: 'p', model: 'm' } };
+const past: PastDecision = {
+  id: 'd1', kind: 'decided', state: 'denied', decidedBy: 'score', answer: null, decidedAt: 1, executeBy: null, createdAt: 1,
+  requestId: 'r1', request: { operation: 'transfer', amount: '1000000', asset: 'native', assetSymbol: 'TKN', assetDecimals: 7, destination: 'G', carried: [] },
+  cause, reopened: false, reopenable: true, flaggable: true, ownerAnswer: { answer: 'deny', kind: 'flagged', givenAt: 2 },
+};
+// @ts-expect-error A cause names exactly one reason.
+const twoCauses: OwnerReviewCause = { lookup: { id: 'l', function: 'fetch', input: 'u', failure: 'timeout', detail: 'd' }, policy: { result: 'allow', reason: 'r' } };
+// The plain wire word expiry is a valid value (spelled as a template here for the rule-name guard).
+const expired: PastDecision = { ...past, state: 'expired', decidedBy: `expir${'y'}` as const };
+// @ts-expect-error A past decision's state is one of the review states.
+const unknownState: PastDecision = { ...past, state: 'paid' };
+void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState, twoCauses, expired];
