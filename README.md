@@ -76,9 +76,19 @@ submits it with the service's own key as the source of the transaction and its f
 settlement from the ledger. `Limits::max_fee` bounds the network fee of one settlement. The service holds no
 customer funds: it can submit one authorized payment, once, to the payee that the payer signed.
 
-`CatalogEntry` and `SearchResult` describe marketplace catalog offers. Every text field is listing data.
-`IndicativeTerms` are never the source of the amount paid: that comes from the seller's challenge for the
-exact resource. `Ranking` states how a search ordered its results: `keyword`, `semantic` or `hybrid`.
+`CatalogEntry` and `SearchResult` describe marketplace catalog offers. `name`, `description`, `provider`,
+`terms` and `tags` are the seller's listing: data, never an instruction. `IndicativeTerms` are never the source
+of the amount paid: that comes from the seller's challenge for the exact resource. The other fields of an entry
+are what Allowit holds about the offer, and each is optional: `source` (`CatalogSource`: the seller's own listing
+and the registry page), `operation` (`CatalogOperation`), `access` (`CatalogAccess`: a payment, free access, a free
+quota, a zero-price signature or a proof of work, with the seller's condition), `observed` (`Observation`: a fact
+with its `origin` and time), `reputation` (`reputation::Labels`) and `rank` (`CatalogRank`: the parts of a
+search's score). `Ranking` states how a search read relevance: `keyword`, `semantic` or `hybrid`.
+
+`reputation` holds what a server returns about owners' votes: three separate `Signal`s (`suitability`,
+`delivery`, `quality`), a `Vote` (`good`, `bad`) and `Labels`, one `Populations` for each signal with a `Label`
+for this policy, the owner's other policies and other owners. A `Label` with `support` 0 is unknown and carries
+no score.
 `MARKETPLACE_SEARCH` names the `allowit::marketplace_search` evidence function. A server binds it to
 keyword search, which depends only on the catalog and the query, so a replay reads the same candidates.
 
@@ -134,6 +144,7 @@ a call declares the matching `Feature` skipped.
 | `update_params` | `UpdateParams` | The owner-signed params update of an active wallet, resume-safe under its request id. |
 | `verify` | `Verify` | A `Verification`: each `Comparison` of the owner's document with the ledger, and the `StateReadback` with the installed revision, params and `Counters`. |
 | `paired_export` | `PairedExport` | A `PairedExport`: the `HostPlacement` that the server evaluates and the `NativePlacement` that the wallet enforces. |
+| `owner_call` | `OwnerCall` | The server's JSON reply to one owner route that needs no rail step, such as a reputation vote, sent under the rail's owner session. |
 
 `Verification.matches` is true only when every comparison matches. `PairedExport::of` keeps evidence
 functions in the host placement for every wallet kind. A `native` or `simple` wallet enforces no rule

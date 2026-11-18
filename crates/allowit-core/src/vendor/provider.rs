@@ -278,6 +278,19 @@ pub trait OwnerProvider {
             "This rail does not build a custom wallet",
         ))
     }
+    /// One request to an owner route of the backend that needs no rail step of its own, such
+    /// as the owner's reputation vote on a settled request: the rail signs the owner in, as for
+    /// its other owner calls, and posts `body` to `path` under that session. The reply is the
+    /// server's JSON. A rail without it declares `Feature::OwnerCall` skipped.
+    fn owner_call(
+        &self,
+        cx: &super::owner::Context<'_>,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> super::error::Result<serde_json::Value> {
+        let _ = (cx, path, body);
+        Err(Error::unsupported("This rail does not send an owner call"))
+    }
     /// The host and native placements of a draft or installed policy document.
     fn paired_export(
         &self,
