@@ -14,6 +14,7 @@ pub mod paid_service;
 pub mod plugin;
 pub mod profiles;
 mod provider;
+pub mod reputation;
 pub mod request;
 pub mod request_proof;
 pub mod routing;

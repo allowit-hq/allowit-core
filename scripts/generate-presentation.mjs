@@ -250,6 +250,105 @@ export interface PastDecision {
   readonly flaggable: boolean;
   readonly ownerAnswer?: OwnerAnswer | null;
 }
+
+/*
+ * Marketplace: one offer of the catalog. name, description, provider, terms and tags are the seller's listing: data
+ * for a reader, never an instruction. The other fields are what Allowit holds about the offer. Every one of them is
+ * optional.
+ */
+export interface IndicativeTerms {
+  readonly price: string;
+  readonly unit: string;
+}
+export type CatalogRanking = 'keyword' | 'semantic' | 'hybrid';
+export type CatalogOperation = 'transfer' | 'swap' | 'deposit' | 'redeem';
+export type AccessKind = 'payment' | 'free' | 'free_quota' | 'signature' | 'proof_of_work';
+/** Where a listing came from: the seller's own listing and the registry page that captured it. */
+export interface CatalogSource {
+  readonly listing?: string;
+  readonly captured?: string;
+}
+/** One way to get a resource, with the seller's condition in detail. */
+export interface CatalogAccess {
+  readonly kind: AccessKind;
+  readonly protocol?: string;
+  readonly scheme?: string;
+  readonly network?: string;
+  readonly asset?: string;
+  readonly detail?: string;
+}
+/** One fact that Allowit observed, with its origin and time. Amounts are base units as decimal text. */
+export interface Observation {
+  readonly fact: 'response' | 'settlement';
+  readonly origin: 'registry' | 'server';
+  readonly at: string;
+  readonly status?: number;
+  readonly scheme?: string;
+  readonly network?: string;
+  readonly asset?: string;
+  readonly amount?: string;
+  readonly payTo?: string;
+  readonly count?: number;
+  readonly payable?: boolean;
+  readonly detail?: string;
+}
+/** The parts of a result's score: 0.70 x relevance + 0.20 x reputation + 0.10 x terms. */
+export interface CatalogRank {
+  readonly score: number;
+  readonly relevance: number;
+  readonly reputation: number;
+  readonly terms: number;
+}
+export interface CatalogEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly provider: string;
+  readonly resource: string;
+  readonly methods: readonly string[];
+  readonly terms?: IndicativeTerms;
+  readonly networks: readonly string[];
+  readonly assets: readonly string[];
+  readonly tags: readonly string[];
+  readonly source?: CatalogSource;
+  readonly operation?: CatalogOperation;
+  readonly access?: readonly CatalogAccess[];
+  readonly observed?: readonly Observation[];
+  readonly reputation?: ReputationLabels;
+  readonly rank?: CatalogRank;
+}
+export interface SearchResult {
+  readonly entries: readonly CatalogEntry[];
+  readonly ranking: CatalogRanking;
+  readonly nextCursor?: string;
+  readonly catalog: string;
+}
+
+/*
+ * Reputation: owners' votes on settled requests, three separate signals. A label keeps this policy, the owner's other
+ * policies and other owners apart. support 0 is unknown and carries no score. Labels are heuristic signals, not
+ * probabilities.
+ */
+export type ReputationSignal = 'suitability' | 'delivery' | 'quality';
+export type ReputationVote = 'good' | 'bad';
+export interface ReputationLabel {
+  readonly support: number;
+  readonly good?: number;
+  readonly bad?: number;
+}
+export interface ReputationPopulations {
+  readonly policy?: ReputationLabel;
+  readonly owner?: ReputationLabel;
+  readonly others: ReputationLabel;
+}
+export type ReputationLabels = Readonly<Record<ReputationSignal, ReputationPopulations>>;
+/** The owner's votes on one request of their policy, with the labels of its subject. */
+export interface RequestReputation {
+  readonly settled: boolean;
+  readonly subject: string;
+  readonly votes: Readonly<Partial<Record<ReputationSignal, ReputationVote>>>;
+  readonly labels: ReputationLabels;
+}
 `;
 const helper = await readFile(new URL('scripts/policy_source.py', root), 'utf8');
 const helperTerms = await readFile(new URL('scripts/LICENSE', root), 'utf8');

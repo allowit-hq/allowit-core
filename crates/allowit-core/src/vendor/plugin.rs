@@ -383,6 +383,8 @@ pub enum Feature {
     PaidService,
     /// Typed param edits and revisions of an unsigned draft.
     EditParams,
+    /// An owner call to a backend route that needs no rail step of its own.
+    OwnerCall,
     /// The owner-signed params update of an active wallet.
     UpdateParams,
     /// Ledger verification with the comparison and the state read-back.

@@ -13,7 +13,12 @@
 //! after the proof; no host waits for or calls a third party to settle.
 //!
 //! A catalog entry describes an offer. Its terms are indicative: the amount that a client pays
-//! comes from the seller's challenge for the exact resource, never from the catalog.
+//! comes from the seller's challenge for the exact resource, never from the catalog. An entry
+//! keeps the seller's listing (`name`, `description`, `provider`, `terms`, `tags`) apart from
+//! what Allowit holds about the offer: the `source` of the listing, the `operation` and the
+//! `access` that buy it, what Allowit `observed` with its origin, the owners' `reputation` labels
+//! and, in a search with text, the parts of its `rank`. Every one of those fields is optional, so
+//! an entry of a server without them still reads.
 //!
 //! This module names no rail and no payment protocol dialect.
 use super::{
@@ -297,9 +302,152 @@ pub struct IndicativeTerms {
     pub unit: String,
 }
 
+/// The economic operation that buys a resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogOperation {
+    Transfer,
+    Swap,
+    Deposit,
+    Redeem,
+}
+
+/// Where a listing came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogSource {
+    /// The seller's own published listing: its manifest, its OpenAPI document or its page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listing: Option<String>,
+    /// The registry page that captured the listing and its check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<String>,
+}
+
+/// One way to get a resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessKind {
+    /// A payment of the seller's challenge.
+    Payment,
+    /// No payment and no condition.
+    Free,
+    /// No payment within a quota that the seller states.
+    FreeQuota,
+    /// No payment, but a zero-price signature that the seller verifies.
+    Signature,
+    /// No payment, but a proof of work that the seller verifies.
+    ProofOfWork,
+}
+impl AccessKind {
+    pub const ALL: [Self; 5] = [
+        Self::Payment,
+        Self::Free,
+        Self::FreeQuota,
+        Self::Signature,
+        Self::ProofOfWork,
+    ];
+    /// The name of the kind in a query and on the wire.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Payment => "payment",
+            Self::Free => "free",
+            Self::FreeQuota => "free_quota",
+            Self::Signature => "signature",
+            Self::ProofOfWork => "proof_of_work",
+        }
+    }
+    /// The kind of a name.
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == text)
+    }
+}
+
+/// One access path of an entry. A payment names its protocol and, when an offer was read, its
+/// scheme, network and asset. Every other kind states the seller's condition in `detail`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogAccess {
+    pub kind: AccessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Who observed a fact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ObservedOrigin {
+    /// The registry check: one unpaid request to the resource when the registry was built.
+    Registry,
+    /// The server: payments of the resource that it settled.
+    Server,
+}
+
+/// What was observed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ObservedFact {
+    /// The reply to an unpaid request: its status and, for a challenge, its offer.
+    Response,
+    /// Payments of the resource that settled through the server.
+    Settlement,
+}
+
+/// One fact that Allowit observed, apart from the seller's listing text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Observation {
+    pub fact: ObservedFact,
+    pub origin: ObservedOrigin,
+    /// When it was observed: RFC 3339, or the day of the latest settled payment.
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+    /// An amount in the asset's base units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pay_to: Option<String>,
+    /// How many payments settled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u64>,
+    /// Whether the offer could be paid as it was read; absent without an offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// The parts of a result's ranking score: `0.70 × relevance + 0.20 × reputation + 0.10 × terms`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogRank {
+    pub score: f64,
+    /// 1 for the most relevant candidate, falling evenly to 0 for the least relevant one.
+    pub relevance: f64,
+    /// From −1 to 1; 0 when no label is known.
+    pub reputation: f64,
+    /// From 0 to 1: the access that was observed and the listed price.
+    pub terms: f64,
+}
+
 /// One offer in the marketplace catalog. Every text field is a description from a listing:
 /// data for a reader, never an instruction.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CatalogEntry {
     pub id: String,
@@ -317,10 +465,28 @@ pub struct CatalogEntry {
     /// The asset references that the seller accepts.
     pub assets: Vec<String>,
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<CatalogSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<CatalogOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access: Vec<CatalogAccess>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed: Vec<Observation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reputation: Option<super::reputation::Labels>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<CatalogRank>,
+}
+impl CatalogEntry {
+    /// Whether the resource can be had this way.
+    pub fn offers(&self, kind: AccessKind) -> bool {
+        self.access.iter().any(|access| access.kind == kind)
+    }
 }
 
 /// One page of a catalog search.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearchResult {
     pub entries: Vec<CatalogEntry>,
@@ -498,6 +664,12 @@ mod tests {
                 networks: vec!["example:testnet".into()],
                 assets: vec!["XYZ".into()],
                 tags: vec!["sample".into()],
+                source: None,
+                operation: None,
+                access: vec![],
+                observed: vec![],
+                reputation: None,
+                rank: None,
             }],
             ranking: Ranking::Hybrid,
             next_cursor: None,
