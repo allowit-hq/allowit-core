@@ -135,6 +135,16 @@ pub trait RuntimeProvider {
         let _ = p;
         Ok(false)
     }
+    /// What the operation `p` adds to its wallet's figures when it executes, as the wallet
+    /// counts it. A server keeps the figures that a wallet does not keep itself, and adds this
+    /// once the operation's receipt confirms it. `None` for a rail without such a count.
+    fn usage(
+        &self,
+        p: &crate::vendor::runtime::Prepared,
+    ) -> Result<Option<crate::vendor::runtime::Usage>> {
+        let _ = p;
+        Ok(None)
+    }
     fn prepare_owner(
         &self,
         i: &crate::vendor::runtime::Installation,

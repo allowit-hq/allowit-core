@@ -397,6 +397,16 @@ pub struct Fee {
     /// `native_units`.
     pub repaid_native_units: u128,
 }
+/// What one executed operation adds to its wallet's figures, as the wallet counts it (Core's
+/// standard post-flight): `spent_units` to the spent totals of the day and of the lifetime,
+/// `amount_units` and `gas_units` to the day's gross volume, one call, and the unpriced mark.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub amount_units: i128,
+    pub gas_units: i128,
+    pub spent_units: i128,
+    pub unpriced: bool,
+}
 impl Receipt {
     pub fn verify_operation(&self, signed: &Signed) -> Result<()> {
         self.0.provider.verify_receipt(&self.0, &signed.0)

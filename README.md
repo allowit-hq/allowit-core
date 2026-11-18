@@ -138,6 +138,10 @@ that the server sent. So the server releases an open operation only on its termi
 `RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run. `false` means not
 proven, and the operation stays open. The method has a default that proves nothing.
 
+A server keeps the figures that a contract wallet does not keep itself, such as every figure of a Simple wallet.
+`RuntimeProvider::usage` gives what an operation adds to them when it executes, as the wallet counts it (`Usage`:
+spent units, gross amount, gas and the unpriced mark), and the server adds it once the operation's receipt confirms it.
+
 ### Owner updates and verification
 
 An owner changes installed params on an active wallet with the owner action `ParamsUpdate`.
