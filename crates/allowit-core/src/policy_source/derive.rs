@@ -80,7 +80,10 @@
 //! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
 //! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
 //! `const` block) ends at its last `}` unless `.` or `?` follows, and any other statement ends
-//! at its `;`. So each statement and each item of a block is a step of its own.
+//! at its `;`. A match arm with a block-like body ends at its last `}` in the same way. So each
+//! statement, each item and each arm of a block is a step of its own. The on-chain part states
+//! `warn` where the source states the lint level `deny` or `forbid`: it leaves code out, and a
+//! lint level changes nothing that the policy does.
 //!
 //! The contract must know each key before it runs, and Rust source cannot pass a state function
 //! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
@@ -785,7 +788,26 @@ impl<'a> Parsed<'a> {
                             c + 1
                         }
                         None => {
-                            let stop = self.find(body, close, &[","]).unwrap_or(close);
+                            // A block-like body, such as `if ok { .. } else { .. }`, needs no
+                            // comma: it ends at its last `}` unless `.` or `?` continues it,
+                            // as in Rust.
+                            let labeled = self.tokens[body].kind == Kind::Lifetime
+                                && self.text(body + 1) == ":";
+                            let start = if labeled { body + 2 } else { body };
+                            let block_like = matches!(
+                                self.text(start),
+                                "if" | "match" | "loop" | "while" | "for" | "{"
+                            );
+                            let exact = block_like
+                                .then(|| self.block_like_end(start, close))
+                                .flatten()
+                                .filter(|last| {
+                                    *last < close && !matches!(self.text(last + 1), "." | "?")
+                                });
+                            let stop = match exact {
+                                Some(last) => last + 1,
+                                None => self.find(body, close, &[","]).unwrap_or(close),
+                            };
                             if stop == body {
                                 return None;
                             }
@@ -2325,6 +2347,22 @@ pub fn derive(source: &str) -> Result<Derived> {
             _ => left.push((from, to)),
         }
     }
+    // The on-chain part leaves code out, so a lint that turns unused code into an error could
+    // stop it from compiling. It states `warn` where the source states `deny` or `forbid`: a
+    // lint level changes nothing that the policy does.
+    for i in 0..count {
+        let attribute = p.text(i.wrapping_sub(1)) == "["
+            && (p.text(i.wrapping_sub(2)) == "#"
+                || (p.text(i.wrapping_sub(2)) == "!" && p.text(i.wrapping_sub(3)) == "#"));
+        if attribute && matches!(p.text(i), "deny" | "forbid") {
+            edits.push(Edit {
+                start: p.tokens[i].start,
+                end: p.tokens[i].end,
+                text: "warn".into(),
+            });
+        }
+    }
+    edits.sort_by_key(|edit| edit.start);
     let mut derived = String::with_capacity(source.len());
     let mut at = 0;
     for edit in &edits {

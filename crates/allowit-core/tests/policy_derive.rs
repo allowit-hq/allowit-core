@@ -131,6 +131,7 @@ golden!(
     iterator_break => "iterator-break",
     inferred_number => "inferred-number",
     pruned_type => "pruned-type",
+    arm_without_comma => "arm-without-comma",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -1150,6 +1151,49 @@ fn a_type_that_a_removed_let_gives_is_followed() {
     assert_eq!(keys(&typed), [("flag".to_owned(), Keeper::Chain, false)]);
 }
 
+/// A match arm whose body is block-like, such as `if ok {}`, needs no comma. When it leaves,
+/// the arm after it stays.
+#[test]
+fn an_arm_without_a_comma_leaves_alone() {
+    let source = include_str!("fixtures/derive/arm-without-comma.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(
+        derived
+            .source
+            .contains("        1 => {}\n        400 => {},\n")
+    );
+    assert_eq!(
+        keys(source),
+        [("fallback".to_owned(), Keeper::Chain, false)]
+    );
+    // A method call after the body continues it, up to the comma.
+    let continued = source.replace(
+        "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
+        "1 => if allowit::new_decision_context(ctx, None).is_ok() { 1 } else { 2 }.max(1),\n",
+    );
+    assert_ne!(continued, source);
+    assert!(derive(&continued).unwrap().source.contains("400 => {},"));
+}
+
+/// The on-chain part leaves code out, so it states `warn` where the source states `deny` or
+/// `forbid`: a lint that turns unused code into an error could stop it from compiling.
+#[test]
+fn a_lint_that_denies_is_a_warning_in_the_on_chain_part() {
+    let source = "use allowit::prelude::*;\n#[deny(unused_variables)]\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let calls: u64 = allowit::get_state(ctx, \"calls\")?.unwrap_or(0);\n    assert!(ctx.request.amount > 0);\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert!(calls < 5);\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(
+        derived.source.contains("#[warn(unused_variables)]"),
+        "{}",
+        derived.source
+    );
+    assert_eq!(derived.left, [(6, 8)]);
+    // Without a server part, the source is its own on-chain part.
+    let local = source.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
+    assert_eq!(derive(&local).unwrap().source, local);
+}
+
 /// `const fn` is one declaration, not a statement read with the next one.
 #[test]
 fn a_const_fn_is_one_declaration() {
@@ -1773,6 +1817,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("iterator-break", iterator_break::BOTH),
         ("inferred-number", inferred_number::BOTH),
         ("pruned-type", pruned_type::BOTH),
+        ("arm-without-comma", arm_without_comma::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN
@@ -1890,9 +1935,10 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             "state-braced-macro",
             "state-after-approval",
             "statement-after-branch",
+            "arm-without-comma",
         ]
         .contains(name);
         assert_eq!(*count > 0, stateful, "{name}: {count}");
     }
-    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 6);
+    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 7);
 }
