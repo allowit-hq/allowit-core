@@ -328,3 +328,76 @@ export interface RequestReputation {
   readonly votes: Readonly<Partial<Record<ReputationSignal, ReputationVote>>>;
   readonly labels: ReputationLabels;
 }
+
+/*
+ * Owner workflows: the hooks that a rail gives the SDK's install, fund and params-update workflows. The SDK holds the
+ * workflows, their journal and their recovery rules; a rail builds, sends and reads its own transactions and checks
+ * its own signatures. Every hook takes the canonical network id that the SDK resolved.
+ */
+/** One owner step: the rail's payload that the owner's wallet signs, its hash as lowercase hex and its time bound. */
+export interface OwnerStep {
+  readonly action: string;
+  readonly payload: string;
+  readonly hash: string;
+  readonly expiresAt: number;
+  readonly explorer?: string | null;
+}
+/** What the network's history holds for a transaction: 'missing', its record, or null without a clear answer. */
+export type TransactionRecord = 'missing' | { readonly hash: string; readonly ledger: number; readonly successful: boolean } | null;
+/** A keypair wallet's account setup, prepared for the owner's signature. */
+export interface PreparedKeypairSetup {
+  readonly wallet: string;
+  readonly step: OwnerStep;
+  /** Checks the owner's signed bytes and adds the new account's own signature; returns the bytes to send. */
+  complete(ownerSigned: string): string;
+}
+/** What signed setup bytes are: their hash, roles and own time bound in unix seconds. */
+export interface SignedKeypairSetup {
+  readonly hash: string;
+  readonly owner: string;
+  readonly wallet: string;
+  readonly agent: string;
+  readonly server: string;
+  readonly validUntil: number;
+}
+/** The fields of a keypair wallet's policy approval that the workflow checks. */
+export interface ApprovalFields {
+  readonly policyId: string;
+  readonly revision: number;
+  readonly wallet: string;
+}
+/** The policy that the owner reviewed: its exact source and values, and its rules and tier when the host shows them. */
+export interface ReviewedPolicy {
+  readonly source: string;
+  readonly params: PolicyValues;
+  readonly rules?: unknown;
+  readonly tier?: unknown;
+}
+export interface OwnerChain {
+  transaction(network: string, hash: string): Promise<TransactionRecord>;
+  /**
+   * What the network holds for signed bytes past their time bound: the ledger when they applied before it, or null when
+   * they can never apply. Rejects when the network proves neither; the SDK then keeps the step saved.
+   */
+  expiredRecord(network: string, hash: string, signedPayload: string): Promise<{ readonly ledger: number } | null>;
+  /** The steps of a keypair wallet's account, which one owner signature creates and funds. A rail without one omits it. */
+  readonly keypairSetup?: {
+    prepare(input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string }): Promise<PreparedKeypairSetup>;
+    read(signedPayload: string, network: string): SignedKeypairSetup | null;
+    /** Sends signed setup bytes: the ledger of the successful transaction, or null without a certain answer. */
+    send(network: string, signedPayload: string, hash: string): Promise<number | null>;
+    /** The installation document that the server registers for the account. */
+    configuration(network: string, wallet: string, owner: string, agent: string, server: string): Record<string, unknown>;
+  };
+  /** The owner's approval of a keypair wallet's policy: one message signature. A rail without one omits it. */
+  readonly approval?: {
+    read(message: unknown, network: string): ApprovalFields | null;
+    /** Whether the approval states exactly the reviewed policy for the wallet. */
+    holds(fields: ApprovalFields, wallet: string, reviewed: ReviewedPolicy): boolean;
+    step(message: string): OwnerStep;
+    /** The wallet's owner as the network names it, or null. */
+    walletOwner(network: string, wallet: string): Promise<string | null>;
+    /** Whether the signature is the signer's signature over the hexadecimal digest of the step. */
+    signedBy(signer: string, hash: string, signature: readonly number[]): boolean;
+  };
+}
