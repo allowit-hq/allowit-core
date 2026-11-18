@@ -13,8 +13,9 @@ if (registry.coreVersion !== manifest.version || registry.coreVersion !== worksp
 }
 const hash = createHash('sha256').update(source, 'utf8').digest('hex');
 // The error catalogue: one entry for each typed error code, with the text that every host shows.
-const errorSource = await readFile(new URL('typescript/error-catalogue.json', root), 'utf8');
-const errors = checkErrorCatalogueSource(errorSource);
+const errorBytes = await readFile(new URL('typescript/error-catalogue.json', root));
+const errors = checkErrorCatalogueSource(errorBytes);
+const errorSource = errorBytes.toString('latin1');
 const errorCodes = errors.entries.map(({ code }) => JSON.stringify(code)).join(' | ');
 const names = registry.functions.map(({ name }) => JSON.stringify(name)).join(' | ');
 const semantics = [...new Set(registry.functions.map(({ parameter }) => parameter.semanticType))]
@@ -750,7 +751,8 @@ for (const [path, output] of [
 ]) {
   const target = new URL(path, root);
   if (process.argv.includes('--check')) {
-    if (await readFile(target, 'utf8') !== output) throw new Error(`${path} differs from its registry input`);
+    // Byte for byte: a lossy decode of either side could hide a difference.
+    if (!(await readFile(target)).equals(Buffer.from(output, 'utf8'))) throw new Error(`${path} differs from its registry input`);
   } else {
     await writeFile(target, output);
   }

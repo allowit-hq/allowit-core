@@ -96,79 +96,29 @@ pub fn entry(code: &str) -> Option<&'static Entry> {
     catalogue().iter().find(|entry| entry.code == code)
 }
 
-/// True for an HTTP or HTTPS origin and nothing else: `https://host` or `https://host:port`, with an
-/// optional final slash. The host is a DNS name (a final dot is allowed), an IPv4 address or a
-/// bracketed IPv6 address, each as a URL parser reads it. A path, a query, a fragment, user
-/// information, a space or a control character makes it no origin.
-pub fn is_origin(text: &str) -> bool {
-    let text = text.strip_suffix('/').unwrap_or(text);
-    let Some(authority) = text
-        .strip_prefix("https://")
-        .or_else(|| text.strip_prefix("http://"))
-    else {
-        return false;
-    };
-    let (host_ok, port) = match authority.strip_prefix('[') {
-        Some(bracketed) => {
-            let Some((address, after)) = bracketed.split_once(']') else {
-                return false;
-            };
-            let port = match after {
-                "" => None,
-                _ => match after.strip_prefix(':') {
-                    Some(port) => Some(port),
-                    None => return false,
-                },
-            };
-            (address.parse::<std::net::Ipv6Addr>().is_ok(), port)
-        }
-        None => {
-            let (host, port) = match authority.split_once(':') {
-                Some((host, port)) => (host, Some(port)),
-                None => (authority, None),
-            };
-            (is_host_name(host), port)
-        }
-    };
-    let port_ok = port.is_none_or(|port| {
-        (1..=5).contains(&port.len())
-            && port.bytes().all(|b| b.is_ascii_digit())
-            && port.parse::<u16>().is_ok_and(|n| n > 0)
-    });
-    host_ok && port_ok
-}
-
-/// A DNS name or an IPv4 address. A URL parser reads a host whose last label is a number as an
-/// IPv4 address, so such a host must be one.
-fn is_host_name(host: &str) -> bool {
-    let name = host.strip_suffix('.').unwrap_or(host);
-    let labels: Vec<&str> = name.split('.').collect();
-    let label_ok = |label: &&str| {
-        !label.is_empty()
-            && label.len() <= 63
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-    };
-    if name.is_empty() || name.len() > 253 || !labels.iter().all(label_ok) {
-        return false;
-    }
-    let numeric = labels
-        .last()
-        .is_some_and(|last| last.bytes().all(|b| b.is_ascii_digit()));
-    !numeric || name.parse::<std::net::Ipv4Addr>().is_ok()
+/// The origin that `text` names, when `text` is an HTTP or HTTPS origin written as a URL parser
+/// writes it: `https://host` or `https://host:port`, with an optional final slash, and nothing
+/// else. Text that a URL parser reads as another origin than the one it shows, such as a host in
+/// capitals, a numeric host in another notation or a line break inside the host, gives none.
+#[cfg(feature = "client")]
+pub fn canonical_origin(text: &str) -> Option<String> {
+    let url = url::Url::parse(text).ok()?;
+    let plain = matches!(url.scheme(), "http" | "https")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    let origin = url.origin().ascii_serialization();
+    (plain && text.strip_suffix('/').unwrap_or(text) == origin).then_some(origin)
 }
 
 /// The address of the help page of `code` on the app at `origin`, such as
 /// `https://app.example/help/policy_denied`. Text that is no code gives the help index. An `origin`
-/// that [`is_origin`] refuses gives no address.
+/// that [`canonical_origin`] refuses gives no address.
+#[cfg(feature = "client")]
 pub fn help_url(origin: &str, code: &str) -> Option<String> {
-    if !is_origin(origin) {
-        return None;
-    }
-    let origin = origin.trim_end_matches('/');
+    let origin = canonical_origin(origin)?;
     Some(if is_code(code) {
         alloc::format!("{origin}{HELP_PATH}{code}")
     } else {
@@ -181,26 +131,22 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    /// A character that does not belong in one line of text: a control (C0, DEL, C1), a line or
-    /// paragraph separator, a direction mark or override, or the byte order mark. The generator
-    /// (`scripts/error-catalogue.mjs`) refuses the same characters.
-    fn hidden(c: char) -> bool {
-        c.is_control()
-            || matches!(c, '\u{200e}' | '\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
-    }
-
+    /// Catalogue text is printable ASCII, trimmed, of 1 to `limit` characters: the generator
+    /// (`scripts/error-catalogue.mjs`) applies the same rule.
     fn plain(text: &str, limit: usize) -> bool {
         !text.is_empty()
-            && text.chars().count() <= limit
+            && text.len() <= limit
             && text == text.trim()
-            && !text.chars().any(hidden)
+            && text.bytes().all(|b| (0x20..=0x7e).contains(&b))
     }
 
     /// True for text that names its reader: an owner and an agent read the same title and cause.
+    /// A word is a run of ASCII letters and digits, as in the generator's rule.
     fn names_reader(text: &str) -> bool {
-        text.split(|c: char| !c.is_alphanumeric()).any(|word| {
-            ["you", "your", "yours", "yourself"].contains(&word.to_lowercase().as_str())
-        })
+        text.split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|word| {
+                ["you", "your", "yours", "yourself"].contains(&word.to_ascii_lowercase().as_str())
+            })
     }
 
     #[test]
@@ -209,7 +155,10 @@ mod tests {
             "a\u{85}b",
             "a\u{2028}b",
             "a\u{202e}b",
+            "a\u{61c}b",
             "a\u{feff}b",
+            "you\u{345}",
+            "caf\u{e9}",
             "a\nb",
             " a",
         ] {
@@ -289,6 +238,7 @@ mod tests {
         assert_ne!(denied.agent_next(), denied.next);
     }
 
+    #[cfg(feature = "client")]
     #[test]
     fn a_help_address_carries_only_a_code() {
         assert_eq!(
@@ -301,7 +251,15 @@ mod tests {
             Some("http://127.0.0.1:5173/help/new_code_1")
         );
         for unsafe_text in [
-            "", "ab", "../x", "a b", "A_CODE", "x\n", "1abc", "a/b", "é_code",
+            "",
+            "ab",
+            "../x",
+            "a b",
+            "A_CODE",
+            "x\n",
+            "1abc",
+            "a/b",
+            "\u{e9}_code",
         ] {
             assert_eq!(
                 help_url("https://app.example", unsafe_text).as_deref(),
@@ -312,8 +270,9 @@ mod tests {
         assert!(!is_code(&"a".repeat(65)));
     }
 
+    #[cfg(feature = "client")]
     #[test]
-    fn a_help_address_needs_an_origin() {
+    fn a_help_address_needs_an_origin_as_a_url_parser_writes_it() {
         for origin in [
             "https://app.example",
             "https://app.example/",
@@ -324,7 +283,7 @@ mod tests {
             "http://192.168.1.10:8080",
             "https://[2001:db8::1]",
         ] {
-            assert!(is_origin(origin), "{origin}");
+            assert!(canonical_origin(origin).is_some(), "{origin}");
             assert!(help_url(origin, "policy_denied").is_some(), "{origin}");
         }
         for origin in [
@@ -335,24 +294,24 @@ mod tests {
             "https://app.example/base",
             "https://app.example#x",
             "https://user@app.example",
-            "https://app.example:0",
             "https://app.example:65536",
-            "https://app.example:",
+            "https://app.example:443",
+            "https://APP.example",
             "https://app\n.example",
             "https://app.example\n",
             "https://app .example",
-            "https://-app.example",
             "https://[::1",
             "https://[]",
-            "https://[zz::1]",
             "https://[:::]",
-            "https://[::1%25en0]",
+            "https://[zz::1]",
             "https://999.999.999.999",
             "https://1.2.3.256",
-            "https://app..example",
+            "https://0x7f000001",
+            "https://app.0x1",
+            "https://b\u{fc}cher.example",
             "https://",
         ] {
-            assert!(!is_origin(origin), "{origin:?}");
+            assert_eq!(canonical_origin(origin), None, "{origin:?}");
             assert_eq!(help_url(origin, "policy_denied"), None, "{origin:?}");
         }
     }

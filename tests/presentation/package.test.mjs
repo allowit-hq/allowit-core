@@ -81,6 +81,9 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
   assert.doesNotThrow(() => checkErrorCatalogue(one({})));
   for (const change of [
     { cause: 'A lone surrogate \ud800 that serde_json refuses.' },
+    { title: '\u061cAn Arabic letter mark' },
+    { cause: 'A combining mark after you\u0345.' },
+    { cause: 'A letter outside ASCII: caf\u00e9.' },
     { cause: 'A C1 control \u0085 here.' },
     { title: 'Two lines' },
     { title: 'Reversed ‮ text' },
@@ -116,6 +119,9 @@ test('the catalogue file is the canonical text of what it parses to', async () =
     // Fields out of order.
     entry.replace(/"for": "(\w+)", /, '').replace('{', '{"for": "owner", '),
   ];
+  // A byte that is not ASCII, such as a malformed UTF-8 byte, is refused before any decoder reads it.
+  const malformed = Buffer.concat([Buffer.from(source.slice(0, first + 30)), Buffer.from([0xff]), Buffer.from(source.slice(first + 30))]);
+  assert.throws(() => checkErrorCatalogueSource(malformed), /printable ASCII/);
   for (const variant of variants) {
     assert.notEqual(variant, entry);
     assert.throws(() => checkErrorCatalogueSource(source.slice(0, first) + variant + source.slice(end)), /canonical form/, variant);

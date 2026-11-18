@@ -287,7 +287,7 @@ use allowit_core::errors;
 if let Some(entry) = errors::entry("policy_denied") {
     println!("{}\n{}", entry.cause, entry.agent_next());
 }
-// None unless `origin` is an HTTP or HTTPS origin and nothing else.
+// With the `client` feature. None unless `origin` is an HTTP or HTTPS origin as a URL parser writes it.
 let page = errors::help_url("https://app.allowit.ai", "policy_denied");
 ```
 
@@ -298,9 +298,9 @@ const page = errorHelpPath(code); // "/help/policy_denied"
 ```
 
 A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
-missing or overlong text, a second entry for a code, or an unknown field. It also refuses text with a control
-character, a line or paragraph separator, a direction override or a broken surrogate, and a title or a cause that names
-its reader ("you"): an owner and an agent read the same entry. Each repository that defines codes or shows errors has a
+missing or overlong text, a second entry for a code, or an unknown field. Catalogue text is printable
+ASCII, so a page, a terminal and a Rust host show it as written, and a title or a cause names no reader ("you"): an
+owner and an agent read the same entry. Each repository that defines codes or shows errors has a
 test that fails for a code without an entry.
 
 ## Asset units

@@ -4,18 +4,18 @@
 export const AUDIENCES = ['owner', 'agent', 'operator'];
 export const FIELDS = ['code', 'for', 'title', 'cause', 'next', 'agent'];
 export const CODE = /^[a-z][a-z0-9_]{2,63}$/;
-// Controls (C0, DEL, C1), line and paragraph separators, direction marks and overrides, and the byte order mark:
-// none of them belongs in one line of text that a terminal or a page shows.
-const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069\ufeff]/u;
-// A title and a cause name no reader: an owner and an agent read the same entry. A word is a run of letters and
-// digits, as in the Rust test: an underscore or any other character ends it.
+// Catalogue text is printable ASCII: letters, digits, the space and ASCII punctuation. Every reader, a page, a terminal
+// or a Rust host, shows such text as it is written, and no hidden character, direction mark or combining mark can
+// change what it shows.
+const PRINTABLE = /^[\x20-\x7e]*$/;
+// A title and a cause name no reader: an owner and an agent read the same entry. A word is a run of ASCII letters and
+// digits, as in the Rust test.
 const READER_WORDS = new Set(['you', 'your', 'yours', 'yourself']);
-export const namesReader = text => text.split(/[^\p{L}\p{N}]+/u).some(word => READER_WORDS.has(word.toLowerCase()));
+export const namesReader = text => text.split(/[^A-Za-z0-9]+/).some(word => READER_WORDS.has(word.toLowerCase()));
 
-/** Plain text: well-formed Unicode, trimmed, without hidden characters, of 1 to `limit` characters. */
+/** Plain text: printable ASCII, trimmed, of 1 to `limit` characters. */
 export function plain(text, limit) {
-  return typeof text === 'string' && text.isWellFormed() && text.length > 0 && [...text].length <= limit
-    && text === text.trim() && !HIDDEN.test(text);
+  return typeof text === 'string' && text.length > 0 && text.length <= limit && text === text.trim() && PRINTABLE.test(text);
 }
 
 /** Throws for the first rule that the catalogue document breaks. */
@@ -48,7 +48,12 @@ const line = entry => '{' + FIELDS.filter(key => key in entry).map(key => `${JSO
  * lines between groups of entries: JSON.parse keeps only the last of two equal keys and reads escapes, so a second
  * field or an escaped character could hide text that another reader, such as Rust's serde_json, reads otherwise.
  */
-export function checkErrorCatalogueSource(source) {
+export function checkErrorCatalogueSource(bytes) {
+  // The file is ASCII, so its bytes and its text are the same: no decoder can replace a malformed byte.
+  const raw = Buffer.from(bytes);
+  const outside = raw.findIndex(byte => byte !== 0x0a && (byte < 0x20 || byte > 0x7e));
+  if (outside !== -1) throw new Error(`The error catalogue is printable ASCII and line feeds; byte ${outside} is 0x${raw[outside].toString(16)}`);
+  const source = raw.toString('latin1');
   const errors = JSON.parse(source);
   const entries = Array.isArray(errors?.entries) ? errors.entries : [];
   const canonical = ['{', '  "schemaVersion": ' + JSON.stringify(errors?.schemaVersion) + ',', '  "helpPath": ' + JSON.stringify(errors?.helpPath) + ',', '  "entries": [',
