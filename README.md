@@ -326,6 +326,10 @@ Amount metadata assumes no asset, decimals or price normalization. Hosts and nat
 Registry order does not prescribe source order. SDK engine derives source bindings and workflow projections.
 The exported metadata hash identifies the exact JSON bytes shared by Rust and JavaScript.
 
+The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, `PastDecision`, `OwnerAnswer` and the
+types that they use) describe what a server answers about a request that waits for its policy owner and about a
+policy's past decisions. They are types only: a client reads a snapshot with its own checks and verifies its hash.
+
 Use `pnpm install --frozen-lockfile --ignore-scripts` for its development tools.
 Run `pnpm generate` after changing the registry. `pnpm check` detects stale generated exports.
 `pnpm test` checks a packed public consumer and the Rust/JavaScript integer roundtrip.

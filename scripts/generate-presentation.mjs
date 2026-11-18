@@ -82,6 +82,170 @@ export declare const canonicalFunctionMetadataHash: string;
 export declare const canonicalFunctionRegistry: CanonicalFunctionRegistry;
 /** Registry order is not authored source or workflow order. */
 export declare const canonicalFunctions: readonly CanonicalFunctionDescriptor[];
+
+/*
+ * Owner review: what a server answers about an agent request that waits for its policy owner, and about a
+ * policy's past decisions. Scores and thresholds are basis points from 0 to 10000. Times are Unix seconds.
+ * Amounts are base units as decimal text, with the symbol and decimals that the network supplies.
+ */
+export type OwnerReviewAnswer = 'allow' | 'deny';
+/** used: an allowed request has its operation; whether it settled is the operation's own status. */
+export type OwnerReviewState = 'pending' | 'allowed' | 'denied' | 'expired' | 'used';
+/** score: new evidence moved the score out of the band. policy: the policy decided by itself. */
+export type OwnerReviewDecidedBy = 'owner' | 'score' | 'policy' | 'expiry';
+/** A field that the request carried beside its operation: agent or seller text, untrusted. */
+export interface OwnerReviewCarried {
+  readonly name: string;
+  readonly value: string;
+}
+export interface OwnerReviewRequest {
+  readonly operation: string;
+  readonly amount: string;
+  readonly asset: string;
+  readonly assetSymbol: string;
+  readonly assetDecimals: number;
+  readonly destination: string;
+  readonly carried: readonly OwnerReviewCarried[];
+}
+/** A decision question of the policy, in the owner's words, with its two thresholds. */
+export interface OwnerReviewQuestion {
+  readonly id: string;
+  readonly text: string;
+  readonly denyBelow: number;
+  readonly allowAbove: number;
+}
+export interface OwnerReviewDecision {
+  readonly question: OwnerReviewQuestion;
+  readonly score: number;
+  readonly provider: string;
+  readonly model: string;
+}
+/** A lookup that failed: which call, what it looked up and what failed. Nothing was scored. */
+export interface OwnerReviewLookup {
+  readonly id: string;
+  readonly function: string;
+  readonly input: string;
+  readonly failure: string;
+  readonly detail: string;
+}
+export interface OwnerReviewVerdict {
+  readonly result: OwnerReviewAnswer;
+  readonly reason: string;
+}
+/** Why an evaluation stopped: exactly one of the three. */
+export type OwnerReviewCause =
+  | { readonly decision: OwnerReviewDecision }
+  | { readonly lookup: OwnerReviewLookup }
+  | { readonly policy: OwnerReviewVerdict };
+export interface OwnerReviewSource {
+  readonly url: string;
+  readonly title?: string;
+}
+export interface OwnerReviewEvidence {
+  readonly function: string;
+  readonly summary: string;
+  readonly sources?: readonly OwnerReviewSource[];
+  readonly observedAt?: number;
+  readonly digest: string;
+}
+export interface OwnerReviewSubject {
+  readonly owner: string;
+  readonly network: string;
+  readonly wallet: string;
+  readonly policyId: string;
+  readonly policyTitle: string;
+  readonly policyRevision: number;
+  readonly sourceHash: string;
+  readonly paramsHash: string;
+  readonly requestId: string;
+  readonly requestKey: string;
+  readonly requestHash: string;
+  readonly request: OwnerReviewRequest;
+}
+/** What the owner answers: one evaluation of one request. Its hash binds the owner's signed answer. */
+export interface OwnerReviewSnapshot {
+  readonly reviewId: string;
+  readonly sequence: number;
+  readonly subject: OwnerReviewSubject;
+  readonly cause: OwnerReviewCause;
+  readonly evaluatedAt: number;
+  readonly evidence: readonly OwnerReviewEvidence[];
+  readonly replayDigest: string;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+/**
+ * One review or past decision as a server reads it out. The snapshot stays unread until a client checks it
+ * against its hash. kind decided: a request that a decision question decided without the owner. reopened: the
+ * owner opened a denied request again; an allow approves the agent's next request with the same content.
+ */
+export interface OwnerReview {
+  readonly id: string;
+  readonly state: OwnerReviewState;
+  readonly decidedBy: OwnerReviewDecidedBy | null;
+  readonly answer: OwnerReviewAnswer | null;
+  readonly decidedAt: number | null;
+  readonly executeBy: number | null;
+  readonly usedAt?: number | null;
+  readonly snapshot: unknown;
+  readonly snapshotHash: string;
+  readonly refetches: number;
+  readonly refetchAvailable: boolean;
+  readonly explanationAvailable: boolean;
+  readonly kind?: 'review' | 'decided';
+  readonly reopened?: boolean;
+  readonly reopenable?: boolean;
+  readonly flaggable?: boolean;
+}
+/** One review in a policy's list, without its evidence. */
+export interface OwnerReviewRow {
+  readonly id: string;
+  readonly state: OwnerReviewState;
+  readonly decidedBy: OwnerReviewDecidedBy | null;
+  readonly answer: OwnerReviewAnswer | null;
+  readonly decidedAt: number | null;
+  readonly executeBy: number | null;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  readonly requestId: string;
+  readonly request: OwnerReviewRequest;
+  readonly cause?: OwnerReviewCause;
+}
+/** A policy with requests that wait for its owner. */
+export interface OwnerReviewPendingPolicy {
+  readonly policyId: string;
+  readonly pending: number;
+  readonly reviews?: readonly { readonly id: string }[];
+}
+/** A sentence for the reader about one snapshot. No decision uses it. */
+export interface OwnerReviewExplanation {
+  readonly text: string;
+  readonly snapshot?: string;
+}
+/** The owner's signed answer to a request that later decisions of the same question read. */
+export interface OwnerAnswer {
+  readonly answer: OwnerReviewAnswer;
+  readonly kind: 'answered' | 'flagged' | 'resubmitted';
+  readonly givenAt: number;
+}
+/** One past decision of a policy: a review, or a request that a decision question decided without the owner. */
+export interface PastDecision {
+  readonly id: string;
+  readonly kind: 'review' | 'decided';
+  readonly state: OwnerReviewState;
+  readonly decidedBy: OwnerReviewDecidedBy | null;
+  readonly answer: OwnerReviewAnswer | null;
+  readonly decidedAt: number | null;
+  readonly executeBy: number | null;
+  readonly createdAt: number;
+  readonly requestId: string;
+  readonly request: OwnerReviewRequest;
+  readonly cause?: OwnerReviewCause;
+  readonly reopened: boolean;
+  readonly reopenable: boolean;
+  readonly flaggable: boolean;
+  readonly ownerAnswer?: OwnerAnswer | null;
+}
 `;
 const helper = await readFile(new URL('scripts/policy_source.py', root), 'utf8');
 const helperTerms = await readFile(new URL('scripts/LICENSE', root), 'utf8');
