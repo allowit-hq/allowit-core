@@ -214,11 +214,14 @@ mod tests {
         assert_eq!(document["schemaVersion"], 1);
         assert_eq!(document["helpPath"], HELP_PATH);
         for entry in document["entries"].as_array().unwrap() {
-            for key in entry.as_object().unwrap().keys() {
+            for (key, value) in entry.as_object().unwrap() {
                 assert!(
                     ["code", "for", "title", "cause", "next", "agent"].contains(&key.as_str()),
                     "{key}"
                 );
+                // Every field that is present is text: `parse` would read an `agent` of null or a
+                // number as no agent step, which the generator refuses.
+                assert!(value.is_string(), "{key} of {} is no text", entry["code"]);
             }
         }
     }
