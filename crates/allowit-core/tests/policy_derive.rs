@@ -664,10 +664,6 @@ fn a_state_call_that_the_contract_cannot_declare_is_refused() {
             "names each state key as a string literal",
         ),
         (
-            "    let seen: Option<bool> = allowit::get_state(ctx, r\"seen\")?;\n",
-            "names each state key as a string literal",
-        ),
-        (
             "    allowit::set_state(ctx, \"last seen\", true)?;\n",
             "is not 1 to 32 ASCII letters, digits or `_`",
         ),
@@ -699,6 +695,42 @@ fn a_state_call_that_the_contract_cannot_declare_is_refused() {
     // An explicit type on the read.
     let typed = with("    let n = allowit::get_state::<u64>(ctx, \"count\")?;\n");
     assert_eq!(keys(&typed), [("count".to_owned(), Keeper::Chain, false)]);
+    // A raw string names a key as a plain string does.
+    let raw = with(
+        "    let seen: Option<bool> = allowit::get_state(ctx, r\"seen\")?;\n    allowit::set_state(ctx, r#\"seen\"#, true)?;\n",
+    );
+    assert_eq!(keys(&raw), [("seen".to_owned(), Keeper::Chain, false)]);
+    // A local function may carry the name of a state function: it is no state call.
+    let local = with("    assert!(get_state() == 1);\n").replace(
+        "pub fn execute",
+        "fn get_state() -> u64 {\n    1\n}\npub fn execute",
+    );
+    source_shape(&local).unwrap();
+    let derived = derive(&local).unwrap();
+    assert_eq!(derived.source, local);
+    assert!(derived.state.is_empty());
+}
+
+/// A function inside a function that only the server runs can carry the name of a function
+/// that writes state. The rule follows names, so it cannot tell which one a statement calls:
+/// it refuses the source. With another name for the inner function, the key stays with the
+/// contract.
+#[test]
+fn a_shadowed_writer_is_refused() {
+    let source = "use allowit::prelude::*;\nfn remember(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"seen\", true)\n}\nfn ask(ctx: &AllowitContext) -> allowit::Result {\n    fn remember(_ctx: &AllowitContext) -> allowit::Result {\n        Ok(())\n    }\n    remember(ctx)?;\n    allowit::new_decision_context(ctx, None)\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    remember(ctx)?;\n    let seen: Option<bool> = allowit::get_state(ctx, \"seen\")?;\n    assert!(seen != Some(false));\n    ask(ctx)?;\n    Ok(())\n}\n";
+    let error = derive(source).unwrap_err();
+    assert!(error.contains("declare `remember` twice"), "{error}");
+    // With another name for the inner function, the contract keeps the key and its check.
+    let renamed = source
+        .replace("    fn remember(_ctx", "    fn note(_ctx")
+        .replace(
+            "    remember(ctx)?;\n    allowit::new",
+            "    note(ctx)?;\n    allowit::new",
+        );
+    let derived = derive(&renamed).unwrap();
+    assert_eq!(keys(&renamed), [("seen".to_owned(), Keeper::Chain, false)]);
+    assert!(derived.source.contains("fn remember(") && derived.source.contains("assert!(seen"));
+    assert!(!derived.source.contains("fn ask("));
 }
 
 /// A statement that reads a standard figure stays, and the contract keeps that figure for it,
@@ -755,6 +787,23 @@ fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
         ]
     );
     assert!(read("day").is_empty());
+    // The stored day is the day of the last admitted operation. A contract wallet stores no
+    // day, so a statement that reads it leaves: only the server evaluates it.
+    let day = source.replace(
+        "    assert!(calls != Some(1_000));",
+        "    let day: Option<u64> = allowit::get_state(ctx, \"day\")?;\n    assert!(day.is_none() || calls != Some(1_000));",
+    );
+    assert_ne!(day, source);
+    let derived = derive(&day).unwrap();
+    assert!(!derived.source.contains("\"day\"") && derived.source.contains("\"calls\""));
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (check.check.as_str(), check.cause, check.movable()),
+        ("assert", Cause::StoredState, false)
+    );
+    assert!(derived.state.is_empty());
 
     // A read that depends on a server function leaves, and keeps no figure for the contract.
     let served = source.replace(
@@ -1009,7 +1058,9 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         AllowitOperation::redeem,
         AllowitOperation::deposit,
     ];
-    let (mut allowed, mut denied_on_chain, mut runs, mut wrote_own) = (0, 0, 0, 0);
+    let (mut allowed, mut denied_on_chain, mut runs) = (0, 0, 0);
+    // For each source, the allowed runs that changed a key that the contract keeps.
+    let mut wrote: std::collections::BTreeMap<&str, usize> = Default::default();
     for (name, both) in [
         ("sample-mandate", sample_mandate::BOTH),
         ("no-server-function", no_server_function::BOTH),
@@ -1047,13 +1098,15 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             .find(|(golden, ..)| *golden == name)
             .unwrap()
             .1;
-        let server_keys: Vec<String> = derive(source)
-            .unwrap()
-            .state
-            .into_iter()
-            .filter(|entry| entry.keeper == Keeper::Server)
-            .map(|entry| entry.key)
-            .collect();
+        let state = derive(source).unwrap().state;
+        let kept_by = |keeper: Keeper| -> Vec<String> {
+            state
+                .iter()
+                .filter(|entry| entry.keeper == keeper)
+                .map(|entry| entry.key.clone())
+                .collect()
+        };
+        let (server_keys, chain_keys) = (kept_by(Keeper::Server), kept_by(Keeper::Chain));
         let on_chain_state = |state: &AllowitMap| {
             let mut state = state.clone();
             for key in &server_keys {
@@ -1103,12 +1156,14 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
                             );
                             runs += 1;
                             denied_on_chain += usize::from(on_chain.is_err());
-                            if let Ok(state) = &whole {
+                            if let Ok(after) = &whole {
                                 allowed += 1;
-                                wrote_own += usize::from(
-                                    state.get("day_payments") == Some(&AllowitValue::Int(3))
-                                        || state.get("paid") == Some(&AllowitValue::Int(4)),
-                                );
+                                // A write of the contract's own key: its value changed.
+                                let changed = chain_keys
+                                    .iter()
+                                    .any(|key| state.get(key.as_str()) != after.get(key.as_str()));
+                                *wrote.entry(name).or_default() += usize::from(changed);
+                                let state = after;
                                 assert_eq!(
                                     on_chain.as_ref(),
                                     Ok(&on_chain_state(state)),
@@ -1126,6 +1181,11 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         allowed > 300 && denied_on_chain > 300,
         "{allowed} allowed, {denied_on_chain} denied of {runs}"
     );
-    // Some allowed runs wrote a key that the contract keeps.
-    assert!(wrote_own > 10, "{wrote_own}");
+    // Each source that keeps a key in the contract wrote it in some allowed runs, and no other
+    // source wrote one.
+    for (name, count) in &wrote {
+        let stateful = ["state-on-chain", "state-on-server", "state-helpers"].contains(name);
+        assert_eq!(*count > 0, stateful, "{name}: {count}");
+    }
+    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 3);
 }

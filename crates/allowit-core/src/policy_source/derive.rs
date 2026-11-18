@@ -51,13 +51,15 @@
 //!   reads or writes the key leaves too (rule 1), and the contract never stores it. A key that
 //!   only leaving statements read is the server's as well.
 //!
-//! A call of a local function that writes a key counts as a write of that key. A key whose name
+//! A call of a local function that writes a key counts as a write of that key, also through
+//! another local function. A key whose name
 //! starts with `day_` lives one daily window; any other key lives until a later write replaces
 //! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
 //!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
-//! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
-//! writes a standard figure.
+//! contract keeps each figure that a kept statement reads ([`Derived::figures`]). A read of the
+//! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
+//! policy writes a standard figure.
 //!
 //! The contract must know each key before it runs, and Rust source cannot pass a state function
 //! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
@@ -197,7 +199,8 @@ pub const DAILY_PREFIX: &str = "day_";
 pub const MAX_STATE_KEY_BYTES: usize = 32;
 
 /// The standard state keys, each with the canonical rules whose figures a read of the key
-/// keeps. `day` is derived from the request's time, so it keeps no figure.
+/// keeps. `day` is the day of the last admitted operation. A contract wallet stores no day, so
+/// a statement that reads it leaves, and the key keeps no figure.
 const STANDARD: &[(&str, &[&str])] = &[
     (allowit::CALLS, &["call_limit"]),
     (allowit::SPENT, &["lifetime_spending_limit"]),
@@ -984,7 +987,7 @@ impl<'a> Parsed<'a> {
 
     /// The state call that token `i` starts, `allowit::get_state(ctx, "key")` or
     /// `allowit::set_state(ctx, "key", value)`: whether it writes, and its key. `None` for
-    /// another token and for a call whose key is not a plain string literal.
+    /// another token and for a call whose key is no string literal.
     fn state_use(&self, i: usize) -> Option<(bool, &'a str)> {
         let writes = match self.allowit_path(i)? {
             "get_state" => false,
@@ -1020,30 +1023,31 @@ impl<'a> Parsed<'a> {
             .get(key)
             .filter(|token| token.kind == Kind::Literal)?;
         let ends = key + 1 == close || (self.text(key + 1) == "," && key + 1 < close);
+        // A plain string, or a raw string such as `r"key"` or `r#"key"#`.
         let text = &self.source[token.start..token.end];
-        text.strip_prefix('"')
+        let raw = text.strip_prefix('r').map(|text| text.trim_matches('#'));
+        raw.unwrap_or(text)
+            .strip_prefix('"')
             .and_then(|text| text.strip_suffix('"'))
             .filter(|_| ends)
             .map(|key| (writes, key))
     }
 
-    /// Every state call of the source. A use of `get_state` or `set_state` that is no such
-    /// call, a key that is no valid literal and a write of a standard figure are refused.
+    /// Every state call of the source. A use of `allowit::get_state` or `allowit::set_state`
+    /// that is no such call, a key that is no valid literal and a write of a standard figure
+    /// are refused.
     fn state_uses(&self) -> Result<Vec<StateUse>> {
         let mut uses = vec![];
-        for i in 0..self.tokens.len() {
+        for at in 0..self.tokens.len() {
+            // Only the library's own functions: a local item may carry one of the two names.
             let Some(name) = self
-                .word(i)
+                .allowit_path(at)
                 .filter(|name| matches!(*name, "get_state" | "set_state"))
             else {
                 continue;
             };
-            let line = self.line(self.tokens[i].start);
-            let at = i.wrapping_sub(2);
-            let call = (i >= 2 && self.allowit_path(at) == Some(name))
-                .then(|| self.state_use(at))
-                .flatten();
-            let Some((writes, key)) = call else {
+            let line = self.line(self.tokens[at].start);
+            let Some((writes, key)) = self.state_use(at) else {
                 return Err(format!(
                     "A policy for a contract wallet names each state key as a string literal: `allowit::{name}(ctx, \"key\"{})` (line {line}). The wallet must know each key before it runs.",
                     if name == "set_state" { ", value" } else { "" }
@@ -1072,10 +1076,11 @@ impl<'a> Parsed<'a> {
     }
 
     /// Whether token `i` starts a call that reads or writes policy state that the server
-    /// keeps.
+    /// keeps: a key of the server, or the stored day, which no contract wallet stores.
     fn state_at(&self, i: usize) -> bool {
-        self.state_use(i)
-            .is_some_and(|(_, key)| self.server_keys.borrow().contains(key))
+        self.state_use(i).is_some_and(|(_, key)| {
+            key == allowit::DAY_KEY || self.server_keys.borrow().contains(key)
+        })
     }
 
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {
@@ -1343,7 +1348,7 @@ pub fn derive(source: &str) -> Result<Derived> {
                 .collect();
             for (other, written) in &writers {
                 let other: HashSet<String> = HashSet::from([other.clone()]);
-                if p.mentions(from, to, &other) {
+                if (from..to).any(|i| p.names(i, &other) && p.text(i + 1) == "(") {
                     keys.extend(written.iter().cloned());
                 }
             }
@@ -1591,9 +1596,14 @@ pub fn derive(source: &str) -> Result<Derived> {
             .filter(|state| state.writes && left[state.at])
             .map(|state| state.key.clone())
             .collect();
+        // The source can only call a function: the gate admits no function value. Its
+        // declaration is no call.
         for (name, written) in &writers {
             let name: HashSet<String> = HashSet::from([name.clone()]);
-            if (0..count).any(|i| left[i] && p.names(i, &name)) {
+            let called = |i: usize| {
+                p.names(i, &name) && p.text(i + 1) == "(" && p.text(i.wrapping_sub(1)) != "fn"
+            };
+            if (0..count).any(|i| left[i] && called(i)) {
                 moved.extend(written.iter().cloned());
             }
         }
@@ -1621,12 +1631,20 @@ pub fn derive(source: &str) -> Result<Derived> {
         return Err("A policy for a contract wallet that depends on a server function cannot take a mutable reference (`&mut` or `ref mut`). Assign the name itself.".into());
     }
     // Two local functions or constants with one name: the rule cannot tell which one a
-    // statement calls.
+    // statement calls. A function can also stand inside another function, where it is no
+    // statement of its own, so every `fn` of the file counts.
     let mut seen: HashSet<&str> = HashSet::new();
+    let mut declared: HashSet<&str> = HashSet::new();
     if let Some(twice) = named
         .iter()
         .filter_map(|id| p.nodes[*id].name.as_deref())
         .find(|name| !seen.insert(name))
+        .or_else(|| {
+            (0..count)
+                .filter(|i| p.text(*i) == "fn")
+                .filter_map(|i| p.word(i + 1))
+                .find(|name| !declared.insert(name))
+        })
         .filter(|_| changed)
     {
         return Err(format!(

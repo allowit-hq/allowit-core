@@ -224,7 +224,8 @@ is not a string literal of 1 to 32 ASCII letters, digits or `_`, and a write of 
 
 `Derived::figures` names the cumulated figures that the kept statements read, each daily or total: those of the
 kept canonical rules, and each standard figure that a kept statement reads with `get_state`. The wallet keeps
-those figures and the keys whose keeper is `chain`.
+those figures and the keys whose keeper is `chain`. A statement that reads the stored day (`get_state(ctx, "day")`)
+leaves: a contract wallet stores no day.
 
 Write a policy so that it stores little. Prefer, in this order: no state; a figure that a canonical rule keeps
 or that the request gives; then one small value under a short key. A daily count belongs under a `day_` key.
