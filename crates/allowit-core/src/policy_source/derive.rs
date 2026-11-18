@@ -65,7 +65,8 @@
 //!
 //! A number without a type takes its type from the code that uses it, and Rust gives it `i32`
 //! when no code does. A statement that leaves can be that code, so a name bound without a
-//! stated type from such a number or from another such name is followed like
+//! stated type from such a number, from `None`, from `get_state`, `param` or `arg` without a
+//! stated type, or from another such name is followed like
 //! a value of the server: when a leaving statement mentions it, or a name that one statement
 //! uses together with it, a kept statement that reads those names leaves too. The rule reads
 //! tokens, so every number without a suffix in the value counts, also one that a typed
@@ -1591,9 +1592,12 @@ pub fn derive(source: &str) -> Result<Derived> {
     }
     // A number without a type takes its type from the code that uses it, and Rust gives it
     // `i32` when no code does. A statement that leaves can be the code that gives the type, so
-    // the on-chain part would compute with another type. The names whose value can hold such
-    // a number are found here: those bound with no type from a number without a suffix or
-    // from another such name. The source gate admits no closure. Names that one statement uses together can share a type,
+    // the on-chain part would compute with another type. Rust gives no other type by itself:
+    // any other open type that only a leaving statement gave fails to compile on chain. The
+    // names whose value can hold an open type are found here: those bound with no stated type
+    // from a number without a suffix, from `None`, from a read of state, a param or an arg
+    // without a stated type, or from another such name. The source gate admits no closure and
+    // no other generic value. Names that one statement uses together can share a type,
     // so they form one group, and a leaving statement that mentions one marks the group.
     let inferred = {
         const SUFFIXES: &[&str] = &[
@@ -1605,7 +1609,13 @@ pub fn derive(source: &str) -> Result<Derived> {
                 let number = p.tokens[i].kind == Kind::Literal
                     && text.starts_with(|c: char| c.is_ascii_digit())
                     && !SUFFIXES.iter().any(|suffix| text.ends_with(suffix));
-                number || p.names(i, names)
+                // A value whose type its uses give: `None`, and a read of a state value, an
+                // owner param or a request arg without a stated type.
+                let open_read = p
+                    .allowit_path(i)
+                    .is_some_and(|f| matches!(f, "get_state" | "param" | "arg"))
+                    && p.text(i + 3) != "::";
+                number || text == "None" || open_read || p.names(i, names)
             })
         };
         // The bindings of `execute`: each pattern with the value that it takes.
@@ -1989,7 +1999,9 @@ pub fn derive(source: &str) -> Result<Derived> {
                     }
                     let declaration = match p.text(at) {
                         "let" => !matches!(p.text(at - 1), "if" | "while" | "&&" | "||"),
-                        "fn" | "use" => true,
+                        // `const fn` is one declaration.
+                        "fn" => p.text(at - 1) != "const",
+                        "use" => true,
                         // A `const` parameter of a generic function is no item.
                         "const" => p.text(at + 1) != "{" && !matches!(p.text(at - 1), "<" | ","),
                         _ => false,

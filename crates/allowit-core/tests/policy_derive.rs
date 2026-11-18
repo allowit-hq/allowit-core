@@ -1068,6 +1068,44 @@ fn a_number_whose_type_a_leaving_statement_gives_is_followed() {
     );
 }
 
+/// The type of a number can also pass through a name that holds no number, such as `None`, or
+/// through a read whose type its uses give. Such names are followed too; a stated type or a
+/// turbofish fixes them.
+#[test]
+fn an_open_type_that_passes_through_another_name_is_followed() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let n = 1;\n    let other = None;\n    assert_ne!(other, Some(n));\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert_ne!(other, Some(1u64));\n    }\n    allowit::set_state(ctx, \"flag\", (n << 31) > 0)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let flag = |source: &str| {
+        keys(source)
+            .into_iter()
+            .find(|(key, ..)| key == "flag")
+            .map(|(_, keeper, _)| keeper)
+    };
+    assert_eq!(flag(source), Some(Keeper::Server));
+    let typed = source
+        .replace("let n = 1;", "let n: u64 = 1;")
+        .replace("let other = None;", "let other: Option<u64> = None;");
+    assert_eq!(flag(&typed), Some(Keeper::Chain));
+    // A state read without a stated type takes its type from its uses.
+    let read = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let paid = allowit::get_state(ctx, \"paid\")?;\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert!(paid != Some(5u64));\n    }\n    allowit::set_state(ctx, \"flag\", paid == Some(1))?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(read, REGISTRY).unwrap();
+    assert_eq!(flag(read), Some(Keeper::Server));
+    let turbofish = read.replace("get_state(ctx", "get_state::<u64>(ctx");
+    assert_eq!(flag(&turbofish), Some(Keeper::Chain));
+}
+
+/// `const fn` is one declaration, not a statement read with the next one.
+#[test]
+fn a_const_fn_is_one_declaration() {
+    let source = "use allowit::prelude::*;\nconst fn limit() -> u64 {\n    1\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    assert!(limit() > 0);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(
+        derived.source.contains("const fn limit()")
+            && derived.source.contains("assert!(limit() > 0)")
+    );
+}
+
 /// The `const` parameters of generic functions are no items: two of them with one name are
 /// no two items with one name, and none of them is a declaration inside a statement.
 #[test]
