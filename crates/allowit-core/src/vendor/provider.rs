@@ -265,9 +265,9 @@ pub trait OwnerProvider {
             "This rail does not verify an installation on the ledger",
         ))
     }
-    /// The owner's view of the build of a Custom policy on the backend: the admitted source and
-    /// the code hash of the build that the server made from it and uploaded. A rail without the
-    /// build hook declares `Feature::CustomBuild` skipped.
+    /// The owner's view of the build of a Custom policy on the backend: the build ticket, the
+    /// hash of the source that the owner signed and the build that the backend holds. A rail
+    /// without the build hook declares `Feature::CustomBuild` skipped.
     fn custom_build(
         &self,
         cx: &super::owner::Context<'_>,
