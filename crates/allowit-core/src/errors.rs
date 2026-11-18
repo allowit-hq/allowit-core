@@ -91,7 +91,8 @@ pub fn catalogue() -> &'static [Entry] {
 }
 
 /// The entry of a typed error code. A newer server can send a code that this release does not
-/// know: a host then shows the sender's text and still links [`help_url`].
+/// know: a host then shows the sender's text and still links the code's help page (`help_url`,
+/// with the `client` feature).
 pub fn entry(code: &str) -> Option<&'static Entry> {
     catalogue().iter().find(|entry| entry.code == code)
 }
@@ -228,6 +229,7 @@ mod tests {
                 code::TOOLCHAIN_MISSING,
                 code::BUILD_FAILED,
                 code::BUILD_MISSING,
+                crate::vendor::owner_session::NETWORK_UNAVAILABLE,
             ] {
                 assert!(entry(defined).is_some(), "{defined} has no catalogue entry");
             }
