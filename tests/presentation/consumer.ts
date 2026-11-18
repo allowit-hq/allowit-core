@@ -1,5 +1,6 @@
 import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord } from '@allowit/core';
 import type { Quantity, Settlement, LimitReport, PaidService, PaymentChallenge, PaymentProof, WalletKindInfo } from '@allowit/core';
+import type { PaymentLimit, WalletLimits, OperationReports } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
@@ -55,4 +56,11 @@ const thirdParty: PaidService = { ...paid, settledBy: 'facilitator' };
 // @ts-expect-error A wallet kind is one of the four kinds.
 const otherKind: WalletKindInfo = { ...native, id: 'vault' };
 void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState, twoCauses, expired, chain, missing, unclear, noHistory];
-void [settled, limit, offer, proof, noAmount, roundedUnits, thirdParty, otherKind];
+const perPayment: PaymentLimit = { param: 'payment_limit', limit: five };
+const counters: WalletLimits = { paymentLimits: [perPayment] };
+const reports: OperationReports = { settlement: settled, paidService: paid, feeCharged: five, limits: [limit], paymentLimits: [perPayment], explorer: 'https://explorer.example/tx/1' };
+// A signed authorization that no ledger holds yet names no transaction to link.
+const unsettled: OperationReports = { paidService: paid, explorer: null };
+// @ts-expect-error A limit on one operation keeps no counter.
+const counted: PaymentLimit = { ...perPayment, spent: five };
+void [settled, limit, offer, proof, noAmount, roundedUnits, thirdParty, otherKind, counters, reports, unsettled, counted];
