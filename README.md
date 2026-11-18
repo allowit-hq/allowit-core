@@ -285,8 +285,10 @@ stays behind a details control in the app and behind `--verbose` in the CLI. A h
 ```rust
 use allowit_core::errors;
 if let Some(entry) = errors::entry("policy_denied") {
-    println!("{}\n{}\n{}", entry.cause, entry.agent_next(), errors::help_url(origin, &entry.code));
+    println!("{}\n{}", entry.cause, entry.agent_next());
 }
+// None unless `origin` is an HTTP or HTTPS origin and nothing else.
+let page = errors::help_url("https://app.allowit.ai", "policy_denied");
 ```
 
 ```ts
@@ -296,8 +298,10 @@ const page = errorHelpPath(code); // "/help/policy_denied"
 ```
 
 A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
-missing or overlong text, a second entry for a code, or an unknown field. Each repository that defines codes or shows
-errors has a test that fails for a code without an entry.
+missing or overlong text, a second entry for a code, or an unknown field. It also refuses text with a control
+character, a line or paragraph separator, a direction override or a broken surrogate, and a title or a cause that names
+its reader ("you"): an owner and an agent read the same entry. Each repository that defines codes or shows errors has a
+test that fails for a code without an entry.
 
 ## Asset units
 

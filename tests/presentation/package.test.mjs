@@ -71,3 +71,41 @@ test('the packed public entry points have usable types and contain no guest sour
     await rm(scratch, { recursive: true, force: true });
   }
 });
+
+test('the generator refuses catalogue text that a Rust host or a terminal cannot show', async () => {
+  const { checkErrorCatalogue } = await import('../../scripts/error-catalogue.mjs');
+  const catalogue = JSON.parse(await readFile(join(root, 'typescript/error-catalogue.json'), 'utf8'));
+  assert.equal(checkErrorCatalogue(catalogue), catalogue);
+  const entry = { code: 'some_code', for: 'owner', title: 'The wallet did not sign', cause: 'A cause.', next: 'A step.' };
+  const one = change => ({ schemaVersion: 1, helpPath: '/help/', entries: [{ ...entry, ...change }] });
+  assert.doesNotThrow(() => checkErrorCatalogue(one({})));
+  for (const change of [
+    { cause: 'A lone surrogate \ud800 that serde_json refuses.' },
+    { cause: 'A C1 control \u0085 here.' },
+    { title: 'Two lines' },
+    { title: 'Reversed ‮ text' },
+    { next: 'A byte order mark ﻿ here.' },
+    { cause: 'Two\nlines.' },
+    { title: 'Your wallet did not sign' },
+    { cause: 'The signature that you sent is invalid.' },
+    { title: 'A title.' },
+    { title: 'x'.repeat(71) },
+    { code: 'Bad-Code' },
+    { for: 'someone' },
+    { extra: 'field' },
+  ]) {
+    assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
+  }
+  assert.throws(() => checkErrorCatalogue({ schemaVersion: 1, helpPath: '/help/', entries: [entry, entry] }), /two entries/);
+});
+
+test('each generated copy keeps the line endings of its source on every checkout', () => {
+  const eol = path => run('git', ['check-attr', 'eol', '--', path]).trim().split(': ').pop();
+  for (const [source, copy] of [
+    ['typescript/error-catalogue.json', 'crates/allowit-core/resources/error-catalogue.json'],
+    ['typescript/canonical-functions.json', 'crates/allowit-core/resources/canonical-functions.json'],
+  ]) {
+    assert.equal(eol(source), 'lf', source);
+    assert.equal(eol(copy), eol(source), copy);
+  }
+});

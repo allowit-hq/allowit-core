@@ -96,15 +96,81 @@ pub fn entry(code: &str) -> Option<&'static Entry> {
     catalogue().iter().find(|entry| entry.code == code)
 }
 
+/// True for an HTTP or HTTPS origin and nothing else: `https://host` or `https://host:port`, with an
+/// optional final slash. The host is a DNS name, an IPv4 address or a bracketed IPv6 address. A path,
+/// a query, a fragment, user information, a space or a control character makes it no origin.
+pub fn is_origin(text: &str) -> bool {
+    let text = text.strip_suffix('/').unwrap_or(text);
+    let Some(authority) = text
+        .strip_prefix("https://")
+        .or_else(|| text.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(bracketed) => {
+            let Some((address, after)) = bracketed.split_once(']') else {
+                return false;
+            };
+            let ipv6 = !address.is_empty()
+                && address.contains(':')
+                && address
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.');
+            if !ipv6 {
+                return false;
+            }
+            match after {
+                "" => (address, None),
+                _ => match after.strip_prefix(':') {
+                    Some(port) => (address, Some(port)),
+                    None => return false,
+                },
+            }
+        }
+        None => {
+            let (host, port) = match authority.split_once(':') {
+                Some((host, port)) => (host, Some(port)),
+                None => (authority, None),
+            };
+            let name = !host.is_empty()
+                && host.len() <= 253
+                && host.split('.').all(|label| {
+                    !label.is_empty()
+                        && label.len() <= 63
+                        && !label.starts_with('-')
+                        && !label.ends_with('-')
+                        && label
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                });
+            if !name {
+                return false;
+            }
+            (host, port)
+        }
+    };
+    let port = port.is_none_or(|port| {
+        (1..=5).contains(&port.len())
+            && port.bytes().all(|b| b.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|n| n > 0)
+    });
+    !host.is_empty() && port
+}
+
 /// The address of the help page of `code` on the app at `origin`, such as
-/// `https://app.example/help/policy_denied`. Text that is no code gives the help index.
-pub fn help_url(origin: &str, code: &str) -> String {
+/// `https://app.example/help/policy_denied`. Text that is no code gives the help index. An `origin`
+/// that [`is_origin`] refuses gives no address.
+pub fn help_url(origin: &str, code: &str) -> Option<String> {
+    if !is_origin(origin) {
+        return None;
+    }
     let origin = origin.trim_end_matches('/');
-    if is_code(code) {
+    Some(if is_code(code) {
         alloc::format!("{origin}{HELP_PATH}{code}")
     } else {
         alloc::format!("{origin}{}", HELP_PATH.trim_end_matches('/'))
-    }
+    })
 }
 
 #[cfg(test)]
@@ -112,11 +178,52 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    /// A character that does not belong in one line of text: a control (C0, DEL, C1), a line or
+    /// paragraph separator, a direction mark or override, or the byte order mark. The generator
+    /// (`scripts/error-catalogue.mjs`) refuses the same characters.
+    fn hidden(c: char) -> bool {
+        c.is_control()
+            || matches!(c, '\u{200e}' | '\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+    }
+
     fn plain(text: &str, limit: usize) -> bool {
         !text.is_empty()
             && text.chars().count() <= limit
             && text == text.trim()
-            && !text.chars().any(char::is_control)
+            && !text.chars().any(hidden)
+    }
+
+    /// True for text that names its reader: an owner and an agent read the same title and cause.
+    fn names_reader(text: &str) -> bool {
+        text.split(|c: char| !c.is_alphanumeric()).any(|word| {
+            ["you", "your", "yours", "yourself"].contains(&word.to_lowercase().as_str())
+        })
+    }
+
+    #[test]
+    fn hidden_characters_and_a_named_reader_are_refused() {
+        for bad in [
+            "a\u{85}b",
+            "a\u{2028}b",
+            "a\u{202e}b",
+            "a\u{feff}b",
+            "a\nb",
+            " a",
+        ] {
+            assert!(!plain(bad, 70), "{bad:?}");
+        }
+        assert!(plain("The wallet did not sign", 70));
+        assert!(names_reader("Your session ended"));
+        assert!(names_reader("A later answer of yours stands"));
+        assert!(!names_reader("The owner's young account"));
+    }
+
+    #[test]
+    fn titles_and_causes_name_no_reader() {
+        for entry in catalogue() {
+            assert!(!names_reader(&entry.title), "{} title", entry.code);
+            assert!(!names_reader(&entry.cause), "{} cause", entry.code);
+        }
     }
 
     #[test]
@@ -180,24 +287,60 @@ mod tests {
     #[test]
     fn a_help_address_carries_only_a_code() {
         assert_eq!(
-            help_url("https://app.example/", "policy_denied"),
-            "https://app.example/help/policy_denied"
+            help_url("https://app.example/", "policy_denied").as_deref(),
+            Some("https://app.example/help/policy_denied")
         );
         // A newer server's code has no entry yet and still has an address.
         assert_eq!(
-            help_url("https://app.example", "new_code_1"),
-            "https://app.example/help/new_code_1"
+            help_url("http://127.0.0.1:5173", "new_code_1").as_deref(),
+            Some("http://127.0.0.1:5173/help/new_code_1")
         );
         for unsafe_text in [
             "", "ab", "../x", "a b", "A_CODE", "x\n", "1abc", "a/b", "é_code",
         ] {
             assert_eq!(
-                help_url("https://app.example", unsafe_text),
-                "https://app.example/help",
+                help_url("https://app.example", unsafe_text).as_deref(),
+                Some("https://app.example/help"),
                 "{unsafe_text:?}"
             );
         }
         assert!(!is_code(&"a".repeat(65)));
-        assert!(is_code(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn a_help_address_needs_an_origin() {
+        for origin in [
+            "https://app.example",
+            "https://app.example/",
+            "http://localhost:8080",
+            "https://[::1]:8443",
+            "https://xn--bcher-kva.example",
+        ] {
+            assert!(is_origin(origin), "{origin}");
+            assert!(help_url(origin, "policy_denied").is_some(), "{origin}");
+        }
+        for origin in [
+            "",
+            "app.example",
+            "ftp://app.example",
+            "https://app.example/?mode=preview",
+            "https://app.example/base",
+            "https://app.example#x",
+            "https://user@app.example",
+            "https://app.example:0",
+            "https://app.example:65536",
+            "https://app.example:",
+            "https://app\n.example",
+            "https://app.example\n",
+            "https://app .example",
+            "https://-app.example",
+            "https://[::1",
+            "https://[]",
+            "https://[zz::1]",
+            "https://",
+        ] {
+            assert!(!is_origin(origin), "{origin:?}");
+            assert_eq!(help_url(origin, "policy_denied"), None, "{origin:?}");
+        }
     }
 }
