@@ -130,6 +130,7 @@ golden!(
     range_loop => "range-loop",
     iterator_break => "iterator-break",
     inferred_number => "inferred-number",
+    pruned_type => "pruned-type",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -1092,6 +1093,32 @@ fn an_open_type_that_passes_through_another_name_is_followed() {
     assert_eq!(flag(read), Some(Keeper::Server));
     let turbofish = read.replace("get_state(ctx", "get_state::<u64>(ctx");
     assert_eq!(flag(&turbofish), Some(Keeper::Chain));
+    let open = read.replace("get_state(ctx", "get_state::<_>(ctx");
+    assert_eq!(flag(&open), Some(Keeper::Server));
+    // `Ok(())` leaves its error type open.
+    let result = source
+        .replace("let other = None;", "let other = Ok(());")
+        .replace("assert_ne!(other, Some(n));", "assert!(other != Err(n));")
+        .replace(
+            "assert_ne!(other, Some(1u64));",
+            "assert!(other != Err(1u64));",
+        );
+    assert_ne!(result, source);
+    source_shape_with_host_calls(&result, REGISTRY).unwrap();
+    assert_eq!(flag(&result), Some(Keeper::Server));
+}
+
+/// A `let` that only leaving code reads leaves too. When it states a type, it can be what
+/// gives the type of a name that a kept statement reads: that name is followed too.
+#[test]
+fn a_type_that_a_removed_let_gives_is_followed() {
+    let source = include_str!("fixtures/derive/pruned-type.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("flag") && !derived.source.contains("let copy"));
+    let typed = source.replace("let n = 1;", "let n: u64 = 1;");
+    assert_eq!(keys(&typed), [("flag".to_owned(), Keeper::Chain, false)]);
 }
 
 /// `const fn` is one declaration, not a statement read with the next one.
@@ -1712,6 +1739,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("range-loop", range_loop::BOTH),
         ("iterator-break", iterator_break::BOTH),
         ("inferred-number", inferred_number::BOTH),
+        ("pruned-type", pruned_type::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN

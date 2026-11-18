@@ -1611,11 +1611,17 @@ pub fn derive(source: &str) -> Result<Derived> {
                     && !SUFFIXES.iter().any(|suffix| text.ends_with(suffix));
                 // A value whose type its uses give: `None`, and a read of a state value, an
                 // owner param or a request arg without a stated type.
+                // A turbofish with `_` leaves the type open too.
                 let open_read = p
                     .allowit_path(i)
                     .is_some_and(|f| matches!(f, "get_state" | "param" | "arg"))
-                    && p.text(i + 3) != "::";
-                number || text == "None" || open_read || p.names(i, names)
+                    && (p.text(i + 3) != "::"
+                        || p.after_generics(i + 4)
+                            .is_none_or(|end| (i + 4..end).any(|at| p.text(at) == "_")));
+                // `Ok(..)` leaves the error type open, and `Err(..)` the value type.
+                let constructor =
+                    matches!(text, "None" | "Ok" | "Err") && p.tokens[i].kind == Kind::Word;
+                number || constructor || open_read || p.names(i, names)
             })
         };
         // The bindings of `execute`: each pattern with the value that it takes.
@@ -1711,6 +1717,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         mutable: &mutable,
         inferred: &inferred,
     };
+    let inferred_names: HashSet<String> = inferred.keys().cloned().collect();
 
     // The statements of `execute` in source order, with the statements of their blocks.
     fn walk(nodes: &[Node], ids: &[usize], out: &mut Vec<usize>) {
@@ -1839,6 +1846,9 @@ pub fn derive(source: &str) -> Result<Derived> {
 
     // A key whose write leaves is the server's, and then every statement that uses the key
     // leaves. That can make another write leave, so the steps repeat until no key moves.
+    // The names whose type a removed statement could have given, beyond the leaving steps:
+    // a `let` that only leaving code read, for one. The steps run again with them.
+    let mut pinned: HashSet<String> = HashSet::new();
     let (callers, readers, cause, gone, changed) = loop {
         // Local functions and constants that make a server call or use state that the server
         // keeps.
@@ -1847,7 +1857,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         let callers = closure(&|from, to, found| p.calls(from, to, found));
         let readers: HashSet<String> = helpers.difference(&callers).cloned().collect();
         let mut cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
-        let mut tainted: HashSet<String> = HashSet::new();
+        let mut tainted: HashSet<String> = pinned.clone();
         loop {
             let before = cause.iter().flatten().count() + tainted.len();
             for id in &order {
@@ -1962,9 +1972,20 @@ pub fn derive(source: &str) -> Result<Derived> {
             moved.extend(written.iter().cloned());
         }
         moved.retain(|key| !p.server_keys.borrow().contains(key));
-        if moved.is_empty() {
+        // Every statement that leaves can give the type of a name that it mentions, also one
+        // that left only because leaving code read it.
+        let typed_by_removed: BTreeSet<String> = (0..count)
+            .filter(|i| left[*i] && (open..last).contains(i))
+            .filter(|i| p.names(*i, &inferred_names))
+            .filter_map(|i| inferred.get(p.word(i)?))
+            .flatten()
+            .filter(|name| !tainted.contains(*name))
+            .cloned()
+            .collect();
+        if moved.is_empty() && typed_by_removed.is_empty() {
             break (callers, readers, cause, gone, changed);
         }
+        pinned.extend(typed_by_removed);
         p.server_keys.borrow_mut().extend(moved);
     };
 
