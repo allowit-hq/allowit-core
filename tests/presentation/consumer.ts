@@ -1,4 +1,5 @@
 import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord } from '@allowit/core';
+import type { Quantity, Settlement, LimitReport, PaidService, PaymentChallenge, PaymentProof, WalletKindInfo } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
@@ -34,4 +35,24 @@ const missing: TransactionRecord = 'missing';
 const unclear: TransactionRecord = { hash: 'h', ledger: 7 };
 // @ts-expect-error A rail always reads the network's record of a transaction.
 const noHistory: OwnerChain = { expiredRecord: async () => null };
+// Payment and wallet-kind values as Core's Rust serializes them.
+const five: Quantity = { units: '50000000', asset: { symbol: 'XYZ', decimals: 7, name: 'XYZ', native: true }, text: '5 XYZ' };
+const settled: Settlement = { height: 12, fee: five, amount: null };
+const limit: LimitReport = { param: 'daily_spending_limit', limit: five, spent: five, remaining: five };
+const paid: PaidService = { resource: 'https://seller.example/r', payTo: 'G', amount: '100000', asset: 'native', settledBy: 'seller', settleWithin: 60 };
+const offer: PaymentChallenge = { resource: paid.resource, network: 'example:testnet', scheme: 'exact', payTo: 'G', amount: five, asset: 'native', terms: { any: 1 } };
+const proof: PaymentProof = { header: 'X-PAYMENT', value: 'v' };
+const native: WalletKindInfo = {
+  id: 'native', title: 'Native', explanation: 'e', recommended: true, pays: 'p', fee: 'f', enforcement: 'offchain', custody: 'keypair',
+  supportedParams: [], paramsUrl: null,
+};
+// @ts-expect-error A settlement states its amount, null when the rail reports none.
+const noAmount: Settlement = { height: 12, fee: five };
+// @ts-expect-error Base units are decimal text, never a JavaScript number.
+const roundedUnits: Quantity = { ...five, units: 50000000 };
+// @ts-expect-error Only the payer or the seller settles a payment.
+const thirdParty: PaidService = { ...paid, settledBy: 'facilitator' };
+// @ts-expect-error A wallet kind is one of the four kinds.
+const otherKind: WalletKindInfo = { ...native, id: 'vault' };
 void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState, twoCauses, expired, chain, missing, unclear, noHistory];
+void [settled, limit, offer, proof, noAmount, roundedUnits, thirdParty, otherKind];

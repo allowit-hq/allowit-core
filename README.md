@@ -335,6 +335,11 @@ The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, 
 types that they use) describe what a server answers about a request that waits for its policy owner and about a
 policy's past decisions. They are types only: a client reads a snapshot with its own checks and verifies its hash.
 
+The payment and wallet-kind types describe the values of the Rust modules in the same JSON form: `AssetDisplay`,
+`Quantity`, `Settlement` and `LimitReport` (`vendor::input_asset`, `vendor::execution`), `PaidService`,
+`PaymentChallenge`, `PaymentProof` and `SettledBy` (`vendor::paid_service`), and `WalletKindId` and `WalletKindInfo`
+(`vendor::kinds`). Base units are decimal text.
+
 Use `pnpm install --frozen-lockfile --ignore-scripts` for its development tools.
 Run `pnpm generate` after changing the registry. `pnpm check` detects stale generated exports.
 `pnpm test` checks a packed public consumer and the Rust/JavaScript integer roundtrip.
