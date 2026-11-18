@@ -63,15 +63,19 @@
 //! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
 //! policy writes a standard figure.
 //!
-//! A number without a type takes its type from the code that uses it, and Rust gives it `i32`
-//! when no code does. A statement that leaves can be that code, so a name bound without a
-//! stated type from such a number, from `None`, from `get_state`, `param` or `arg` without a
-//! stated type, or from another such name is followed like
-//! a value of the server: when a leaving statement mentions it, or a name that one statement
-//! uses together with it, a kept statement that reads those names leaves too. The rule reads
-//! tokens, so every number without a suffix in the value counts, also one that a typed
-//! operand fixes. A stated type (`let n: u64`) or a suffix (`1u64`) keeps the statements on
-//! chain.
+//! A value without a stated type can take its type from the code that uses it, and Rust gives a
+//! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
+//! part would compute with another type. The rule names the forms of a value whose type is
+//! fixed: a literal with a fixed type (a text, a bool, a number with a suffix), a field of the
+//! request, an owner param read whole, a call of a library function with a fixed return type
+//! or of an integer type's `from` or `try_from` (with at most `?` after it), a range with a
+//! side of a fixed type, and a name of a fixed type (with at most `.clone()` or `.as_str()`).
+//! A name bound without a stated type (by `let`, `for`, `if let`, `while let` or a `match`
+//! arm) from any other form is followed like a value of the server: when a removed statement
+//! mentions it, or a name that one statement uses together with it, a kept statement that
+//! reads those names leaves too. A form that the rule does not know counts as open, so it
+//! moves more to the server, never less. A stated type (`let n: u64 = ...`) keeps the
+//! statements on chain.
 //!
 //! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
 //! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
@@ -1028,6 +1032,32 @@ impl<'a> Parsed<'a> {
             })
     }
 
+    /// The text of the token before token `at`, past the attributes (`#[...]`) that stand
+    /// right before it, or "" at the start of the file.
+    fn before_attributes(&self, at: usize) -> &'a str {
+        let mut i = at;
+        while i > 0 && self.text(i - 1) == "]" {
+            let mut depth = 0i64;
+            let mut j = i - 1;
+            loop {
+                match self.text(j) {
+                    "]" => depth += 1,
+                    "[" => depth -= 1,
+                    _ => {}
+                }
+                if depth == 0 || j == 0 {
+                    break;
+                }
+                j -= 1;
+            }
+            if depth != 0 || j == 0 || self.text(j - 1) != "#" {
+                break;
+            }
+            i = j - 1;
+        }
+        if i == 0 { "" } else { self.text(i - 1) }
+    }
+
     fn mentions(&self, from: usize, to: usize, wanted: &HashSet<String>) -> bool {
         !wanted.is_empty() && (from..to).any(|i| self.names(i, wanted))
     }
@@ -1590,38 +1620,103 @@ pub fn derive(source: &str) -> Result<Derived> {
             mutable.extend(p.bound(i + 1, pattern));
         }
     }
-    // A number without a type takes its type from the code that uses it, and Rust gives it
-    // `i32` when no code does. A statement that leaves can be the code that gives the type, so
-    // the on-chain part would compute with another type. Rust gives no other type by itself:
-    // any other open type that only a leaving statement gave fails to compile on chain. The
-    // names whose value can hold an open type are found here: those bound with no stated type
-    // from a number without a suffix, from `None`, from a read of state, a param or an arg
-    // without a stated type, or from another such name. The source gate admits no closure and
-    // no other generic value. Names that one statement uses together can share a type,
-    // so they form one group, and a leaving statement that mentions one marks the group.
+    // A value without a stated type can take its type from the code that uses it, and a
+    // statement that leaves can be that code. The names that can hold such a value are found
+    // here: those bound with no stated type from a value of a form that `fixed` does not
+    // know. Names that one statement uses together can share a type, so they form one group,
+    // and a removed statement that mentions one marks the group.
     let inferred = {
         const SUFFIXES: &[&str] = &[
             "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
         ];
-        let open = |from: usize, to: usize, names: &HashSet<String>| {
-            (from..to).any(|i| {
-                let text = p.text(i);
-                let number = p.tokens[i].kind == Kind::Literal
-                    && text.starts_with(|c: char| c.is_ascii_digit())
-                    && !SUFFIXES.iter().any(|suffix| text.ends_with(suffix));
-                // A value whose type its uses give: `None`, and a read of a state value, an
-                // owner param or a request arg without a stated type.
-                // A turbofish with `_` leaves the type open too.
-                let open_read = p
-                    .allowit_path(i)
-                    .is_some_and(|f| matches!(f, "get_state" | "param" | "arg"))
-                    && (p.text(i + 3) != "::"
-                        || p.after_generics(i + 4)
-                            .is_none_or(|end| (i + 4..end).any(|at| p.text(at) == "_")));
-                // `Ok(..)` leaves the error type open, and `Err(..)` the value type.
-                let constructor =
-                    matches!(text, "None" | "Ok" | "Err") && p.tokens[i].kind == Kind::Word;
-                number || constructor || open_read || p.names(i, names)
+        // Whether the tokens `from..to` are one value of a form whose type is fixed, whatever
+        // code uses it. Every other form counts as open: the rule names the fixed forms, so a
+        // form that it does not know moves more to the server, never less.
+        let fixed = |from: usize, to: usize, known: &HashSet<String>| -> bool {
+            let mut i = from;
+            // `&value` and `&mut value` have the type of the value.
+            while i < to && p.text(i) == "&" {
+                i += 1;
+            }
+            if i < to && p.text(i) == "mut" {
+                i += 1;
+            }
+            if i >= to {
+                return false;
+            }
+            let one = |at: usize| {
+                let text = p.text(at);
+                match p.tokens[at].kind {
+                    Kind::Literal => {
+                        !text.starts_with(|c: char| c.is_ascii_digit())
+                            || SUFFIXES.iter().any(|suffix| text.ends_with(suffix))
+                    }
+                    Kind::Word => {
+                        matches!(text, "true" | "false")
+                            || p.word(at).is_some_and(|name| known.contains(name))
+                    }
+                    _ => false,
+                }
+            };
+            // A value read whole, with at most `.clone()` or `.as_str()` after it.
+            let plain_end = |mut at: usize| {
+                while at + 3 < to + 1
+                    && p.text(at) == "."
+                    && matches!(p.text(at + 1), "clone" | "as_str")
+                    && p.text(at + 2) == "("
+                    && p.text(at + 3) == ")"
+                {
+                    at += 4;
+                }
+                at == to
+            };
+            // A range takes the type of a side whose type is fixed. A side is one token: a
+            // number, or a value that `one` takes.
+            if let Some(dots) = p.find(i, to, &["..", "..="]) {
+                let number = |at: usize| {
+                    p.tokens[at].kind == Kind::Literal
+                        && p.text(at).starts_with(|c: char| c.is_ascii_digit())
+                };
+                let side = |(a, b): (usize, usize)| b == a + 1 && (number(a) || one(a));
+                let typed = |(a, b): (usize, usize)| b == a + 1 && one(a);
+                let (left, right) = ((i, dots), (dots + 1, to));
+                return side(left) && side(right) && (typed(left) || typed(right));
+            }
+            if one(i) && plain_end(i + 1) {
+                return true;
+            }
+            // A field of the request.
+            if p.text(i) == "ctx" && p.text(i + 1) == "." && p.text(i + 2) == "request" {
+                let mut at = i + 3;
+                while p.text(at) == "." && p.word(at + 1).is_some() && p.text(at + 2) != "(" {
+                    at += 2;
+                }
+                return plain_end(at);
+            }
+            // An owner param read whole: an `AllowitValue`.
+            if p.text(i) == "ctx" && p.text(i + 1) == "." && p.text(i + 2) == "params" {
+                return p.text(i + 3) == "[" && p.close(i + 3).is_some_and(|close| close + 1 == to);
+            }
+            // A call of a library function with a fixed return type, or of `from` or
+            // `try_from` of an integer type, with at most `?` after it.
+            let call = if let Some(function) = p.allowit_path(i) {
+                let generic = matches!(function, "get_state" | "param" | "arg");
+                let open = if p.text(i + 3) == "::" && p.text(i + 4) == "<" {
+                    p.after_generics(i + 4)
+                        .filter(|end| !(i + 4..*end).any(|at| p.text(at) == "_"))
+                } else {
+                    (!generic).then_some(i + 3)
+                };
+                open.filter(|at| p.text(*at) == "(")
+            } else {
+                (SUFFIXES.contains(&p.text(i))
+                    && p.text(i + 1) == "::"
+                    && matches!(p.text(i + 2), "from" | "try_from"))
+                .then_some(i + 3)
+                .filter(|at| p.text(*at) == "(")
+            };
+            call.and_then(|open| p.close(open)).is_some_and(|close| {
+                close + 1 == to || (close + 2 == to && p.text(close + 1) == "?")
             })
         };
         // The bindings of `execute`: each pattern with the value that it takes.
@@ -1664,12 +1759,33 @@ pub fn derive(source: &str) -> Result<Derived> {
                 _ => {}
             }
         }
+        // Start from every name as fixed, and take out each name that a binding gives an open
+        // value, until no name moves: a name bound twice is open when one binding is.
+        let mut known: HashSet<String> = named
+            .iter()
+            .filter_map(|id| p.nodes[*id].name.clone())
+            .chain(["ctx".to_owned()])
+            .chain(
+                bindings
+                    .iter()
+                    .flat_map(|((from, to), _)| p.bound(*from, *to)),
+            )
+            .chain(
+                all.iter()
+                    .filter(|id| in_execute(**id) && p.nodes[**id].shape == Shape::Let)
+                    .flat_map(|id| p.nodes[*id].names.iter().cloned()),
+            )
+            .collect();
         let mut names: HashSet<String> = HashSet::new();
         loop {
             let before = names.len();
             for ((from, to), value) in &bindings {
-                if value.is_none_or(|(start, end)| open(start, end, &names)) {
-                    names.extend(p.bound(*from, *to));
+                if value.is_none_or(|(start, end)| !fixed(start, end, &known)) {
+                    let bound = p.bound(*from, *to);
+                    for name in &bound {
+                        known.remove(name);
+                    }
+                    names.extend(bound);
                 }
             }
             if names.len() == before {
@@ -2024,7 +2140,9 @@ pub fn derive(source: &str) -> Result<Derived> {
                         "fn" => p.text(at - 1) != "const",
                         "use" => true,
                         // A `const` parameter of a generic function is no item.
-                        "const" => p.text(at + 1) != "{" && !matches!(p.text(at - 1), "<" | ","),
+                        "const" => {
+                            p.text(at + 1) != "{" && !matches!(p.before_attributes(at), "<" | ",")
+                        }
                         _ => false,
                     };
                     if declaration && p.tokens[at].kind == Kind::Word {
@@ -2066,7 +2184,7 @@ pub fn derive(source: &str) -> Result<Derived> {
             (0..count)
                 .filter(|i| matches!(p.text(*i), "fn" | "const") && p.text(i + 1) != "fn")
                 // A `const` parameter of a generic function is no item.
-                .filter(|i| !matches!(p.text(i.wrapping_sub(1)), "<" | ","))
+                .filter(|i| !matches!(p.before_attributes(*i), "<" | ","))
                 .filter_map(|i| p.word(i + 1))
                 .filter(|name| *name != "_")
                 .find(|name| !declared.insert(name))

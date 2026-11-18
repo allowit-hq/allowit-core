@@ -1030,10 +1030,11 @@ fn a_number_whose_type_a_leaving_statement_gives_is_followed() {
     for (from, to, keeper) in [
         // A stated type, or a suffix, fixes the type on both sides.
         ("let n = ", "let n: u64 = ", Keeper::Chain),
+        // A branch is no form whose type the rule knows: it counts as open.
         (
             "if ctx.request.amount > 0 { 1 } else { 2 }",
             "if ctx.request.amount > 0i128 { 1u64 } else { 2u64 }",
-            Keeper::Chain,
+            Keeper::Server,
         ),
         // A value of the request has its own type.
         (
@@ -1095,6 +1096,34 @@ fn an_open_type_that_passes_through_another_name_is_followed() {
     assert_eq!(flag(&turbofish), Some(Keeper::Chain));
     let open = read.replace("get_state(ctx", "get_state::<_>(ctx");
     assert_eq!(flag(&open), Some(Keeper::Server));
+    // Any form that the rule does not know counts as open: a raw spelling, a call of a local
+    // function, an owner param read with `.ok()`.
+    for (from, to) in [
+        ("let other = None;", "let other = r#None;"),
+        ("let other = None;", "let other = empty();"),
+    ] {
+        let other = source.replace(from, to).replace(
+            "pub fn execute",
+            "fn empty<Result>() -> Option<Result> {\n    None\n}\npub fn execute",
+        );
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        assert_eq!(flag(&other), Some(Keeper::Server), "{to}");
+    }
+    let param = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let n = ctx.params[\"threshold\"].ok();\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert_eq!(n, 1u64);\n    }\n    assert_eq!(Some(n), Some(1));\n    allowit::set_state(ctx, \"flag\", true)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(param, REGISTRY).unwrap();
+    let derived = derive(param).unwrap();
+    assert!(
+        !derived.source.contains("assert_eq!(Some(n)"),
+        "{}",
+        derived.source
+    );
+    let typed_param = param.replace("let n = ", "let n: u64 = ");
+    assert!(
+        derive(&typed_param)
+            .unwrap()
+            .source
+            .contains("assert_eq!(Some(n)")
+    );
     // `Ok(())` leaves its error type open.
     let result = source
         .replace("let other = None;", "let other = Ok(());")
@@ -1139,6 +1168,10 @@ fn a_const_fn_is_one_declaration() {
 fn const_parameters_are_no_items() {
     let source = "use allowit::prelude::*;\nfn first<const N: u64>() -> u64 {\n    N\n}\nfn second<const N: u64>() -> u64 {\n    N\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}\n";
     derive(source).unwrap();
+    // Also with an attribute before the parameter.
+    let attributed = source.replace("<const N", "<#[allow(dead_code)] const N");
+    assert_ne!(attributed, source);
+    derive(&attributed).unwrap();
 }
 
 /// A check outside the block of a helper that left names another item of the helper's name.
