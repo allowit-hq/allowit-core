@@ -128,6 +128,7 @@ golden!(
     statement_after_branch => "statement-after-branch",
     loop_in_condition => "loop-in-condition",
     range_loop => "range-loop",
+    iterator_break => "iterator-break",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -945,6 +946,56 @@ fn a_declaration_that_the_parser_reads_with_the_statement_before_is_refused() {
     assert_eq!(derive(&local).unwrap().source, local);
 }
 
+/// The iterated value of a `for` runs before the loop: a `break` there ends the enclosing loop.
+/// When that `break` depends on the server, the enclosing loop leaves with its write.
+#[test]
+fn an_exit_in_the_iterated_value_of_a_for_ends_the_enclosing_loop() {
+    let source = include_str!("fixtures/derive/iterator-break.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("seen".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(source).unwrap().source.contains("loop"));
+    // An exit there that needs no server stays, with the loop and its write.
+    let local = source.replace(
+        "allowit::new_decision_context(ctx, None).is_ok()",
+        "ctx.request.amount > 5",
+    );
+    assert_ne!(local, source);
+    assert_eq!(keys(&local), [("seen".to_owned(), Keeper::Chain, false)]);
+    assert_eq!(derive(&local).unwrap().source, local);
+}
+
+/// A `const _` that uses a key of the server or calls the server leaves. No statement that
+/// stays then uses that key.
+#[test]
+fn an_anonymous_constant_that_uses_a_server_key_leaves() {
+    let source = "use allowit::prelude::*;\nconst _: () = {\n    fn unused(ctx: &AllowitContext) -> bool {\n        let flag: Option<bool> = allowit::get_state(ctx, \"flag\").unwrap_or(None);\n        flag.unwrap_or(false)\n    }\n};\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let flag: bool = allowit::get_state(ctx, \"flag\")?.unwrap_or(false);\n    if flag {\n        return Err(AllowitError::DestinationNotAllowed);\n    }\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        allowit::set_state(ctx, \"flag\", true)?;\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("flag") && !derived.source.contains("const _"));
+    // A `const _` that uses no server value stays.
+    let local = source.replace("allowit::get_state(ctx, \"flag\").unwrap_or(None)", "None");
+    assert!(derive(&local).unwrap().source.contains("const _"));
+}
+
+/// A local function is seen only in the block that declares it. When it leaves, a statement
+/// outside that block that names another item of the same name, such as `Some`, stays.
+#[test]
+fn a_helper_is_named_only_in_the_block_that_declares_it() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    {\n        fn Some(ctx: &AllowitContext) -> allowit::Result {\n            allowit::set_state(ctx, \"flag\", true)\n        }\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            Some(ctx)?;\n        }\n    }\n    let seen = Some(true);\n    allowit::set_state(ctx, \"keep\", seen.is_some())?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("flag".to_owned(), Keeper::Server, false),
+            ("keep".to_owned(), Keeper::Chain, false)
+        ]
+    );
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("let seen = Some(true);"));
+    assert!(!derived.source.contains("fn Some") && !derived.source.contains("\"flag\""));
+}
+
 /// `const _` binds no name: two of them are no two items with one name.
 #[test]
 fn anonymous_constants_are_no_duplicate_names() {
@@ -1520,6 +1571,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("statement-after-branch", statement_after_branch::BOTH),
         ("loop-in-condition", loop_in_condition::BOTH),
         ("range-loop", range_loop::BOTH),
+        ("iterator-break", iterator_break::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN

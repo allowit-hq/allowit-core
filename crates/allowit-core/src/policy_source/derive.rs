@@ -475,6 +475,9 @@ struct Parsed<'a> {
     nodes: Vec<Node>,
     /// The state keys that the server keeps. [`derive`] finds them step by step.
     server_keys: RefCell<HashSet<String>>,
+    /// The tokens where each local function or constant is seen: the block that declares it,
+    /// or the whole file.
+    item_scopes: RefCell<HashMap<String, (usize, usize)>>,
 }
 
 /// One call of `allowit::get_state` or `allowit::set_state`.
@@ -992,6 +995,19 @@ impl<'a> Parsed<'a> {
         })
     }
 
+    /// Whether token `i` names one of the local functions or constants in `wanted` where that
+    /// item is seen: outside the block that declares it, the name is another item, such as the
+    /// `Some` of the language.
+    fn names_item(&self, i: usize, wanted: &HashSet<String>) -> bool {
+        self.names(i, wanted)
+            && self.word(i).is_some_and(|name| {
+                self.item_scopes
+                    .borrow()
+                    .get(name)
+                    .is_none_or(|(from, to)| (*from..=*to).contains(&i))
+            })
+    }
+
     fn mentions(&self, from: usize, to: usize, wanted: &HashSet<String>) -> bool {
         !wanted.is_empty() && (from..to).any(|i| self.names(i, wanted))
     }
@@ -1160,7 +1176,8 @@ impl<'a> Parsed<'a> {
     }
 
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {
-        (from..to).any(|i| self.server_at(i) || self.server_text_at(i) || self.names(i, helpers))
+        (from..to)
+            .any(|i| self.server_at(i) || self.server_text_at(i) || self.names_item(i, helpers))
     }
 
     /// Whether the tokens make a server call other than a use of state that the server keeps.
@@ -1169,7 +1186,7 @@ impl<'a> Parsed<'a> {
         (from..to).any(|i| {
             (self.server_at(i) && !self.state_at(i))
                 || self.server_text_at(i)
-                || self.names(i, callers)
+                || self.names_item(i, callers)
         })
     }
 
@@ -1233,19 +1250,20 @@ impl<'a> Parsed<'a> {
     /// Whether the tokens hold a `break` or `continue` of a loop that encloses them.
     fn breaks(&self, from: usize, to: usize) -> bool {
         let mut loops: Vec<bool> = vec![];
-        let (mut pending, mut depth, mut pending_depth) = (false, 0i64, 0i64);
+        // The `{` of each loop body. A block in the header of a loop, such as the iterated
+        // value of `for _ in { ... } {}`, runs outside the loop: an exit there ends an
+        // enclosing loop.
+        let mut bodies: HashSet<usize> = HashSet::new();
         for i in self.steps(from, to) {
             match self.text(i) {
                 "loop" | "while" | "for" if self.tokens[i].kind == Kind::Word => {
-                    pending = true;
-                    pending_depth = depth;
+                    let body = match self.text(i) {
+                        "loop" => Some(i + 1).filter(|open| self.text(*open) == "{"),
+                        _ => self.body_after(i + 1, to),
+                    };
+                    bodies.extend(body);
                 }
-                "(" | "[" => depth += 1,
-                ")" | "]" => depth -= 1,
-                "{" => {
-                    loops.push(pending && depth == pending_depth);
-                    pending = false;
-                }
+                "{" => loops.push(bodies.contains(&i)),
                 "}" => {
                     loops.pop();
                 }
@@ -1267,7 +1285,7 @@ impl<'a> Parsed<'a> {
     fn reads_only(&self, from: usize, to: usize, functions: &HashSet<String>) -> bool {
         (from..to).all(|i| {
             let text = self.text(i);
-            if matches!(text, "?" | "!" | "=" | "{" | "}") || self.names(i, functions) {
+            if matches!(text, "?" | "!" | "=" | "{" | "}") || self.names_item(i, functions) {
                 return false;
             }
             let Some(name) = self.word(i) else {
@@ -1357,6 +1375,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         tokens: lex(source)?,
         nodes: vec![],
         server_keys: RefCell::default(),
+        item_scopes: RefCell::default(),
     };
     let count = parsed.tokens.len();
     // The file is a list of items. `execute` is the one function that is split.
@@ -1389,6 +1408,29 @@ pub fn derive(source: &str) -> Result<Derived> {
         .copied()
         .filter(|id| *id != execute && p.nodes[*id].name.is_some())
         .collect();
+    // Where each of them is seen: the block that declares it, or the whole file.
+    {
+        let mut inside: Vec<Option<usize>> = vec![None; count];
+        let mut blocks: Vec<usize> = vec![];
+        for (i, block) in inside.iter_mut().enumerate() {
+            *block = blocks.last().copied();
+            match p.text(i) {
+                "{" => blocks.push(i),
+                "}" => {
+                    blocks.pop();
+                }
+                _ => {}
+            }
+        }
+        let mut scopes = p.item_scopes.borrow_mut();
+        for id in &named {
+            let block = inside[p.nodes[*id].first];
+            let scope = block.map_or((0, count), |open| (open, p.close(open).unwrap_or(count)));
+            if let Some(name) = &p.nodes[*id].name {
+                scopes.entry(name.clone()).or_insert(scope);
+            }
+        }
+    }
     let closure = |start: &dyn Fn(usize, usize, &HashSet<String>) -> bool| {
         let mut found: HashSet<String> = HashSet::new();
         loop {
@@ -1692,11 +1734,22 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
         }
 
-        // Items of the file that make a server call leave.
+        // Items of the file that make a server call leave. A `const _` has no name that
+        // another statement could read, so it leaves by its own tokens.
         let mut gone: Vec<bool> = cause.iter().map(Option::is_some).collect();
         for id in &named {
             if helpers.contains(p.nodes[*id].name.as_deref().unwrap_or_default()) {
                 gone[*id] = true;
+            }
+        }
+        for id in &all {
+            let node = &p.nodes[*id];
+            let anonymous = matches!(node.shape, Shape::Item | Shape::Whole)
+                && node.name.is_none()
+                && p.text(node.key) == "const";
+            if anonymous && !gone[*id] {
+                let (from, to) = range(*id);
+                gone[*id] = p.server(from, to, &helpers);
             }
         }
         let changed = gone.iter().any(|left| *left);
@@ -1726,7 +1779,10 @@ pub fn derive(source: &str) -> Result<Derived> {
                 }
                 let (from, to) = range(*id);
                 let outside = |i: &usize| *i < from || *i >= to;
-                let read = |i: &usize| p.names(*i, &wanted);
+                let read = |i: &usize| match node.shape {
+                    Shape::Item => p.names_item(*i, &wanted),
+                    _ => p.names(*i, &wanted),
+                };
                 let kept = (0..count).filter(outside).any(|i| !left[i] && read(&i));
                 let dropped = (0..count).filter(outside).any(|i| left[i] && read(&i));
                 if !kept && dropped {
@@ -1942,7 +1998,14 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     if edits.is_empty() && !changed {
-        return finish(source, source.to_owned(), vec![], vec![], &uses);
+        return finish(
+            source,
+            source.to_owned(),
+            vec![],
+            vec![],
+            &uses,
+            &HashSet::new(),
+        );
     }
 
     edits.sort_by_key(|edit| edit.start);
@@ -2108,7 +2171,8 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     server_only.sort_by_key(|check| check.line);
-    finish(source, derived, left, server_only, &uses)
+    let server_keys = p.server_keys.borrow().clone();
+    finish(source, derived, left, server_only, &uses, &server_keys)
 }
 
 /// Check the derived policy, list the checks that it keeps and name the keeper of each state
@@ -2119,6 +2183,7 @@ fn finish(
     left: Vec<(u32, u32)>,
     server_only: Vec<ServerOnly>,
     uses: &[StateUse],
+    server_keys: &HashSet<String>,
 ) -> Result<Derived> {
     let defect = |what: &str| {
         format!(
@@ -2130,6 +2195,7 @@ fn finish(
         tokens: lex(&source)?,
         nodes: vec![],
         server_keys: RefCell::default(),
+        item_scopes: RefCell::default(),
     };
     let count = parsed.tokens.len();
     if source != original {
@@ -2152,6 +2218,12 @@ fn finish(
         .filter(|key| standard(key))
         .collect();
     let chain: BTreeSet<&str> = stays.iter().map(|state| state.key.as_str()).collect();
+    // A key that the server keeps is used by no statement that stays.
+    if let Some(key) = chain.iter().find(|key| server_keys.contains(**key)) {
+        return Err(defect(&format!(
+            "the derived part still uses the state key {key:?}, which the server keeps"
+        )));
+    }
     let state = uses
         .iter()
         .map(|state| state.key.as_str())
