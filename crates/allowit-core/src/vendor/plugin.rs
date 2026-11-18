@@ -158,8 +158,8 @@ pub trait RailPlugin: Sync {
     }
 
     /// The "build custom wallet" hook: the build of a Custom wallet's code from the exact policy
-    /// source, the hash of that code and the signature scheme of the build statements. A rail
-    /// without it declares [`Feature::CustomBuild`] skipped.
+    /// source and the hash of that code. A rail without it declares [`Feature::CustomBuild`]
+    /// skipped.
     fn custom_wallet_build(&self) -> Option<&'static dyn CustomWalletBuild> {
         None
     }
@@ -377,7 +377,7 @@ pub enum Feature {
     Verify,
     /// The paired host and native placements of a policy.
     PairedExport,
-    /// The build of a Custom wallet's code from the policy source, with its signed statements.
+    /// The build of a Custom wallet's code from the policy source.
     CustomBuild,
 }
 

@@ -134,6 +134,20 @@ pub trait RuntimeProvider {
         fee: u64,
         now: u64,
     ) -> Result<crate::vendor::runtime::OwnerPacket>;
+    /// Upload the wallet code `wasm` of an installation from the server's own account, which
+    /// pays the network's fee and rent. An upload gives no authority: the owner's creation
+    /// names the code by its hash. Returns the receipt of the upload, or `None` when the network
+    /// holds the code already. A rail without uploads refuses.
+    fn upload_code(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        wasm: &[u8],
+        poll: crate::vendor::runtime::Poll,
+        now: u64,
+    ) -> Result<Option<crate::vendor::runtime::Receipt>> {
+        let _ = (i, wasm, poll, now);
+        Err(Error::unsupported("This rail does not upload wallet code"))
+    }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
     /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
     /// A rail refuses an update whose expected revision is not the installed one.
@@ -251,8 +265,8 @@ pub trait OwnerProvider {
             "This rail does not verify an installation on the ledger",
         ))
     }
-    /// The owner's view of the build of a Custom policy on the backend: the server
-    /// presignature, the build ticket and the build that the backend holds. A rail without the
+    /// The owner's view of the build of a Custom policy on the backend: the admitted source and
+    /// the code hash of the build that the server made from it and uploaded. A rail without the
     /// build hook declares `Feature::CustomBuild` skipped.
     fn custom_build(
         &self,
