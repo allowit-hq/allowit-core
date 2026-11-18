@@ -174,6 +174,23 @@ pub trait RuntimeProvider {
         let _ = (i, wasm, poll, now);
         Err(Error::unsupported("This rail does not upload wallet code"))
     }
+    /// As `upload_code`, with the network fee bounded by `max_fee`, in the rail's native units:
+    /// an upload whose fee would exceed it is refused before anything is signed. The server pays
+    /// an upload, so it bounds what one upload can cost. A rail without the bound uploads
+    /// nothing.
+    fn upload_code_within(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        wasm: &[u8],
+        max_fee: u64,
+        poll: crate::vendor::runtime::Poll,
+        now: u64,
+    ) -> Result<Option<crate::vendor::runtime::Receipt>> {
+        let _ = (i, wasm, max_fee, poll, now);
+        Err(Error::unsupported(
+            "This rail does not upload wallet code within a fee ceiling",
+        ))
+    }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
     /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
     /// A rail refuses an update whose expected revision is not the installed one.
