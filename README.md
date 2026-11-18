@@ -338,7 +338,8 @@ policy's past decisions. They are types only: a client reads a snapshot with its
 The payment and wallet-kind types describe the values of the Rust modules in the same JSON form: `AssetDisplay`,
 `Quantity`, `Settlement` and `LimitReport` (`vendor::input_asset`, `vendor::execution`), `PaidService`,
 `PaymentChallenge`, `PaymentProof` and `SettledBy` (`vendor::paid_service`), and `WalletKindId` and `WalletKindInfo`
-(`vendor::kinds`). Base units are decimal text.
+(`vendor::kinds`). `PaymentLimit`, `WalletLimits` and `OperationReports` describe the reports at the top level of a
+status, receipt, limits or wallet document. Base units are decimal text.
 
 Use `pnpm install --frozen-lockfile --ignore-scripts` for its development tools.
 Run `pnpm generate` after changing the registry. `pnpm check` detects stale generated exports.
@@ -402,7 +403,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.0", version = "0.12", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.1", version = "0.12", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
