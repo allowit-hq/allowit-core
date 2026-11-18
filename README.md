@@ -87,57 +87,33 @@ A rail without the hook declares `Feature::PaidService` skipped.
 ## Custom wallet build
 
 `allowit_core::vendor::custom_build` (feature `vendor`) defines the build of a Custom wallet. The wallet runs
-code that is built from the exact policy source. The server does not build the code and does not vouch for
-a build. Two signed text statements bind a build to its source.
+code that is built from the exact policy source. The owner's policy signature binds that source, and the
+wallet stores its hash. The server builds the code from the admitted source and uploads it with
+`RuntimeProvider::upload_code`, from its own account; an upload gives no authority. The owner's one
+creation signature (`OwnerAction::Create`) names the code by its hash, so it covers the build. A client
+that can build compares its own build with that hash before the owner signs. The build is reproducible, so
+anyone can compare the code on the network with the source.
 
-The server presignature states that the server admitted one policy source on one network:
-
-```text
-Allowit custom policy presignature v1
-network: <CAIP-2 network>
-policy: <policy id>
-source-sha256: <SHA-256 of the exact policy source>
-server: <server identity>
-```
-
-The owner attestation states that the owner built the wallet code with `code-sha256` from that source. It
-repeats the presignature fields and carries the server's signature, so it verifies without the server:
-
-```text
-Allowit custom build attestation v1
-network: <CAIP-2 network>
-policy: <policy id>
-source-sha256: <SHA-256 of the exact policy source>
-code-sha256: <identity of the wallet code>
-server: <server identity>
-presignature: <the server's signature, hexadecimal>
-owner: <owner identity>
-```
-
-The first line of each statement is its domain and version. Lines end with one line feed and the last line
-has none. A value is 1 to 128 printable ASCII characters without a space. Hashes and signatures are
-lowercase hexadecimal text.
-
-A rail implements `CustomWalletBuild`: `build` compiles the wallet code from the source, `code_hash` gives
-the identity of code as the network records it, and `sign_message` and `verify_message` are the rail's
-wallet text-message signature. A local key and a browser wallet produce the same signature.
-
-`presign` and `attest` sign the statements. `verify_presignature` passes only when the trusted server key
-signed exactly the verifier's own network, policy id and source. `verify_attestation` also requires the
-owner's signature over that presignature and the code hash. `check_code_hash` compares the attested hash
-with a hash that the verifier read itself. The `code` module lists the typed refusal codes:
-`custom_policy_unknown`, `custom_presignature_mismatch`, `custom_attestation_invalid`,
-`custom_code_hash_mismatch`, `custom_toolchain_missing`, `custom_build_failed`, `custom_build_missing` and
-`custom_build_attested`.
+A rail implements `CustomWalletBuild`: `build` compiles the wallet code from the source, and `code_hash`
+gives the identity of code as the network records it. `check_code_hash` refuses code whose hash differs
+from the client's own build. The `code` module lists the typed refusal codes: `custom_policy_unknown`,
+`custom_code_hash_mismatch`, `custom_toolchain_missing`, `custom_build_failed` and `custom_build_missing`.
 
 A rail without the hook declares `Feature::CustomBuild` skipped.
+
+### Contract wallet deployment
+
+`OwnerAction::Create` creates a contract wallet and funds it in one owner transaction: `units` of the
+installed asset, and `fee_asset_units` of the network's fee asset when the installed asset is another
+asset; the wallet repays the network fee of each operation from it. `owner::Deploy` carries the same two
+amounts as decimal text. The server's account sends each agent operation and pays its fee, and the wallet
+repays it, so the deployment needs no other owner signature.
 
 ### Owner updates and verification
 
 An owner changes installed params on an active wallet with the owner action `ParamsUpdate`.
 `RuntimeProvider::prepare_params_update` prepares its owner step, which then takes the path of every
-owner packet. The call is a separate provider method with a default, so `OwnerAction` keeps its
-variants and no consumer changes. `ParamsUpdate` holds the policy id, the expected configuration revision and each changed param with its
+owner packet. The call is a separate provider method with a default. `ParamsUpdate` holds the policy id, the expected configuration revision and each changed param with its
 complete typed value. `ParamsUpdate::apply` changes installed params only: it adds no param, removes none
 and keeps the type of each value. The rail writes the next configuration revision and keeps the policy
 source, the recorded usage and the request nonce. `OwnerRuntime::with_params` returns the installation
@@ -392,7 +368,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.8.0", version = "0.8", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.9.0", version = "0.9", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

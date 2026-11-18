@@ -393,13 +393,19 @@ pub struct ObservedAuthorization {
     pub receipt: Receipt,
     pub status: Status,
 }
+/// An owner action on an installation. A rail prepares each as one owner transaction with
+/// `RuntimeProvider::prepare_owner`.
 #[derive(Clone, Debug)]
 pub enum OwnerAction {
-    Upload {
-        wasm: Vec<u8>,
-    },
+    /// Create the wallet with the code `wasm` and fund it in the same transaction: `units` of
+    /// the installed asset, and `fee_asset_units` of the network's fee asset, from which the
+    /// wallet repays the network fee of its operations, when the installed asset is another
+    /// asset. The network holds the code already: the server uploads it with
+    /// `RuntimeProvider::upload_code`, and an upload gives no authority.
     Create {
         wasm: Vec<u8>,
+        units: i128,
+        fee_asset_units: i128,
     },
     Fund {
         units: i128,

@@ -13,13 +13,23 @@ pub struct Context<'a> {
     pub signer: &'a dyn Signer,
     pub clock: &'a dyn Fn() -> Result<u64>,
 }
+/// The deployment of a contract wallet: one owner transaction creates the wallet with the
+/// reviewed code and funds it.
 pub struct Deploy<'a> {
     pub draft: &'a [u8],
     pub agent: &'a str,
     pub server: &'a str,
+    /// The reviewed code. The owner's client compares its hash with the code that the creation
+    /// names.
     pub executable: &'a [u8],
     pub request_id: &'a str,
     pub fee_limit: &'a str,
+    /// The amount of the installed asset that the creation moves into the wallet, as decimal
+    /// text. `None` moves none.
+    pub amount: Option<&'a str>,
+    /// The amount of the network's fee asset that the creation moves into the wallet for the
+    /// network fees that it repays, as decimal text, when the installed asset is another asset.
+    pub fee_asset_amount: Option<&'a str>,
 }
 pub struct Activate<'a> {
     pub document: &'a [u8],
