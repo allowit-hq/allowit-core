@@ -15,7 +15,7 @@ const unknown: PolicyValue = { Number: '1' };
 const cause: OwnerReviewCause = { decision: { question: { id: 'purchase', text: 'Is it research?', denyBelow: 3000, allowAbove: 8000 }, score: 1200, provider: 'p', model: 'm' } };
 const past: PastDecision = {
   id: 'd1', kind: 'decided', state: 'denied', decidedBy: 'score', answer: null, decidedAt: 1, executeBy: null, createdAt: 1,
-  requestId: 'r1', request: { operation: 'transfer', amount: '1000000', asset: 'native', assetSymbol: 'XLM', assetDecimals: 7, destination: 'G', carried: [] },
+  requestId: 'r1', request: { operation: 'transfer', amount: '1000000', asset: 'native', assetSymbol: 'TKN', assetDecimals: 7, destination: 'G', carried: [] },
   cause, reopened: false, reopenable: true, flaggable: true, ownerAnswer: { answer: 'deny', kind: 'flagged', givenAt: 2 },
 };
 // @ts-expect-error A cause names exactly one reason.
