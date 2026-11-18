@@ -140,3 +140,8 @@ test('each generated copy keeps the line endings of its source on every checkout
     assert.equal(eol(copy), eol(source), copy);
   }
 });
+
+test('every release checks that the generated copies are the bytes of their sources', async () => {
+  const release = await readFile(join(root, '.github/workflows/release.yml'), 'utf8');
+  assert.match(release, /- run: node scripts\/generate-presentation\.mjs --check\n/);
+});
