@@ -179,14 +179,26 @@ mod tests {
     /// new request ID reads the original request first.
     fn unsafe_text(text: &str) -> Option<&'static str> {
         let lower = text.to_ascii_lowercase();
-        let outcome = [
-            "nothing was",
-            "nothing is",
-            "nothing were",
-            "no draft changed",
-            "was not made",
+        // An outcome of a step; "Nothing was lost", the owner's words for the text that stays in
+        // the form, is none.
+        let step = [
+            "paid",
+            "sent",
+            "signed",
+            "saved",
+            "changed",
+            "charged",
+            "prepared",
+            "imported",
+            "evaluated",
         ];
-        if outcome.iter().any(|claim| lower.contains(claim)) {
+        let claims_outcome = ["nothing was ", "nothing is ", "nothing were "]
+            .iter()
+            .any(|start| {
+                step.iter()
+                    .any(|outcome| lower.contains(&format!("{start}{outcome}")))
+            });
+        if claims_outcome || lower.contains("no draft changed") || lower.contains("was not made") {
             return Some("an outcome");
         }
         if text.contains("new request ID")
@@ -200,6 +212,8 @@ mod tests {
     #[test]
     fn no_entry_states_an_outcome_or_retries_without_the_original() {
         assert_eq!(unsafe_text("Nothing was paid."), Some("an outcome"));
+        // The owner's words for the text that stays in the form are no outcome of a step.
+        assert_eq!(unsafe_text("Nothing was lost."), None);
         assert_eq!(
             unsafe_text("Send it with a new request ID."),
             Some("a new request ID without the original")

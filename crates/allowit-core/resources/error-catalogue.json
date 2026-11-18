@@ -24,7 +24,7 @@
     {"code": "owner_step_open", "for": "owner", "title": "Another step waits for the owner's signature", "cause": "One owner step runs at a time for an account, in this tab and in every other tab.", "next": "Finish or cancel the open step, then start this one."},
     {"code": "signer_unavailable", "for": "owner", "title": "The app cannot sign on this network", "cause": "The app holds no wallet connection that signs owner steps on this network.", "next": "Choose a network from the header's list and sign in there."},
 
-    {"code": "model_busy", "for": "owner", "title": "The drafting model is busy", "cause": "No model wrote the draft this time, and the words stay in the form.", "next": "Choose Try again, or Revise for a change of a draft. Allowit sends the same request and creates at most one draft."},
+    {"code": "model_busy", "for": "owner", "title": "The drafting model is busy", "cause": "Nothing was lost. No model wrote the draft this time, and the words stay in the form.", "next": "Choose Try again, or Revise for a change of a draft. Allowit sends the same request and creates at most one draft."},
     {"code": "model_timeout", "for": "owner", "title": "The model took too long", "cause": "The model did not answer within its time limit.", "next": "Send the same request again."},
     {"code": "model_unreachable", "for": "owner", "title": "The model could not be reached", "cause": "Allowit could not connect to the model that this step uses.", "next": "Send the same request again in a moment."},
     {"code": "build_gate_unavailable", "for": "owner", "title": "The policy check did not run", "cause": "Allowit builds each draft to check it, and that check was unavailable.", "next": "Send the same request again in a moment."},

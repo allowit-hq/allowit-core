@@ -13,9 +13,10 @@ const PRINTABLE = /^[\x20-\x7e]*$/;
 const READER_WORDS = new Set(['you', 'your', 'yours', 'yourself']);
 export const namesReader = text => text.split(/[^A-Za-z0-9]+/).some(word => READER_WORDS.has(word.toLowerCase()));
 
-// An entry states no outcome, such as "Nothing was paid": several senders send one code in different cases, and only
-// the sender knows what happened. Its own text says so beside the entry.
-const OUTCOME = /\bnothing (was|is|were)\b|\bno draft changed\b|\bwas not made\b/i;
+// An entry states no outcome of a step, such as "Nothing was paid": several senders send one code in different cases,
+// and only the sender knows what happened. Its own text says so beside the entry. ("Nothing was lost", the owner's
+// words for the text that stays in the form, is no outcome of a step.)
+const OUTCOME = /\bnothing (was|is|were) (paid|sent|signed|saved|changed|charged|prepared|imported|evaluated)\b|\bno draft changed\b|\bwas not made\b/i;
 // A step that sends a request with a new request ID first reads the original one, which can still pay.
 const NEW_ID = /\bnew request ID\b/;
 const CHECKS_ORIGINAL = /\ballowit status\b|\boriginal request\b/;
