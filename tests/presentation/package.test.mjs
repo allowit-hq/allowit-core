@@ -96,6 +96,8 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
     { code: 'Bad-Code' },
     { for: 'someone' },
     { extra: 'field' },
+    // An entry for the agent states the agent's step apart from the owner's.
+    { for: 'agent' },
   ]) {
     assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
   }

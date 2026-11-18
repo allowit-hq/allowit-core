@@ -689,9 +689,9 @@ export interface ErrorEntry {
   readonly title: string;
   /** Why it happened, in the owner's words. */
   readonly cause: string;
-  /** What the reader does next. In the app the reader is the owner. */
+  /** What the owner does next on reading the error in the app. */
   readonly next: string;
-  /** What an agent that reads the error in a terminal does next, when that differs from `next`. */
+  /** What an agent that reads the error in a terminal does next, when that differs from `next`. Every entry for the agent has it. */
   readonly agent?: string;
 }
 export interface ErrorCatalogue {

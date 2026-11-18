@@ -34,9 +34,10 @@ pub struct Entry {
     pub title: String,
     /// Why it happened, in the owner's words.
     pub cause: String,
-    /// What the reader does next. In the app the reader is the owner.
+    /// What the owner does next on reading the error in the app.
     pub next: String,
     /// What an agent that reads the error in a terminal does next, when that differs from `next`.
+    /// Every entry for the agent has it.
     pub agent: Option<String>,
 }
 
@@ -193,6 +194,10 @@ mod tests {
             assert!(!entry.title.ends_with(['.', '!']), "{} title", entry.code);
             assert!(plain(&entry.cause, 260), "{} cause", entry.code);
             assert!(plain(&entry.next, 260), "{} next", entry.code);
+            // The owner reads `next` in the app; an entry for the agent states the agent's own step.
+            if entry.audience == Audience::Agent {
+                assert!(entry.agent.is_some(), "{} has no agent step", entry.code);
+            }
             if let Some(agent) = &entry.agent {
                 assert!(plain(agent, 260), "{} agent", entry.code);
             }

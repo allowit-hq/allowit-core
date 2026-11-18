@@ -33,6 +33,8 @@ export function checkErrorCatalogue(errors) {
     if (!plain(entry.title, 70) || /[.!]$/.test(entry.title)) throw new Error(`${name}: the title is one plain line of at most 70 characters without a final period`);
     if (!plain(entry.cause, 260) || !plain(entry.next, 260)) throw new Error(`${name}: the cause and the next step are plain text of at most 260 characters`);
     if (entry.agent !== undefined && !plain(entry.agent, 260)) throw new Error(`${name}: the agent's next step is plain text of at most 260 characters`);
+    // `next` is what the owner does on reading the entry in the app; an entry for the agent states the agent's own step in `agent`.
+    if (entry.for === 'agent' && entry.agent === undefined) throw new Error(`${name}: an entry for the agent states the agent's step in "agent" and the owner's in "next"`);
     if (namesReader(entry.title) || namesReader(entry.cause)) throw new Error(`${name}: the title and the cause name no reader ("you")`);
     const unknown = Object.keys(entry).filter(key => !FIELDS.includes(key));
     if (unknown.length) throw new Error(`${name}: unknown field ${unknown[0]}`);

@@ -278,7 +278,8 @@ A policy that needs another param or its own state uses the `custom` kind.
 
 [`error-catalogue.json`](typescript/error-catalogue.json) holds one entry for each typed error code that a server, a
 rail or a client sends. An entry has the code, who reads it (`owner`, `agent` or `operator`), a title, the cause in
-the owner's words, the next step, and the agent's next step when a terminal reader does something else. Every host
+the owner's words, the owner's next step in the app, and the agent's next step when a terminal reader does
+something else; every entry for the agent has that step. Every host
 shows this text for the code and links the help page of the code, `<app origin>/help/<code>`. The sender's own text
 stays behind a details control in the app and behind `--verbose` in the CLI. A host holds no error text of its own.
 
