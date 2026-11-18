@@ -80,7 +80,8 @@
 //! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
 //! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
 //! `const` block) ends at its last `}` unless `.` or `?` follows, and any other statement ends
-//! at its `;`. A match arm with a block-like body ends at its last `}` in the same way. So each
+//! at its `;`. A match arm with a block-like body, a `const` block or a macro with braces ends
+//! at its last `}` in the same way. So each
 //! statement, each item and each arm of a block is a step of its own. The on-chain part states
 //! `warn` where the source states the lint level `deny` or `forbid`: it leaves code out, and a
 //! lint level changes nothing that the policy does.
@@ -798,9 +799,21 @@ impl<'a> Parsed<'a> {
                                 self.text(start),
                                 "if" | "match" | "loop" | "while" | "for" | "{"
                             );
+                            // So does a `const` block, and a macro with braces.
+                            let braced = match (self.text(start), self.text(start + 1)) {
+                                ("const", "{") => self.close(start + 1),
+                                (_, "!")
+                                    if self.word(start).is_some()
+                                        && self.text(start + 2) == "{" =>
+                                {
+                                    self.close(start + 2)
+                                }
+                                _ => None,
+                            };
                             let exact = block_like
                                 .then(|| self.block_like_end(start, close))
                                 .flatten()
+                                .or(braced)
                                 .filter(|last| {
                                     *last < close && !matches!(self.text(last + 1), "." | "?")
                                 });
@@ -2354,7 +2367,7 @@ pub fn derive(source: &str) -> Result<Derived> {
         let attribute = p.text(i.wrapping_sub(1)) == "["
             && (p.text(i.wrapping_sub(2)) == "#"
                 || (p.text(i.wrapping_sub(2)) == "!" && p.text(i.wrapping_sub(3)) == "#"));
-        if attribute && matches!(p.text(i), "deny" | "forbid") {
+        if attribute && matches!(p.word(i), Some("deny" | "forbid")) {
             edits.push(Edit {
                 start: p.tokens[i].start,
                 end: p.tokens[i].end,

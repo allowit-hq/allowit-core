@@ -1174,6 +1174,28 @@ fn an_arm_without_a_comma_leaves_alone() {
     );
     assert_ne!(continued, source);
     assert!(derive(&continued).unwrap().source.contains("400 => {},"));
+    // A `const` block and a macro with braces need no comma either.
+    for body in ["const {}", "matches! { ctx.request.amount, 1 }"] {
+        let other = source
+            .replace(
+                "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
+                &format!("1 => {body}\n"),
+            )
+            .replace(
+                "400 => {},",
+                "400 => {\n            allowit::new_decision_context(ctx, None)?;\n        },",
+            );
+        assert_ne!(other, source);
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        let derived = derive(&other).unwrap();
+        assert!(derived.source.contains(&format!("1 => {body}\n")), "{body}");
+        assert!(
+            derived.source.contains("400 => {"),
+            "{body}: {}",
+            derived.source
+        );
+        assert!(!derived.source.contains("new_decision_context"), "{body}");
+    }
 }
 
 /// The on-chain part leaves code out, so it states `warn` where the source states `deny` or
@@ -1189,6 +1211,16 @@ fn a_lint_that_denies_is_a_warning_in_the_on_chain_part() {
         derived.source
     );
     assert_eq!(derived.left, [(6, 8)]);
+    // Also under the raw spelling of the lint level.
+    let raw = source.replace("#[deny(", "#[r#forbid(");
+    assert_ne!(raw, source);
+    source_shape_with_host_calls(&raw, REGISTRY).unwrap();
+    assert!(
+        derive(&raw)
+            .unwrap()
+            .source
+            .contains("#[warn(unused_variables)]")
+    );
     // Without a server part, the source is its own on-chain part.
     let local = source.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
     assert_eq!(derive(&local).unwrap().source, local);
