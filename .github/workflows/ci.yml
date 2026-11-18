@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python3 -m unittest discover -s scripts/tests
+      - run: scripts/no-network.sh python3 -m unittest discover -s scripts/tests
       - run: cargo fmt --all --check
       - run: rustfmt --edition 2024 --check crates/allowit-core/src/portable/core.rs
       - run: cargo test --locked -p allowit-core --features client,service,transport,policy-source,vendor --no-run
