@@ -274,6 +274,31 @@ A policy that needs another param or its own state uses the `custom` kind.
 | `expires_at` | Unix timestamp in seconds | Require unexpired parameters and request. |
 | `operations` | `*` or a list of operation names | Require a permitted operation. |
 
+## Error catalogue
+
+[`error-catalogue.json`](typescript/error-catalogue.json) holds one entry for each typed error code that a server, a
+rail or a client sends. An entry has the code, who reads it (`owner`, `agent` or `operator`), a title, the cause in
+the owner's words, the next step, and the agent's next step when a terminal reader does something else. Every host
+shows this text for the code and links the help page of the code, `<app origin>/help/<code>`. The sender's own text
+stays behind a details control in the app and behind `--verbose` in the CLI. A host holds no error text of its own.
+
+```rust
+use allowit_core::errors;
+if let Some(entry) = errors::entry("policy_denied") {
+    println!("{}\n{}\n{}", entry.cause, entry.agent_next(), errors::help_url(origin, &entry.code));
+}
+```
+
+```ts
+import { errorEntry, errorHelpPath } from "@allowit/core";
+const entry = errorEntry(code); // null for a code that this release does not know
+const page = errorHelpPath(code); // "/help/policy_denied"
+```
+
+A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
+missing or overlong text, a second entry for a code, or an unknown field. Each repository that defines codes or shows
+errors has a test that fails for a code without an entry.
+
 ## Asset units
 
 A rail supplies the unit of every amount. `RailPlugin::native_asset(network)` and

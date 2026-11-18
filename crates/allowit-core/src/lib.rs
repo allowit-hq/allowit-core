@@ -15,6 +15,8 @@ pub use portable::*;
 pub mod admin;
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "std")]
+pub mod errors;
 #[cfg(feature = "policy-source")]
 pub mod policy;
 #[cfg(feature = "std")]

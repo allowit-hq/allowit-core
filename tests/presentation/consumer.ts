@@ -3,6 +3,8 @@ import type { Quantity, Settlement, LimitReport, PaidService, PaymentChallenge, 
 import type { PaymentLimit, WalletLimits, OperationReports } from '@allowit/core';
 import type { CreditBalance, CreditCallPrice, CreditCharge, CreditEntries, CreditFee, CreditPrices, PolicyCredits } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
+import { errorCatalogue, errorEntry, errorHelpPath } from '@allowit/core';
+import type { ErrorCode, ErrorEntry, ErrorAudience } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
 const address: PolicyValue = { Addr: '0xabc123' };
@@ -99,3 +101,12 @@ const mixed: CreditCallPrice = { item: 'fetch', call: '0.0', inputPerMillionToke
 // @ts-expect-error The server always says whether a call counts against the allowance.
 const uncounted: CreditCallPrice = { item: 'fetch', call: '0.0' };
 void [balance, usage, prices, roundedCharge, unknownOutcome, counts, rates, noPrice, halfRate, mixed, uncounted];
+// The error catalogue: a known code is typed, any text can be looked up, and an entry names its reader.
+const knownCode: ErrorCode = 'policy_denied';
+// @ts-expect-error A code without an entry is no ErrorCode.
+const unknownCode: ErrorCode = 'no_such_code';
+const looked: ErrorEntry | null = errorEntry('anything a server sent');
+const reader: ErrorAudience | undefined = looked?.for;
+const firstTitle: string = errorCatalogue.entries[0]!.title;
+const helpPath: string = errorHelpPath(knownCode);
+void [knownCode, unknownCode, reader, firstTitle, helpPath];

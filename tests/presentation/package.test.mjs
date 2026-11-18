@@ -38,6 +38,7 @@ test('the packed public entry points have usable types and contain no guest sour
     assert.deepEqual(contents, [
       'package/LICENSE', 'package/README.md', 'package/package.json',
       'package/typescript/canonical-functions.json', 'package/typescript/core.d.ts', 'package/typescript/core.js',
+      'package/typescript/error-catalogue.json',
     ].sort());
     const packageDir = join(scratch, 'node_modules', '@allowit', 'core');
     await mkdir(packageDir, { recursive: true });
@@ -52,6 +53,16 @@ test('the packed public entry points have usable types and contain no guest sour
     assert.equal(actual.source, source);
     assert.equal(actual.hash, createHash('sha256').update(source).digest('hex'));
     assert.equal(actual.names.length, 9);
+    await writeFile(join(scratch, 'errors.mjs'), `import { errorCatalogue, errorCatalogueSource, errorEntry, errorHelpPath } from '@allowit/core';\nconsole.log(JSON.stringify({ codes: errorCatalogue.entries.map(entry => entry.code), source: errorCatalogueSource, denied: errorEntry('policy_denied'), path: errorHelpPath('policy_denied'), frozen: Object.isFrozen(errorCatalogue.entries[0]) }));\n`);
+    const errors = JSON.parse(run(process.execPath, [join(scratch, 'errors.mjs')], { cwd: scratch }));
+    const errorSource = await readFile(join(root, 'typescript/error-catalogue.json'), 'utf8');
+    assert.equal(errors.source, errorSource);
+    assert.equal(errors.source, await readFile(join(root, 'crates/allowit-core/resources/error-catalogue.json'), 'utf8'));
+    assert.deepEqual(errors.codes, JSON.parse(errorSource).entries.map(entry => entry.code));
+    assert.equal(new Set(errors.codes).size, errors.codes.length);
+    assert.equal(errors.denied.for, 'agent');
+    assert.equal(errors.path, '/help/policy_denied');
+    assert.equal(errors.frozen, true);
     const { canonicalFunctionRegistry } = await import('../../typescript/core.js');
     assert(Object.isFrozen(canonicalFunctionRegistry));
     assert(Object.isFrozen(canonicalFunctionRegistry.functions[0].parameter));
