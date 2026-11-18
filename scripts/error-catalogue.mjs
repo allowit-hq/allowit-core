@@ -7,8 +7,10 @@ export const CODE = /^[a-z][a-z0-9_]{2,63}$/;
 // Controls (C0, DEL, C1), line and paragraph separators, direction marks and overrides, and the byte order mark:
 // none of them belongs in one line of text that a terminal or a page shows.
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069\ufeff]/u;
-// A title and a cause name no reader: an owner and an agent read the same entry.
-const READER = /\b(you|your|yours|yourself)\b/i;
+// A title and a cause name no reader: an owner and an agent read the same entry. A word is a run of letters and
+// digits, as in the Rust test: an underscore or any other character ends it.
+const READER_WORDS = new Set(['you', 'your', 'yours', 'yourself']);
+export const namesReader = text => text.split(/[^\p{L}\p{N}]+/u).some(word => READER_WORDS.has(word.toLowerCase()));
 
 /** Plain text: well-formed Unicode, trimmed, without hidden characters, of 1 to `limit` characters. */
 export function plain(text, limit) {
@@ -31,9 +33,30 @@ export function checkErrorCatalogue(errors) {
     if (!plain(entry.title, 70) || /[.!]$/.test(entry.title)) throw new Error(`${name}: the title is one plain line of at most 70 characters without a final period`);
     if (!plain(entry.cause, 260) || !plain(entry.next, 260)) throw new Error(`${name}: the cause and the next step are plain text of at most 260 characters`);
     if (entry.agent !== undefined && !plain(entry.agent, 260)) throw new Error(`${name}: the agent's next step is plain text of at most 260 characters`);
-    if (READER.test(entry.title) || READER.test(entry.cause)) throw new Error(`${name}: the title and the cause name no reader ("you")`);
+    if (namesReader(entry.title) || namesReader(entry.cause)) throw new Error(`${name}: the title and the cause name no reader ("you")`);
     const unknown = Object.keys(entry).filter(key => !FIELDS.includes(key));
     if (unknown.length) throw new Error(`${name}: unknown field ${unknown[0]}`);
   }
   return errors;
+}
+
+/** One entry as the catalogue file writes it: its fields in order, on one line. */
+const line = entry => '{' + FIELDS.filter(key => key in entry).map(key => `${JSON.stringify(key)}: ${JSON.stringify(entry[key])}`).join(', ') + '}';
+
+/**
+ * Parses the catalogue file and checks it. The file must be the canonical text of what it parses to, apart from blank
+ * lines between groups of entries: JSON.parse keeps only the last of two equal keys and reads escapes, so a second
+ * field or an escaped character could hide text that another reader, such as Rust's serde_json, reads otherwise.
+ */
+export function checkErrorCatalogueSource(source) {
+  const errors = JSON.parse(source);
+  const entries = Array.isArray(errors?.entries) ? errors.entries : [];
+  const canonical = ['{', '  "schemaVersion": ' + JSON.stringify(errors?.schemaVersion) + ',', '  "helpPath": ' + JSON.stringify(errors?.helpPath) + ',', '  "entries": [',
+    ...entries.map((entry, i) => '    ' + line(entry) + (i < entries.length - 1 ? ',' : '')), '  ]', '}'];
+  const lines = source.split('\n').filter(text => text !== '');
+  const differs = lines.findIndex((text, i) => text !== canonical[i]);
+  if (lines.length !== canonical.length || differs !== -1) {
+    throw new Error(`The error catalogue is not in its canonical form near ${JSON.stringify((lines[differs] ?? '').slice(0, 60))}: one entry per line, its fields once each and in order, and no escapes other than JSON.stringify writes`);
+  }
+  return checkErrorCatalogue(errors);
 }

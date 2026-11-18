@@ -97,6 +97,29 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
     assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
   }
   assert.throws(() => checkErrorCatalogue({ schemaVersion: 1, helpPath: '/help/', entries: [entry, entry] }), /two entries/);
+  // An underscore ends a word, as in the Rust test.
+  assert.throws(() => checkErrorCatalogue(one({ cause: 'The key that _you_ supplied did not match.' })), /name no reader/);
+});
+
+test('the catalogue file is the canonical text of what it parses to', async () => {
+  const { checkErrorCatalogueSource } = await import('../../scripts/error-catalogue.mjs');
+  const source = await readFile(join(root, 'typescript/error-catalogue.json'), 'utf8');
+  assert.doesNotThrow(() => checkErrorCatalogueSource(source));
+  const first = source.indexOf('{"code": ');
+  const end = source.indexOf('}', first) + 1;
+  const entry = source.slice(first, end);
+  const variants = [
+    // A second title: JSON.parse keeps the valid one, and serde_json refuses the lone surrogate of the first.
+    entry.replace('"title": ', '"title": "A \\ud800 title", "title": '),
+    // An escape that reads as a letter.
+    entry.replace('"title": "', '"title": "\\u0054'),
+    // Fields out of order.
+    entry.replace(/"for": "(\w+)", /, '').replace('{', '{"for": "owner", '),
+  ];
+  for (const variant of variants) {
+    assert.notEqual(variant, entry);
+    assert.throws(() => checkErrorCatalogueSource(source.slice(0, first) + variant + source.slice(end)), /canonical form/, variant);
+  }
 });
 
 test('each generated copy keeps the line endings of its source on every checkout', () => {

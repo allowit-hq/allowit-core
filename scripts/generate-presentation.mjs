@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { checkErrorCatalogue, CODE } from './error-catalogue.mjs';
+import { checkErrorCatalogueSource, CODE } from './error-catalogue.mjs';
 
 const root = new URL('../', import.meta.url);
 const source = await readFile(new URL('typescript/canonical-functions.json', root), 'utf8');
@@ -14,7 +14,7 @@ if (registry.coreVersion !== manifest.version || registry.coreVersion !== worksp
 const hash = createHash('sha256').update(source, 'utf8').digest('hex');
 // The error catalogue: one entry for each typed error code, with the text that every host shows.
 const errorSource = await readFile(new URL('typescript/error-catalogue.json', root), 'utf8');
-const errors = checkErrorCatalogue(JSON.parse(errorSource));
+const errors = checkErrorCatalogueSource(errorSource);
 const errorCodes = errors.entries.map(({ code }) => JSON.stringify(code)).join(' | ');
 const names = registry.functions.map(({ name }) => JSON.stringify(name)).join(' | ');
 const semantics = [...new Set(registry.functions.map(({ parameter }) => parameter.semanticType))]

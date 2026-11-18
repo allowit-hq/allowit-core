@@ -97,8 +97,9 @@ pub fn entry(code: &str) -> Option<&'static Entry> {
 }
 
 /// True for an HTTP or HTTPS origin and nothing else: `https://host` or `https://host:port`, with an
-/// optional final slash. The host is a DNS name, an IPv4 address or a bracketed IPv6 address. A path,
-/// a query, a fragment, user information, a space or a control character makes it no origin.
+/// optional final slash. The host is a DNS name (a final dot is allowed), an IPv4 address or a
+/// bracketed IPv6 address, each as a URL parser reads it. A path, a query, a fragment, user
+/// information, a space or a control character makes it no origin.
 pub fn is_origin(text: &str) -> bool {
     let text = text.strip_suffix('/').unwrap_or(text);
     let Some(authority) = text
@@ -107,55 +108,57 @@ pub fn is_origin(text: &str) -> bool {
     else {
         return false;
     };
-    let (host, port) = match authority.strip_prefix('[') {
+    let (host_ok, port) = match authority.strip_prefix('[') {
         Some(bracketed) => {
             let Some((address, after)) = bracketed.split_once(']') else {
                 return false;
             };
-            let ipv6 = !address.is_empty()
-                && address.contains(':')
-                && address
-                    .bytes()
-                    .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.');
-            if !ipv6 {
-                return false;
-            }
-            match after {
-                "" => (address, None),
+            let port = match after {
+                "" => None,
                 _ => match after.strip_prefix(':') {
-                    Some(port) => (address, Some(port)),
+                    Some(port) => Some(port),
                     None => return false,
                 },
-            }
+            };
+            (address.parse::<std::net::Ipv6Addr>().is_ok(), port)
         }
         None => {
             let (host, port) = match authority.split_once(':') {
                 Some((host, port)) => (host, Some(port)),
                 None => (authority, None),
             };
-            let name = !host.is_empty()
-                && host.len() <= 253
-                && host.split('.').all(|label| {
-                    !label.is_empty()
-                        && label.len() <= 63
-                        && !label.starts_with('-')
-                        && !label.ends_with('-')
-                        && label
-                            .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-                });
-            if !name {
-                return false;
-            }
-            (host, port)
+            (is_host_name(host), port)
         }
     };
-    let port = port.is_none_or(|port| {
+    let port_ok = port.is_none_or(|port| {
         (1..=5).contains(&port.len())
             && port.bytes().all(|b| b.is_ascii_digit())
             && port.parse::<u16>().is_ok_and(|n| n > 0)
     });
-    !host.is_empty() && port
+    host_ok && port_ok
+}
+
+/// A DNS name or an IPv4 address. A URL parser reads a host whose last label is a number as an
+/// IPv4 address, so such a host must be one.
+fn is_host_name(host: &str) -> bool {
+    let name = host.strip_suffix('.').unwrap_or(host);
+    let labels: Vec<&str> = name.split('.').collect();
+    let label_ok = |label: &&str| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    };
+    if name.is_empty() || name.len() > 253 || !labels.iter().all(label_ok) {
+        return false;
+    }
+    let numeric = labels
+        .last()
+        .is_some_and(|last| last.bytes().all(|b| b.is_ascii_digit()));
+    !numeric || name.parse::<std::net::Ipv4Addr>().is_ok()
 }
 
 /// The address of the help page of `code` on the app at `origin`, such as
@@ -215,6 +218,8 @@ mod tests {
         assert!(plain("The wallet did not sign", 70));
         assert!(names_reader("Your session ended"));
         assert!(names_reader("A later answer of yours stands"));
+        // An underscore ends a word, as in the generator's rule.
+        assert!(names_reader("The key that _you_ supplied did not match"));
         assert!(!names_reader("The owner's young account"));
     }
 
@@ -315,6 +320,9 @@ mod tests {
             "http://localhost:8080",
             "https://[::1]:8443",
             "https://xn--bcher-kva.example",
+            "https://app.example.",
+            "http://192.168.1.10:8080",
+            "https://[2001:db8::1]",
         ] {
             assert!(is_origin(origin), "{origin}");
             assert!(help_url(origin, "policy_denied").is_some(), "{origin}");
@@ -337,6 +345,11 @@ mod tests {
             "https://[::1",
             "https://[]",
             "https://[zz::1]",
+            "https://[:::]",
+            "https://[::1%25en0]",
+            "https://999.999.999.999",
+            "https://1.2.3.256",
+            "https://app..example",
             "https://",
         ] {
             assert!(!is_origin(origin), "{origin:?}");
