@@ -23,6 +23,8 @@ jobs:
       - run: python3 scripts/check_dependencies.py
       - run: cargo build --locked --workspace --all-targets
       - run: cargo check --locked -p allowit-core --no-default-features --lib
+  # The hermetic tests: no socket, no network. scripts/no-network.sh runs them in a unit that
+  # may create no IP socket, so a test that needs one fails here.
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -38,10 +40,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python3 -m unittest discover -s scripts/tests
+      - run: scripts/no-network.sh python3 -m unittest discover -s scripts/tests
       - run: cargo fmt --all --check
       - run: rustfmt --edition 2024 --check crates/allowit-core/src/portable/core.rs
-      - run: cargo test --locked -p allowit-core --features client,service,transport,policy-source,vendor
+      - run: cargo test --locked -p allowit-core --features client,service,transport,policy-source,vendor --no-run
+      - run: scripts/no-network.sh cargo test --locked --offline -p allowit-core --features client,service,transport,policy-source,vendor
       - run: cargo clippy --locked -p allowit-core --all-targets --features client,service,transport,policy-source,vendor -- -D warnings
   verification:
     runs-on: ubuntu-24.04
@@ -56,8 +59,21 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Portable rules and doctests
-        run: cargo test --locked -p allowit-core
+        run: |
+          cargo test --locked -p allowit-core --no-run
+          scripts/no-network.sh cargo test --locked --offline -p allowit-core
       - name: Host policy rules and write isolation
-        run: cargo test --locked -p allowit-core --no-default-features --features std
+        run: |
+          cargo test --locked -p allowit-core --no-default-features --features std --no-run
+          scripts/no-network.sh cargo test --locked --offline -p allowit-core --no-default-features --features std
       - run: cargo clippy --locked -p allowit-core --all-targets -- -D warnings
       - run: cargo clippy --locked -p allowit-core --no-default-features --features std --all-targets -- -D warnings
+  # The end-to-end tests with the whole suite: fixture servers on loopback.
+  end-to-end:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p allowit-core --features client,service,transport,policy-source,vendor,e2e

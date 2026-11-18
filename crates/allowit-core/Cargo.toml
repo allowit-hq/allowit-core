@@ -42,6 +42,9 @@ service = ["std"]
 policy-source = ["std", "serde/derive"]
 vendor = ["client", "transport", "policy-source", "dep:zeroize", "dep:time", "dep:serde_json_canonicalizer", "serde_json/raw_value", "serde_json/arbitrary_precision"]
 transport = ["service", "dep:reqwest"]
+# Runs the end-to-end tests too: tests that bind a local socket for a fixture server.
+# Without it, `cargo test` runs only the hermetic tests. No library code reads it.
+e2e = []
 
 [dependencies]
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
