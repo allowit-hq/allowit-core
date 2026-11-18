@@ -1,4 +1,4 @@
-import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision } from '@allowit/core';
+import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord } from '@allowit/core';
 import { canonicalFunctions, canonicalFunctionMetadataHash } from '@allowit/core';
 
 const max: PolicyValue = { Int: '170141183460469231731687303715884105727' };
@@ -24,4 +24,14 @@ const twoCauses: OwnerReviewCause = { lookup: { id: 'l', function: 'fetch', inpu
 const expired: PastDecision = { ...past, state: 'expired', decidedBy: `expir${'y'}` as const };
 // @ts-expect-error A past decision's state is one of the review states.
 const unknownState: PastDecision = { ...past, state: 'paid' };
-void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState, twoCauses, expired];
+// A rail's owner hooks: the network reads are required, the keypair wallet's setup and approval are optional.
+const chain: OwnerChain = {
+  transaction: async (_network, hash) => ({ hash, ledger: 7, successful: true }),
+  expiredRecord: async () => null,
+};
+const missing: TransactionRecord = 'missing';
+// @ts-expect-error A transaction record states whether it succeeded.
+const unclear: TransactionRecord = { hash: 'h', ledger: 7 };
+// @ts-expect-error A rail always reads the network's record of a transaction.
+const noHistory: OwnerChain = { expiredRecord: async () => null };
+void [values, functionName, hash, rounded, ambiguous, unknown, past, unknownState, twoCauses, expired, chain, missing, unclear, noHistory];
