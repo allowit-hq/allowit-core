@@ -322,6 +322,11 @@ Amount metadata assumes no asset, decimals or price normalization. Hosts and nat
 Registry order does not prescribe source order. SDK engine derives source bindings and workflow projections.
 The exported metadata hash identifies the exact JSON bytes shared by Rust and JavaScript.
 
+`OwnerChain` is the contract between the SDK's npm owner workflows and a rail. The SDK holds the install, fund and
+params-update workflows with their journal and recovery rules. A rail supplies `ownerChain`: the network's
+`TransactionRecord` of a transaction, the record of an expired signed step, and, for a keypair wallet, the steps of
+its account setup (`prepare`, `read`, `send`, `configuration`) and the check of the owner's policy approval.
+
 The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, `PastDecision`, `OwnerAnswer` and the
 types that they use) describe what a server answers about a request that waits for its policy owner and about a
 policy's past decisions. They are types only: a client reads a snapshot with its own checks and verifies its hash.
@@ -388,7 +393,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.11.0", version = "0.11", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.11.1", version = "0.11", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
