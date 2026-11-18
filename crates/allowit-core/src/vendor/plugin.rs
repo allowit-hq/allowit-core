@@ -176,6 +176,12 @@ pub trait RailPlugin: Sync {
         None
     }
 
+    /// The rail's text-message signature, with which a server signs its own statements. A rail
+    /// without it gives a server no message signature.
+    fn message_signature(&self) -> Option<&'static dyn super::wallet::MessageSignature> {
+        None
+    }
+
     /// Vendor evidence functions, by name, that policies may call.
     fn policy_functions(&self) -> &'static [(&'static str, PolicyFunction)] {
         &[]

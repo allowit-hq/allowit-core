@@ -111,6 +111,10 @@ from the client's own build. The `code` module lists the typed refusal codes: `c
 
 A rail without the hook declares `Feature::CustomBuild` skipped.
 
+`RailPlugin::message_signature` gives a rail's text-message signature (`wallet::MessageSignature`): the
+signature that its browser wallets make of a text message. A server signs its own statements with it, such
+as the request of a signed fetch, and anyone verifies them with the server's public identity.
+
 ### Contract wallet deployment
 
 `OwnerAction::Create` creates a contract wallet and funds it in one owner transaction: `units` of the
@@ -384,7 +388,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.9.1", version = "0.9", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.10.1", version = "0.10", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
