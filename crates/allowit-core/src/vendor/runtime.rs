@@ -64,6 +64,12 @@ pub struct Terms {
     /// from the gas that this operation repays, down to zero; the wallet counts what it repays.
     /// Zero for a wallet that repays no gas.
     pub gas_carry_units: u128,
+    /// Native units that the server paid for this operation outside its transaction, before it:
+    /// the fee of a restoration of the wallet's lapsed code that this operation needed. They are
+    /// part of this operation's fee. A rail whose wallet repays the network fee adds them to the
+    /// gas that this operation repays, within the wallet's gas cap; the server charges what the
+    /// wallet does not repay to the operation's request. Zero when the server paid nothing.
+    pub gas_due_units: u128,
 }
 #[derive(Clone, Debug)]
 pub struct Expense {
