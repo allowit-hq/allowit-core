@@ -116,7 +116,7 @@ pub(crate) mod gate {
     use std::collections::{HashMap, HashSet};
 
     /// `policy_source.py` `MACROS`: the macros authored code may invoke.
-    const MACROS: &[&str] = &[
+    pub(super) const MACROS: &[&str] = &[
         "assert",
         "assert_eq",
         "assert_ne",

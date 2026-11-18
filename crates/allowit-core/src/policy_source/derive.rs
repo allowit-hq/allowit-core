@@ -44,15 +44,17 @@
 //! operation is admitted. Each key has one keeper, so a statement reads the same value on the
 //! chain and on the server:
 //!
-//! - the chain keeps a key when every statement that writes it stays. The contract stores the
-//!   key, the kept statements read and write it there, and the server reads it from the
-//!   contract when it evaluates the whole source;
+//! - the chain keeps a key when a statement that uses it stays and no statement that writes it
+//!   leaves. The contract stores the key, the kept statements read and write it there, and
+//!   the server reads it from the contract when it evaluates the whole source, also in a
+//!   statement that left;
 //! - the server keeps a key when a statement that writes it leaves. Then every statement that
-//!   reads or writes the key leaves too (rule 1), and the contract never stores it. A key that
-//!   only leaving statements read is the server's as well.
+//!   reads or writes the key leaves too (rule 1), and the contract never stores it. A key
+//!   with no write that only leaving statements read is the server's as well.
 //!
 //! A call of a local function that writes a key counts as a write of that key, also through
-//! another local function. A key whose name
+//! another local function. A function that stands inside another one writes only where it is
+//! called. A key whose name
 //! starts with `day_` lives one daily window; any other key lives until a later write replaces
 //! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
 //!
@@ -163,10 +165,12 @@ pub struct Derived {
 /// Who keeps one state key of a policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Keeper {
-    /// The contract stores the key. Every statement that writes it stays in the on-chain part.
+    /// The contract stores the key. A statement that uses it stays in the on-chain part, and
+    /// so does every statement that writes it.
     Chain,
     /// The server stores the key. Every statement that reads or writes it runs only on the
-    /// server.
+    /// server: a statement that writes it left, or the key has no write and only leaving
+    /// statements read it.
     Server,
 }
 
@@ -639,15 +643,19 @@ impl<'a> Parsed<'a> {
 
     /// The last token of the statement that token `p` starts, when it is a macro with braces,
     /// such as `assert! { ok }`, or a `const { ... }` block. Such a statement ends at its `}`
-    /// with no `;`, unless a method call or `?` continues it.
+    /// with no `;`. Only the name of a macro counts: `if ! { ok } { ... }` negates a block.
+    /// When a token that can continue an expression follows, the statement is not ended here:
+    /// the parser ends a statement early only where the end is certain, because two
+    /// statements read as one leave or stay together, while one statement read as two can
+    /// keep a denial without its condition.
     fn braced_end(&self, p: usize, end: usize) -> Option<usize> {
         let open = match (self.text(p), self.text(p + 1), self.text(p + 2)) {
             ("const", "{", _) => p + 1,
-            (_, "!", "{") if self.word(p).is_some() => p + 2,
+            (name, "!", "{") if gate::MACROS.contains(&name) => p + 2,
             _ => return None,
         };
         self.close(open)
-            .filter(|last| *last < end && !matches!(self.text(last + 1), "." | "?"))
+            .filter(|last| *last < end && !self.continues(last + 1))
     }
 
     /// The last token of the branch statement whose keyword or `{` is token `p`, also when its
@@ -1398,18 +1406,29 @@ pub fn derive(source: &str) -> Result<Derived> {
     let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
     // The local functions that each function calls, read once.
     let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    let fn_names: HashSet<&str> = local_fns.iter().map(|(_, name)| *name).collect();
     for ((from, to), name) in &local_fns {
         let (from, to) = (*from, *to);
+        // A function that stands inside this one runs only when it is called: its tokens
+        // are its own.
+        let inner: Vec<(usize, usize)> = local_fns
+            .iter()
+            .map(|(range, _)| *range)
+            .filter(|(start, end)| *start > from && *end <= to)
+            .collect();
+        let own = |i: usize| {
+            (from..to).contains(&i) && !inner.iter().any(|(start, end)| (*start..*end).contains(&i))
+        };
         let direct = uses
             .iter()
-            .filter(|state| state.writes && (from..to).contains(&state.at))
+            .filter(|state| state.writes && own(state.at))
             .map(|state| state.key.clone());
         writers
             .entry((*name).to_owned())
             .or_default()
             .extend(direct);
-        for callee in (from..to).filter_map(call_at) {
-            if local_fns.iter().any(|(_, other)| *other == callee) {
+        for callee in (from..to).filter(|i| own(*i)).filter_map(call_at) {
+            if fn_names.contains(callee) {
                 callers_of.entry(callee).or_default().push(name);
             }
         }

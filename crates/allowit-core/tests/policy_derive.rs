@@ -123,6 +123,7 @@ golden!(
     state_helpers => "state-helpers",
     state_braced_macro => "state-braced-macro",
     state_after_approval => "state-after-approval",
+    negated_block_condition => "negated-block-condition",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -685,6 +686,56 @@ fn a_function_after_a_statement_with_braces_follows_its_calls() {
     assert!(!derive(&constant).unwrap().source.contains("fn remember("));
 }
 
+/// `!` before a block negates the block: only the name of a macro before `!` starts a macro.
+/// A branch whose condition is such a block is one statement, so its denial never stays
+/// without its condition.
+#[test]
+fn a_negated_block_condition_is_no_macro() {
+    let source = include_str!("fixtures/derive/negated-block-condition.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("DestinationNotAllowed"));
+    assert_eq!(derived.kept, ["payment_limit"]);
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!((check.line, check.cause), (6, Cause::NotSplit));
+    for header in [
+        "while ! { allowit::new_decision_context(ctx, None).is_ok() } {",
+        "if matches! { allowit::new_decision_context(ctx, None), Ok(()) } == false {",
+        "if !matches! { allowit::new_decision_context(ctx, None), Ok(()) } {",
+        "if ! const { false } || allowit::new_decision_context(ctx, None).is_err() {",
+    ] {
+        let other = source.replace(
+            "if ! { allowit::new_decision_context(ctx, None).is_ok() } {",
+            header,
+        );
+        assert_ne!(other, source);
+        let derived = derive(&other).unwrap();
+        assert!(
+            !derived.source.contains("DestinationNotAllowed"),
+            "{header}"
+        );
+    }
+}
+
+/// A function that stands inside another function runs only where it is called. Its write is
+/// no write of the function around it.
+#[test]
+fn a_function_inside_a_function_writes_only_where_it_is_called() {
+    let source = "use allowit::prelude::*;\nuse allowit::AllowitDecision;\nfn outer(ctx: &AllowitContext) -> allowit::Result {\n    fn reset(ctx: &AllowitContext) -> allowit::Result {\n        allowit::set_state(ctx, \"n\", 0u64)\n    }\n    Ok(())\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    outer(ctx)?;\n    let n: u64 = allowit::get_state(ctx, \"n\")?.unwrap_or(0);\n    assert!(n < 3);\n    allowit::set_state(ctx, \"n\", n + 1)?;\n    let score = allowit::decision(ctx, &AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    if score > 5000 {\n        outer(ctx)?;\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("n".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("assert!(n < 3)") && derived.source.contains("n + 1"));
+    assert_eq!(derived.source.matches("outer(ctx)?;").count(), 1);
+    // With a call of the inner function, a leaving call of the outer one moves the key.
+    let called = source.replace("    Ok(())\n}\npub fn", "    reset(ctx)\n}\npub fn");
+    assert_ne!(called, source);
+    assert_eq!(keys(&called), [("n".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(&called).unwrap().source.contains("\"n\""));
+}
+
 /// A `const` block that a method call continues is a statement, and no item. After an early
 /// approval on a server value it leaves as every later statement does, and the server keeps
 /// the key that it writes.
@@ -1192,6 +1243,7 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("state-helpers", state_helpers::BOTH),
         ("state-braced-macro", state_braced_macro::BOTH),
         ("state-after-approval", state_after_approval::BOTH),
+        ("negated-block-condition", negated_block_condition::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN

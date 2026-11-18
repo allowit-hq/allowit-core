@@ -215,13 +215,14 @@ Each key has one keeper, and `Derived::state` names it:
 
 | Keeper | When | Where the value lives |
 | --- | --- | --- |
-| `chain` | Every statement that writes the key stays in the derived part | In the wallet contract. The server reads it from there when it evaluates the whole source |
-| `server` | A statement that writes the key leaves, or only leaving statements read it | With the server. Every statement that reads or writes the key leaves the derived part |
+| `chain` | A statement that uses the key stays in the derived part, and no statement that writes it leaves | In the wallet contract. The server reads it from there when it evaluates the whole source, also in a statement that left |
+| `server` | A statement that writes the key leaves, or the key has no write and only leaving statements read it | With the server. Every statement that reads or writes the key leaves the derived part |
 
-A call of a local function that writes a key counts as a write of that key. A key that starts with `day_` lives
-one daily window; any other key lives until a later write replaces it. The keeper enforces the window: Core's
-evaluator reads the state map as it gets it, so the contract and the server each leave an ended value out of it. `derive` refuses a state call whose key
-is not a string literal of 1 to 32 ASCII letters, digits or `_`, and a write of a standard figure.
+A call of a local function that writes a key counts as a write of that key; a function inside another function
+writes only where it is called. A key that starts with `day_` lives one daily window; any other key lives until a
+later write replaces it. The keeper enforces the window: Core's evaluator reads the state map as it gets it, so the
+contract and the server each leave an ended value out of it. `derive` refuses a state call whose key is not a string
+literal of 1 to 32 ASCII letters, digits or `_`, and a write of a standard figure.
 
 `Derived::figures` names the cumulated figures that the kept statements read, each daily or total: those of the
 kept canonical rules, and each standard figure that a kept statement reads with `get_state`. The wallet keeps
