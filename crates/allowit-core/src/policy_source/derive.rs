@@ -155,7 +155,10 @@ pub struct Derived {
     pub kept: Vec<String>,
     /// The cumulated figures that the kept statements read, in a fixed order and without
     /// repetition: those of the kept canonical rules, and those that a kept statement reads
-    /// with `allowit::get_state`. A contract wallet keeps these figures.
+    /// with `allowit::get_state`. A contract wallet keeps these figures, and the server
+    /// evaluates the whole source on the wallet's values of them. The wallet gives a daily
+    /// figure of its current window and leaves an ended one out: `get_state` reads the state
+    /// map as it gets it.
     pub figures: Vec<Figure>,
     /// The policy's own state keys, sorted by key and without repetition, each with its
     /// keeper. An empty list means that the policy keeps no state of its own.
@@ -606,6 +609,7 @@ impl<'a> Parsed<'a> {
                                 | "match"
                                 | "in"
                                 | "return"
+                                | "const"
                                 | "=="
                                 | "!="
                                 | "&&"
@@ -808,7 +812,8 @@ impl<'a> Parsed<'a> {
         (from..to)
             .filter_map(|i| {
                 let name = self.word(i)?;
-                let free = !matches!(name, "mut" | "ref" | "_")
+                // The keywords of a pattern, as written: `r#mut` is a name.
+                let free = !matches!(self.text(i), "mut" | "ref" | "_")
                     && self.text(i.wrapping_sub(1)) != "::"
                     && !matches!(self.text(i + 1), "(" | "::" | "{" | "!");
                 free.then(|| name.to_owned())
@@ -1394,32 +1399,65 @@ pub fn derive(source: &str) -> Result<Derived> {
     };
     // Every local function with its tokens, read from each `fn` of the file: a function can
     // stand inside a statement that is not split, where it is no statement of its own.
-    // `execute` itself is no local function.
-    let local_fns: Vec<((usize, usize), &str)> = (0..count)
-        .filter(|i| p.text(*i) == "fn" && !(first..open).contains(i))
-        .filter_map(|i| {
-            let body = p
-                .find(i + 1, count, &["{", ";"])
-                .filter(|at| p.text(*at) == "{");
-            Some(((i, p.close(body?)? + 1), p.word(i + 1)?))
+    // `execute` itself is no local function. A function is seen in the block that holds its
+    // declaration, or in the whole file: `scope` is that range of tokens.
+    struct LocalFn<'a> {
+        name: &'a str,
+        tokens: (usize, usize),
+        scope: (usize, usize),
+    }
+    let mut local_fns: Vec<LocalFn> = vec![];
+    let mut blocks: Vec<usize> = vec![];
+    for i in 0..count {
+        match p.text(i) {
+            "{" => blocks.push(i),
+            "}" => {
+                blocks.pop();
+            }
+            "fn" if !(first..open).contains(&i) => {
+                let body = p
+                    .find(i + 1, count, &["{", ";"])
+                    .filter(|at| p.text(*at) == "{")
+                    .and_then(|at| p.close(at));
+                let scope = match blocks.last() {
+                    Some(block) => (*block, p.close(*block).unwrap_or(count)),
+                    None => (0, count),
+                };
+                if let (Some(end), Some(name)) = (body, p.word(i + 1)) {
+                    local_fns.push(LocalFn {
+                        name,
+                        tokens: (i, end + 1),
+                        scope,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    // The local function that the call at token `i` names: one that is seen there. Another
+    // item can carry the same name outside that block, such as `Some`.
+    let called_at = |i: usize| {
+        call_at(i).filter(|name| {
+            local_fns
+                .iter()
+                .any(|f| f.name == *name && (f.scope.0..f.scope.1).contains(&i))
         })
-        .collect();
-    let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
-    // The local functions that each function calls, read once.
-    let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
-    let fn_names: HashSet<&str> = local_fns.iter().map(|(_, name)| *name).collect();
+    };
     let in_local_fn = |i: usize| {
         local_fns
             .iter()
-            .any(|((from, to), _)| (*from..*to).contains(&i))
+            .any(|f| (f.tokens.0..f.tokens.1).contains(&i))
     };
-    for ((from, to), name) in &local_fns {
-        let (from, to) = (*from, *to);
+    let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
+    // The local functions that each function calls, read once.
+    let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for function in &local_fns {
+        let (from, to) = function.tokens;
         // A function that stands inside this one runs only when it is called: its tokens
         // are its own.
         let inner: Vec<(usize, usize)> = local_fns
             .iter()
-            .map(|(range, _)| *range)
+            .map(|other| other.tokens)
             .filter(|(start, end)| *start > from && *end <= to)
             .collect();
         let own = |i: usize| {
@@ -1430,17 +1468,15 @@ pub fn derive(source: &str) -> Result<Derived> {
             .filter(|state| state.writes && own(state.at))
             .map(|state| state.key.clone());
         writers
-            .entry((*name).to_owned())
+            .entry(function.name.to_owned())
             .or_default()
             .extend(direct);
-        for callee in (from..to).filter(|i| own(*i)).filter_map(call_at) {
-            if fn_names.contains(callee) {
-                callers_of.entry(callee).or_default().push(name);
-            }
+        for callee in (from..to).filter(|i| own(*i)).filter_map(called_at) {
+            callers_of.entry(callee).or_default().push(function.name);
         }
     }
     // Each written key goes from a function to its callers until no set grows.
-    let mut pending: Vec<&str> = local_fns.iter().map(|(_, name)| *name).collect();
+    let mut pending: Vec<&str> = local_fns.iter().map(|f| f.name).collect();
     while let Some(callee) = pending.pop() {
         let written = writers.get(callee).cloned().unwrap_or_default();
         for caller in callers_of.get(callee).into_iter().flatten() {
@@ -1705,7 +1741,7 @@ pub fn derive(source: &str) -> Result<Derived> {
             .collect();
         for written in (0..count)
             .filter(|i| step(*i))
-            .filter_map(call_at)
+            .filter_map(called_at)
             .filter_map(|name| writers.get(name))
         {
             moved.extend(written.iter().cloned());

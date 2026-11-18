@@ -222,12 +222,16 @@ A call of a local function that writes a key counts as a write of that key; a fu
 writes only where it is called. A key that starts with `day_` lives one daily window; any other key lives until a
 later write replaces it. The keeper enforces the window: Core's evaluator reads the state map as it gets it, so the
 contract and the server each leave an ended value out of it. `derive` refuses a state call whose key is not a string
-literal of 1 to 32 ASCII letters, digits or `_`, and a write of a standard figure.
+literal of 1 to 32 ASCII letters, digits or `_`, and a write of a standard figure. The literal spells the key itself:
+a key with an escape, such as `"\x61"`, is refused.
 
 `Derived::figures` names the cumulated figures that the kept statements read, each daily or total: those of the
 kept canonical rules, and each standard figure that a kept statement reads with `get_state`. The wallet keeps
 those figures and the keys whose keeper is `chain`. A statement that reads the stored day (`get_state(ctx, "day")`)
-leaves: a contract wallet stores no day.
+leaves: a contract wallet stores no day. The server evaluates the whole source on the wallet's values of those
+figures, as it does for a key that the chain keeps. The wallet gives a daily figure of its current window and
+leaves an ended one out, so a direct read of `day_spent`, `day_total` or `day_unpriced` gets the same value on
+the chain and on the server.
 
 Write a policy so that it stores little. Prefer, in this order: no state; a figure that a canonical rule keeps
 or that the request gives; then one small value under a short key. A daily count belongs under a `day_` key.

@@ -759,6 +759,55 @@ fn a_shadowed_name_after_a_statement_with_braces_leaves() {
     }
 }
 
+/// A raw name such as `r#mut` is a name. When a `let` that binds it leaves, a later statement
+/// that reads the name leaves too.
+#[test]
+fn a_binding_with_a_raw_keyword_name_is_followed() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let r#mut = false;\n    let r#mut = allowit::new_decision_context(ctx, None).is_ok();\n    allowit::set_state(ctx, \"paid\", r#mut)?;\n    assert!(r#mut);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    for name in ["r#mut", "r#ref", "seen"] {
+        let other = source.replace("r#mut", name);
+        let derived = derive(&other).unwrap();
+        assert_eq!(
+            keys(&other),
+            [("paid".to_owned(), Keeper::Server, false)],
+            "{name}"
+        );
+        assert!(
+            !derived.source.contains("paid") && !derived.source.contains("assert"),
+            "{name}"
+        );
+    }
+}
+
+/// A call names a local function only in the block that holds the function. Outside that
+/// block the name is another item, such as `Some`, and its call writes nothing.
+#[test]
+fn a_call_outside_the_block_of_a_function_is_no_call_of_it() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    {\n        fn Some(ctx: &AllowitContext) -> allowit::Result {\n            allowit::set_state(ctx, \"paid\", true)\n        }\n    }\n    let paid: bool = allowit::get_state(ctx, \"paid\")?.unwrap_or(false);\n    assert!(!paid);\n    allowit::set_state(ctx, \"paid\", true)?;\n    let _answer = Some(allowit::new_decision_context(ctx, None)?);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("paid".to_owned(), Keeper::Chain, false)]);
+    assert!(derive(source).unwrap().source.contains("assert!(!paid)"));
+    // Inside the block, the call is a call of the function: a leaving call moves the key.
+    let inside = source.replace(
+        "        }\n    }\n",
+        "        }\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            Some(ctx)?;\n        }\n    }\n",
+    );
+    assert_ne!(inside, source);
+    assert_eq!(keys(&inside), [("paid".to_owned(), Keeper::Server, false)]);
+}
+
+/// A `const` block in the condition of a branch is an operand, and the branch ends at its own
+/// body: a statement after the branch stays by itself.
+#[test]
+fn a_const_block_in_a_condition_is_an_operand() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if const { true } && allowit::new_decision_context(ctx, None).is_ok() {}\n    allowit::set_state(ctx, \"paid\", true)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("paid".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("\"paid\"") && !derived.source.contains("const"));
+}
+
 /// A function that leaves writes nothing by that: only a call of it writes. A function that
 /// no statement calls moves no key to the server.
 #[test]
@@ -1262,9 +1311,20 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         set("marked", AllowitValue::Bool(flagged));
         state
     };
+    // The first request of a new day. The keeper of a daily figure gives the figure of the
+    // current window: the wallet leaves an ended one out, and the server evaluates on the
+    // wallet's figures.
+    let rolled = || {
+        let mut state = figures();
+        for key in ["day_spent", "day_total"] {
+            state.remove(key);
+        }
+        state
+    };
     let states = [
         AllowitMap::new(),
         figures(),
+        rolled(),
         own(2, 5_000, 3, false),
         own(3, 0, 9, true),
     ];
