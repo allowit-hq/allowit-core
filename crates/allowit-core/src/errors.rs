@@ -5,10 +5,12 @@
 //! text for a details view. A host holds no error text of its own. The TypeScript package exports
 //! the same bytes as `errorCatalogue`.
 //!
-//! The generator (`scripts/generate-presentation.mjs`) checks the source,
-//! `typescript/error-catalogue.json`, and writes it here. An entry names the problem, its cause and
-//! the reader's next step; it says nothing about request IDs, retries or payment outcomes, which
-//! the sender's own details state.
+//! The generator (`scripts/generate-presentation.mjs`) composes this catalogue from its source,
+//! `typescript/error-catalogue.json`: an entry's own words, and the [`Retry`] kind of an entry whose
+//! reader can send its request again. Only the template of a retry kind names a request ID, a
+//! payment or a retry, so each step that repeats a request says it in the same reviewed words.
+//! Where the senders of a code need different recoveries, the code takes [`Retry::Details`]: the
+//! sender's `details.retry` names the recovery.
 use alloc::string::String;
 use alloc::vec::Vec;
 use std::sync::OnceLock;
@@ -30,6 +32,53 @@ pub enum Audience {
     Operator,
 }
 
+/// What a reader does with the request that the error answered. Each kind has one reviewed
+/// template in the catalogue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Retry {
+    /// The request has no final outcome, or the server answers it from its kept outcome: send it
+    /// unchanged, with the same request ID.
+    Same,
+    /// The outcome stands until the owner acts on the policy; then send the request unchanged.
+    Owner,
+    /// The request can have taken effect: read it first, and send a new one only once it ended
+    /// without a payment.
+    Final,
+    /// The purchase has a payment that settled or is settling: do not pay for it again.
+    Settled,
+    /// The request is not sent again.
+    Never,
+    /// The senders of the code need different recoveries: the sender's `details.retry` names
+    /// the recovery, and the template follows it.
+    Details,
+}
+
+impl Retry {
+    /// Every kind, in the order of the catalogue's templates.
+    pub const ALL: [Retry; 6] = [
+        Retry::Same,
+        Retry::Owner,
+        Retry::Final,
+        Retry::Settled,
+        Retry::Never,
+        Retry::Details,
+    ];
+    /// The kind's name in the catalogue.
+    pub fn name(self) -> &'static str {
+        match self {
+            Retry::Same => "same",
+            Retry::Owner => "owner",
+            Retry::Final => "final",
+            Retry::Settled => "settled",
+            Retry::Never => "none",
+            Retry::Details => "details",
+        }
+    }
+    fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
 /// One typed error code with the text that every host shows for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -39,11 +88,14 @@ pub struct Entry {
     pub title: String,
     /// Why it happened, in the owner's words.
     pub cause: String,
-    /// What the owner does next on reading the error in the app.
+    /// What the owner does next on reading the error in the app. An entry for the agent ends it
+    /// with the owner's sentence of its retry kind.
     pub next: String,
-    /// What an agent that reads the error in a terminal does next, when that differs from `next`.
-    /// Every entry for the agent has it.
+    /// What an agent that reads the error in a terminal does next, when that differs from `next`,
+    /// with the agent's sentences of the retry kind. Every entry for the agent has it.
     pub agent: Option<String>,
+    /// The retry kind, when the reader can send the request again or must not.
+    pub retry: Option<Retry>,
 }
 
 impl Entry {
@@ -86,6 +138,8 @@ fn parse() -> Vec<Entry> {
             cause: text(entry, "cause").expect("an entry has a cause"),
             next: text(entry, "next").expect("an entry has a next step"),
             agent: text(entry, "agent"),
+            retry: text(entry, "retry")
+                .map(|name| Retry::parse(&name).expect("a known retry kind")),
         })
         .collect()
 }
@@ -188,12 +242,13 @@ mod tests {
             .collect()
     }
 
-    /// The rule that the text of `field` breaks, `request`, `payment` or `retry`, or None. An entry
-    /// says nothing about request IDs, retries or payment outcomes: the sender's details state
-    /// those. A step (`next`, `agent`) names no ID, no payment and no retry, and the agent's step
-    /// not "again"; the owner's step can say "again" of a step in the app, such as a sign-in. A
-    /// title and a cause name no retry and no payment outcome; they can name an ID, because some
-    /// codes, such as `request_id_binds_other_input`, are about one.
+    /// The rule that an entry's own text in `field` breaks, `request`, `payment` or `retry`, or
+    /// None, as the generator (`scripts/error-catalogue.mjs`) applies it: only the template of a
+    /// retry kind names a request ID, a retry or a payment. A step (`next`, `agent`) names no ID, no
+    /// payment and no retry, and the agent's step not "again"; the owner's step can say "again" of
+    /// a step in the app, such as a sign-in. A title and a cause name no retry and no payment
+    /// outcome; they can name an ID, because some codes, such as `request_id_binds_other_input`,
+    /// are about one.
     fn word_rule(field: &str, text: &str) -> Option<&'static str> {
         const IDS: [&str; 2] = ["id", "ids"];
         const OUTCOME: [&str; 14] = [
@@ -272,23 +327,99 @@ mod tests {
     }
 
     #[test]
-    fn no_entry_names_a_request_id_a_retry_or_a_payment_outcome() {
-        for entry in catalogue() {
-            let mut fields = vec![
-                ("title", entry.title.as_str()),
-                ("cause", entry.cause.as_str()),
-                ("next", entry.next.as_str()),
-            ];
-            fields.extend(entry.agent.as_deref().map(|agent| ("agent", agent)));
-            for (field, text) in fields {
-                assert_eq!(
-                    word_rule(field, text),
-                    None,
-                    "{} {field}: {text}",
-                    entry.code
-                );
-            }
+    fn the_word_rules_agree_with_the_generator() {
+        // The generator's test reads the same cases, so both rule sets agree on each.
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/catalogue-text-vectors.json"
+        ))
+        .expect("the vectors are JSON");
+        let cases = vectors["cases"].as_array().expect("cases");
+        assert!(cases.len() > 20);
+        for case in cases {
+            let (field, text) = (
+                case["field"].as_str().unwrap(),
+                case["text"].as_str().unwrap(),
+            );
+            assert_eq!(
+                word_rule(field, text),
+                case["rule"].as_str(),
+                "{field}: {text}"
+            );
         }
+    }
+
+    /// The part of `composed` between `first` and `then`, or None when it is not so composed.
+    fn between<'a>(composed: &'a str, first: &str, then: &str) -> Option<&'a str> {
+        let middle = composed.strip_prefix(first)?.strip_suffix(then)?;
+        Some(middle.trim())
+    }
+
+    #[test]
+    fn each_step_is_its_own_words_and_the_template_of_its_retry_kind() {
+        let document: serde_json::Value = serde_json::from_str(ERROR_CATALOGUE_JSON).unwrap();
+        let templates = document["retry"].as_object().expect("the retry templates");
+        // serde_json reads the keys of an object in sorted order; the generator checks their order.
+        let kinds: BTreeSet<&str> = templates.keys().map(String::as_str).collect();
+        assert_eq!(kinds, BTreeSet::from(Retry::ALL.map(Retry::name)));
+        for (kind, template) in templates {
+            let fields: BTreeSet<&str> = template
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(fields, BTreeSet::from(["first", "then", "owner"]), "{kind}");
+        }
+        let mut composed = 0;
+        for (raw, entry) in document["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(catalogue())
+        {
+            let kind = raw["retry"].as_str();
+            assert_eq!(kind, entry.retry.map(Retry::name), "{}", entry.code);
+            for (field, text) in [("title", &entry.title), ("cause", &entry.cause)] {
+                assert_eq!(word_rule(field, text), None, "{} {field}", entry.code);
+            }
+            // The entry's own words of each step: without a retry kind the whole step, with one
+            // what stands between the template's sentences.
+            let (next, agent) = match kind {
+                None => (entry.next.as_str(), entry.agent.as_deref().unwrap_or("")),
+                Some(kind) => {
+                    composed += 1;
+                    let template = &templates[kind];
+                    let text = |key: &str| template[key].as_str().unwrap();
+                    let owner = if entry.audience == Audience::Agent {
+                        text("owner")
+                    } else {
+                        ""
+                    };
+                    let agent = entry.agent.as_deref().expect("a composed agent step");
+                    (
+                        between(&entry.next, "", owner).unwrap_or_else(|| {
+                            panic!("{} next ends with its template", entry.code)
+                        }),
+                        between(agent, text("first"), text("then"))
+                            .unwrap_or_else(|| panic!("{} agent holds its template", entry.code)),
+                    )
+                }
+            };
+            assert!(plain(next, 260), "{} next", entry.code);
+            assert_eq!(word_rule("next", next), None, "{} next: {next}", entry.code);
+            assert!(
+                agent.is_empty() || plain(agent, 260),
+                "{} agent",
+                entry.code
+            );
+            assert_eq!(
+                word_rule("agent", agent),
+                None,
+                "{} agent: {agent}",
+                entry.code
+            );
+        }
+        assert!(composed > 40, "{composed} entries have a retry kind");
     }
 
     #[test]
@@ -310,13 +441,14 @@ mod tests {
             assert!(plain(&entry.title, 70), "{} title", entry.code);
             assert!(!entry.title.ends_with(['.', '!']), "{} title", entry.code);
             assert!(plain(&entry.cause, 260), "{} cause", entry.code);
-            assert!(plain(&entry.next, 260), "{} next", entry.code);
+            // A composed step holds the entry's own words and the sentences of its retry kind.
+            assert!(plain(&entry.next, 600), "{} next", entry.code);
             // The owner reads `next` in the app; an entry for the agent states the agent's own step.
             if entry.audience == Audience::Agent {
                 assert!(entry.agent.is_some(), "{} has no agent step", entry.code);
             }
             if let Some(agent) = &entry.agent {
-                assert!(plain(agent, 260), "{} agent", entry.code);
+                assert!(plain(agent, 600), "{} agent", entry.code);
             }
             assert_eq!(
                 entry.agent_next(),
@@ -338,12 +470,13 @@ mod tests {
             .collect();
         assert_eq!(
             keys,
-            BTreeSet::from(["schemaVersion", "helpPath", "entries"])
+            BTreeSet::from(["schemaVersion", "helpPath", "retry", "entries"])
         );
         for entry in document["entries"].as_array().unwrap() {
             for (key, value) in entry.as_object().unwrap() {
                 assert!(
-                    ["code", "for", "title", "cause", "next", "agent"].contains(&key.as_str()),
+                    ["code", "for", "title", "cause", "next", "agent", "retry"]
+                        .contains(&key.as_str()),
                     "{key}"
                 );
                 // Every field that is present is text: `parse` would read an `agent` of null or a

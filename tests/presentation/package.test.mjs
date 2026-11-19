@@ -54,10 +54,10 @@ test('the packed public entry points have usable types and contain no guest sour
     assert.equal(actual.names.length, 9);
     await writeFile(join(scratch, 'errors.mjs'), `import { errorCatalogue, errorCatalogueSource, errorEntry, errorHelpPath } from '@allowit/core';\nconsole.log(JSON.stringify({ codes: errorCatalogue.entries.map(entry => entry.code), source: errorCatalogueSource, denied: errorEntry('policy_denied'), path: errorHelpPath('policy_denied'), frozen: Object.isFrozen(errorCatalogue.entries[0]) }));\n`);
     const errors = JSON.parse(run(process.execPath, [join(scratch, 'errors.mjs')], { cwd: scratch }));
-    // The package holds the catalogue as the Rust crate does; its source file stays in the repository.
-    const { catalogueText, checkErrorCatalogueSource } = await import('../../scripts/error-catalogue.mjs');
+    // The package holds the composed catalogue, as the Rust crate does; its source stays in the repository.
+    const { catalogueText, checkErrorCatalogueSource, composeErrorCatalogue } = await import('../../scripts/error-catalogue.mjs');
     const errorSource = checkErrorCatalogueSource(await readFile(join(root, 'typescript/error-catalogue.json')));
-    assert.equal(errors.source, catalogueText(errorSource));
+    assert.equal(errors.source, catalogueText(composeErrorCatalogue(errorSource)));
     assert.equal(errors.source, await readFile(join(root, 'crates/allowit-core/resources/error-catalogue.json'), 'utf8'));
     assert.deepEqual(errors.codes, errorSource.entries.map(entry => entry.code));
     assert.equal(new Set(errors.codes).size, errors.codes.length);
@@ -78,7 +78,7 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
   const catalogue = JSON.parse(await readFile(join(root, 'typescript/error-catalogue.json'), 'utf8'));
   assert.equal(checkErrorCatalogue(catalogue), catalogue);
   const entry = { code: 'some_code', for: 'owner', title: 'The wallet did not sign', cause: 'A cause.', next: 'A step.' };
-  const one = change => ({ schemaVersion: 1, helpPath: '/help/', entries: [{ ...entry, ...change }] });
+  const one = change => ({ schemaVersion: 1, helpPath: '/help/', retry: catalogue.retry, entries: [{ ...entry, ...change }] });
   assert.doesNotThrow(() => checkErrorCatalogue(one({})));
   for (const change of [
     { cause: 'A lone surrogate \ud800 that serde_json refuses.' },
@@ -97,17 +97,54 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
     { code: 'Bad-Code' },
     { for: 'someone' },
     { extra: 'field' },
-    // An entry for the agent states the agent's step apart from the owner's.
+    // An entry for the agent states the agent's step apart from the owner's, in its own words or by its retry kind.
     { for: 'agent' },
-    { retry: 'same' },
+    { retry: 'later' },
+    // Only a retry kind's template names a request ID, a payment outcome or a retry.
+    { cause: 'The server refused it. Nothing was paid.' },
+    { next: 'Send the request again with a new request ID.' },
+    { agent: 'Send the request again in a moment.' },
   ]) {
     assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
   }
-  assert.doesNotThrow(() => checkErrorCatalogue(one({ for: 'agent', agent: 'Tell the owner.' })));
+  assert.doesNotThrow(() => checkErrorCatalogue(one({ for: 'agent', retry: 'same' })));
   assert.throws(() => checkErrorCatalogue({ ...one({}), entries: [entry, entry] }), /two entries/);
-  assert.throws(() => checkErrorCatalogue({ ...one({}), retry: {} }), /no field retry/);
+  // Each of the six kinds has one template with its three sentences, and nothing else does.
+  const { retry } = catalogue;
+  assert.throws(() => checkErrorCatalogue({ ...one({}), retry: { ...retry, later: retry.same } }), /retry templates/);
+  const { details, ...fewer } = retry;
+  assert.throws(() => checkErrorCatalogue({ ...one({}), retry: fewer }), /retry templates/);
+  assert.throws(() => checkErrorCatalogue({ ...one({}), retry: { ...retry, same: { ...retry.same, then: '' } } }), /retry template same/);
+  // The Rust test reads the same cases of the word rules, so the two rule sets agree on each.
+  const { wordRule } = await import('../../scripts/error-catalogue.mjs');
+  const vectors = JSON.parse(await readFile(join(root, 'crates/allowit-core/tests/fixtures/catalogue-text-vectors.json'), 'utf8'));
+  assert.ok(vectors.cases.length > 20);
+  for (const { field, text, rule } of vectors.cases) assert.equal(wordRule(field, text), rule, `${field}: ${text}`);
   // An underscore ends a word, as in the Rust test.
   assert.throws(() => checkErrorCatalogue(one({ cause: 'The key that _you_ supplied did not match.' })), /name no reader/);
+});
+
+test('each step with a retry kind is the words of its entry and the template of its kind', async () => {
+  const { composeErrorCatalogue } = await import('../../scripts/error-catalogue.mjs');
+  const template = { first: 'Read it first.', then: 'Then send it.', owner: 'The agent sends it.' };
+  const retry = { same: template, owner: template, final: template, settled: template, none: template, details: template };
+  const entries = [
+    { code: 'for_agent', for: 'agent', title: 'T', cause: 'C.', next: 'No action is needed.', agent: 'Wait.', retry: 'same' },
+    { code: 'for_owner', for: 'owner', title: 'T', cause: 'C.', next: 'Do the step.', agent: 'Tell the owner.', retry: 'final' },
+    { code: 'no_words', for: 'agent', title: 'T', cause: 'C.', next: 'No action is needed.', retry: 'none' },
+    { code: 'no_kind', for: 'agent', title: 'T', cause: 'C.', next: 'N.', agent: 'A.' },
+    { code: 'by_sender', for: 'agent', title: 'T', cause: 'C.', next: 'N.', agent: 'A.', retry: 'details' },
+  ];
+  const composed = composeErrorCatalogue({ schemaVersion: 1, helpPath: '/help/', retry, entries }).entries;
+  assert.deepEqual(composed.map(({ next, agent }) => [next, agent]), [
+    ['No action is needed. The agent sends it.', 'Read it first. Wait. Then send it.'],
+    // The owner's step of an entry for the owner is the owner's own.
+    ['Do the step.', 'Read it first. Tell the owner. Then send it.'],
+    ['No action is needed. The agent sends it.', 'Read it first. Then send it.'],
+    ['N.', 'A.'],
+    ['N. The agent sends it.', 'Read it first. A. Then send it.'],
+  ]);
+  assert.deepEqual(composed.map(entry => entry.retry), ['same', 'final', 'none', undefined, 'details']);
 });
 
 test('the catalogue file is the canonical text of what it parses to', async () => {
@@ -132,6 +169,11 @@ test('the catalogue file is the canonical text of what it parses to', async () =
     assert.notEqual(variant, entry);
     assert.throws(() => checkErrorCatalogueSource(source.slice(0, first) + variant + source.slice(end)), /canonical form/, variant);
   }
+  // A template with its sentences out of order.
+  const same = source.match(/^    "same": \{.*\},$/m)[0];
+  const swapped = same.replace(/"first": ("[^"]*"), "then": ("[^"]*")/, '"then": $2, "first": $1');
+  assert.notEqual(swapped, same);
+  assert.throws(() => checkErrorCatalogueSource(source.replace(same, swapped)), /canonical form/);
 });
 
 test('each generated copy keeps the line endings of its source on every checkout', () => {

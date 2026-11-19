@@ -285,9 +285,24 @@ control in the app and behind `--verbose` in the CLI. A host holds no error text
 
 One code has one cause: where the senders of a code have different causes, they send different codes.
 
-`scripts/generate-presentation.mjs` checks the source and writes it to
+An entry can have a retry kind, which says what happens to the request that the error answered:
+
+| Kind | The request |
+| --- | --- |
+| `same` | Has no final outcome, or the server answers it from its kept outcome: it goes again unchanged. |
+| `owner` | Keeps its outcome until the owner acts on the policy; then it goes again unchanged. |
+| `final` | Can have taken effect: the agent reads it first and sends a new one only once it ended without a payment. |
+| `settled` | Belongs to a purchase with a payment that settled or is settling: the agent does not pay for it again. |
+| `none` | Does not go again. |
+| `details` | Goes as the sender's `details.retry` says: the senders of the code need different recoveries. |
+
+A code takes one of the first five kinds only when every sender sends it in one situation. A code whose senders need
+different recoveries takes `details`, or no kind. Each kind has one template in the source: the agent's sentences
+around the entry's own step, and the owner's sentence at the end of the owner's step of an entry for the agent.
+`scripts/generate-presentation.mjs` composes each step from the entry's own words and its template, and writes the
+composed catalogue to
 [`crates/allowit-core/resources/error-catalogue.json`](crates/allowit-core/resources/error-catalogue.json) and to
-`errorCatalogue` in the npm package.
+`errorCatalogue` in the npm package. Hosts read only the composed catalogue.
 
 ```rust
 use allowit_core::errors;
@@ -308,12 +323,12 @@ The catalogue holds Allowit's own refusal codes. The reason codes of the payment
 a seller, such as `invalidReason` and `errorReason`, belong to that protocol and are not in the catalogue.
 
 A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
-missing or overlong text, a second entry for a code or an unknown field. Catalogue text is printable ASCII, so a page,
+missing or overlong text, a second entry for a code, an unknown retry kind or an unknown field. Catalogue text is printable ASCII, so a page,
 a terminal and a Rust host show it as written, and a title or a cause names no reader ("you"): an owner and an agent
 read the same entry.
 
-An entry says nothing about request IDs, retries or payment outcomes: the sender's details state those. The Rust test
-checks each word of each entry against fixed word lists, so the check is complete for those lists:
+Only a template names a request ID, a payment or a retry. The generator and the Rust test check each word of an
+entry's own text against fixed word lists, so the check is complete for those lists:
 
 - A step (`next`, `agent`) has no ID word (`id`, `ids`), no payment word (`pay`, `payment`, `paid`, `settle`,
   `settlement`, `charged`, `refund` and their forms) and no retry word (`retry`, `resend` and their forms). The agent's
@@ -322,6 +337,8 @@ checks each word of each entry against fixed word lists, so the check is complet
   `charged`, the forms of `refund`). They can name an ID: some codes, such as `request_id_binds_other_input`, are
   about one.
 
+Both rule sets read the cases of
+[`catalogue-text-vectors.json`](crates/allowit-core/tests/fixtures/catalogue-text-vectors.json).
 Each repository that defines codes or shows errors has a test that fails for a code without an entry.
 
 ## Asset units
@@ -494,7 +511,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.1", version = "0.14", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.0", version = "0.15", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

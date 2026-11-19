@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { catalogueText, checkErrorCatalogueSource, CODE } from './error-catalogue.mjs';
+import { catalogueText, checkErrorCatalogueSource, composeErrorCatalogue, CODE, RETRY_KINDS } from './error-catalogue.mjs';
 
 const root = new URL('../', import.meta.url);
 const source = await readFile(new URL('typescript/canonical-functions.json', root), 'utf8');
@@ -13,7 +13,8 @@ if (registry.coreVersion !== manifest.version || registry.coreVersion !== worksp
 }
 const hash = createHash('sha256').update(source, 'utf8').digest('hex');
 // The error catalogue: one entry for each typed error code, with the text that every host shows.
-const errors = checkErrorCatalogueSource(await readFile(new URL('typescript/error-catalogue.json', root)));
+// The source holds each entry's own words and retry kind; every host reads the composed catalogue.
+const errors = composeErrorCatalogue(checkErrorCatalogueSource(await readFile(new URL('typescript/error-catalogue.json', root))));
 const errorSource = catalogueText(errors);
 const errorCodes = errors.entries.map(({ code }) => JSON.stringify(code)).join(' | ');
 const names = registry.functions.map(({ name }) => JSON.stringify(name)).join(' | ');
@@ -713,6 +714,22 @@ export interface OwnerChain {
 export type ErrorCode = ${errorCodes};
 /** Who reads the error and acts on it: the wallet owner, the paying agent, or the operator of the server. */
 export type ErrorAudience = 'owner' | 'agent' | 'operator';
+/**
+ * What a reader does with the request that the error answered. same: send it unchanged. owner: send it unchanged once
+ * the owner changed the policy. final: read it first, and send a new one only once it ended without a payment.
+ * settled: do not pay for the purchase again. none: do not send it again. details: follow the retry that the sender's
+ * details name, for a code whose senders need different recoveries.
+ */
+export type RetryKind = ${RETRY_KINDS.map(kind => JSON.stringify(kind)).join(' | ')};
+/** The reviewed sentences of a retry kind: the only text of the catalogue that names a request ID, a payment or a retry. */
+export interface RetryTemplate {
+  /** The agent's sentence before the entry's own step, or empty. */
+  readonly first: string;
+  /** The agent's sentence after the entry's own step. */
+  readonly then: string;
+  /** The sentence at the end of the owner's step. */
+  readonly owner: string;
+}
 export interface ErrorEntry {
   readonly code: ErrorCode;
   readonly for: ErrorAudience;
@@ -720,18 +737,24 @@ export interface ErrorEntry {
   readonly title: string;
   /** Why it happened, in the owner's words. */
   readonly cause: string;
-  /** What the owner does next on reading the error in the app. */
+  /** What the owner does next on reading the error in the app, with the owner's sentence of the retry kind. */
   readonly next: string;
-  /** What an agent that reads the error in a terminal does next, when that differs from \`next\`. Every entry for the agent has it. */
+  /**
+   * What an agent that reads the error in a terminal does next, when that differs from \`next\`, with the agent's
+   * sentences of the retry kind. Every entry for the agent has it.
+   */
   readonly agent?: string;
+  /** The retry kind, when the reader can send the request again or must not. */
+  readonly retry?: RetryKind;
 }
 export interface ErrorCatalogue {
   readonly schemaVersion: 1;
   /** The path of a help page before its code, on the origin that serves the app: \`/help/\`. */
   readonly helpPath: string;
+  readonly retry: { readonly [K in RetryKind]: RetryTemplate };
   readonly entries: readonly ErrorEntry[];
 }
-/** Exact UTF-8 input of \`errorCatalogue\`: the catalogue as the Rust crate holds it. */
+/** Exact UTF-8 input of \`errorCatalogue\`: the composed catalogue, as the Rust crate holds it. */
 export declare const errorCatalogueSource: string;
 export declare const errorCatalogue: ErrorCatalogue;
 /** The entry of a typed error code, or null for a value that has none. */
