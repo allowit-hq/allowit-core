@@ -174,9 +174,10 @@ pub trait RuntimeProvider {
     /// `observed`, compared with its own account `retained`: the version of an owner's
     /// configuration change that this rail verified on the network. The host asks while no
     /// operation of the wallet is open, whatever the two versions are. `None` when `observed` shows
-    /// the configuration that `retained` describes. A change that the host cannot take, such as one
-    /// that also moved the wallet's replay state or a version that went back, is refused. The
-    /// default refuses.
+    /// the configuration and the replay state (`Accounting::nonce`) that `retained` describes.
+    /// Every other difference is refused: a change that the host cannot take, such as one that also
+    /// moved the replay state or a version that went back, and a replay state that moved while the
+    /// version stayed. The default refuses.
     fn configuration_change(
         &self,
         i: &crate::vendor::runtime::Installation,
@@ -270,7 +271,8 @@ pub trait RuntimeProvider {
             "This rail does not renew wallet code within a time bound",
         ))
     }
-    /// Whether the code transaction `p` from `prepare_code_within` or `prepare_code_renewal` is
+    /// Whether the code transaction `p` from `prepare_code_within` or `prepare_code_renewal`, or
+    /// from their time-bound forms `prepare_code_until` and `prepare_code_renewal_until`, is
     /// still needed: an upload until its code is live, a renewal while the code's lifetime is
     /// below the renewal threshold. A caller sends again a code transaction that the network did
     /// not accept only while it is needed, since another transaction can do its work while it
