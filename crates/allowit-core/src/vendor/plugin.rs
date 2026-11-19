@@ -214,6 +214,8 @@ pub enum LinkKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Deadlines {
+    /// The longest validity, in seconds, of an operation that this rail prepares: a host bounds
+    /// the validity that it asks for (`Validity`) by it.
     pub max_validity_secs: u64,
     pub owner_step_ttl_secs: u64,
     pub block_time_secs: u64,

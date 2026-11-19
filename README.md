@@ -42,6 +42,10 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   server keeps the difference per wallet: a confirmed operation adds `Fee::repaid_native_units` and
   subtracts `Fee::native_units`. It passes that carry as `Terms::gas_carry_units`, and the rail
   subtracts it from the next repayment, down to zero.
+- Time bounds and configuration changes that only a rail can decide, each refused by a rail that
+  does not implement it: `prepare_code_until` and `prepare_code_renewal_until` sign a code
+  transaction within the caller's time bound, and `configuration_change` gives the version of an
+  owner's configuration change that the rail verified.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
