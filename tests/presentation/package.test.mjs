@@ -52,6 +52,18 @@ test('the packed public entry points have usable types and contain no guest sour
     assert.equal(actual.source, source);
     assert.equal(actual.hash, createHash('sha256').update(source).digest('hex'));
     assert.equal(actual.names.length, 9);
+    await writeFile(join(scratch, 'errors.mjs'), `import { errorCatalogue, errorCatalogueSource, errorEntry, errorHelpPath } from '@allowit/core';\nconsole.log(JSON.stringify({ codes: errorCatalogue.entries.map(entry => entry.code), source: errorCatalogueSource, denied: errorEntry('policy_denied'), path: errorHelpPath('policy_denied'), frozen: Object.isFrozen(errorCatalogue.entries[0]) }));\n`);
+    const errors = JSON.parse(run(process.execPath, [join(scratch, 'errors.mjs')], { cwd: scratch }));
+    // The package holds the catalogue as the Rust crate does; its source file stays in the repository.
+    const { catalogueText, checkErrorCatalogueSource } = await import('../../scripts/error-catalogue.mjs');
+    const errorSource = checkErrorCatalogueSource(await readFile(join(root, 'typescript/error-catalogue.json')));
+    assert.equal(errors.source, catalogueText(errorSource));
+    assert.equal(errors.source, await readFile(join(root, 'crates/allowit-core/resources/error-catalogue.json'), 'utf8'));
+    assert.deepEqual(errors.codes, errorSource.entries.map(entry => entry.code));
+    assert.equal(new Set(errors.codes).size, errors.codes.length);
+    assert.equal(errors.denied.for, 'agent');
+    assert.equal(errors.path, '/help/policy_denied');
+    assert.equal(errors.frozen, true);
     const { canonicalFunctionRegistry } = await import('../../typescript/core.js');
     assert(Object.isFrozen(canonicalFunctionRegistry));
     assert(Object.isFrozen(canonicalFunctionRegistry.functions[0].parameter));
@@ -59,4 +71,98 @@ test('the packed public entry points have usable types and contain no guest sour
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+});
+
+test('the generator refuses catalogue text that a Rust host or a terminal cannot show', async () => {
+  const { checkErrorCatalogue } = await import('../../scripts/error-catalogue.mjs');
+  const catalogue = JSON.parse(await readFile(join(root, 'typescript/error-catalogue.json'), 'utf8'));
+  assert.equal(checkErrorCatalogue(catalogue), catalogue);
+  const entry = { code: 'some_code', for: 'owner', title: 'The wallet did not sign', cause: 'A cause.', next: 'A step.' };
+  const one = change => ({ schemaVersion: 1, helpPath: '/help/', causes: ['some_code'], staticSteps: ['some_code'], entries: [{ ...entry, ...change }] });
+  assert.doesNotThrow(() => checkErrorCatalogue(one({})));
+  for (const change of [
+    { cause: 'A lone surrogate \ud800 that serde_json refuses.' },
+    { title: '\u061cAn Arabic letter mark' },
+    { cause: 'A combining mark after you\u0345.' },
+    { cause: 'A letter outside ASCII: caf\u00e9.' },
+    { cause: 'A C1 control \u0085 here.' },
+    { title: 'Two lines' },
+    { title: 'Reversed ‮ text' },
+    { next: 'A byte order mark ﻿ here.' },
+    { cause: 'Two\nlines.' },
+    { title: 'Your wallet did not sign' },
+    { cause: 'The signature that you sent is invalid.' },
+    { title: 'A title.' },
+    { title: 'x'.repeat(71) },
+    { code: 'Bad-Code' },
+    { for: 'someone' },
+    { extra: 'field' },
+    // An entry for the agent states the agent's step apart from the owner's.
+    { for: 'agent' },
+    { retry: 'same' },
+  ]) {
+    assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
+  }
+  assert.doesNotThrow(() => checkErrorCatalogue(one({ for: 'agent', agent: 'Tell the owner.' })));
+  assert.throws(() => checkErrorCatalogue({ ...one({}), entries: [entry, entry] }), /two entries/);
+  assert.throws(() => checkErrorCatalogue({ ...one({}), retry: {} }), /no field retry/);
+  // An entry is a registry line: the cause and the step are the sender's unless an allow-list names the code.
+  const { cause, next, ...bare } = entry;
+  const sender = change => ({ schemaVersion: 1, helpPath: '/help/', causes: [], staticSteps: [], entries: [{ ...bare, ...change }] });
+  assert.doesNotThrow(() => checkErrorCatalogue(sender({})));
+  assert.doesNotThrow(() => checkErrorCatalogue(sender({ for: 'agent' })));
+  assert.throws(() => checkErrorCatalogue(sender({ cause: 'A cause.' })), /cause is the sender's/);
+  assert.throws(() => checkErrorCatalogue(sender({ next: 'A step.' })), /step is the sender's/);
+  assert.throws(() => checkErrorCatalogue(sender({ agent: 'A step.' })), /step is the sender's/);
+  assert.throws(() => checkErrorCatalogue({ ...sender({}), causes: ['some_code'] }), /listed cause/);
+  assert.throws(() => checkErrorCatalogue({ ...sender({}), staticSteps: ['some_code'] }), /static step/);
+  for (const list of ['causes', 'staticSteps']) {
+    assert.throws(() => checkErrorCatalogue({ ...one({}), [list]: ['some_code', 'other_code'] }), /other_code, which has no entry/);
+    assert.throws(() => checkErrorCatalogue({ ...one({}), [list]: ['some_code', 'some_code'] }), new RegExp(`once in ${list}`));
+    const { [list]: dropped, ...unlisted } = one({});
+    assert.throws(() => checkErrorCatalogue(unlisted), new RegExp(`once in ${list}`));
+  }
+  // An underscore ends a word, as in the Rust test.
+  assert.throws(() => checkErrorCatalogue(one({ cause: 'The key that _you_ supplied did not match.' })), /name no reader/);
+});
+
+test('the catalogue file is the canonical text of what it parses to', async () => {
+  const { checkErrorCatalogueSource } = await import('../../scripts/error-catalogue.mjs');
+  const source = await readFile(join(root, 'typescript/error-catalogue.json'), 'utf8');
+  assert.doesNotThrow(() => checkErrorCatalogueSource(source));
+  const first = source.indexOf('{"code": ');
+  const end = source.indexOf('}', first) + 1;
+  const entry = source.slice(first, end);
+  const variants = [
+    // A second title: JSON.parse keeps the valid one, and serde_json refuses the lone surrogate of the first.
+    entry.replace('"title": ', '"title": "A \\ud800 title", "title": '),
+    // An escape that reads as a letter.
+    entry.replace('"title": "', '"title": "\\u0054'),
+    // Fields out of order.
+    entry.replace(/"for": "(\w+)", /, '').replace('{', '{"for": "owner", '),
+  ];
+  // A byte that is not ASCII, such as a malformed UTF-8 byte, is refused before any decoder reads it.
+  const malformed = Buffer.concat([Buffer.from(source.slice(0, first + 30)), Buffer.from([0xff]), Buffer.from(source.slice(first + 30))]);
+  assert.throws(() => checkErrorCatalogueSource(malformed), /printable ASCII/);
+  for (const variant of variants) {
+    assert.notEqual(variant, entry);
+    assert.throws(() => checkErrorCatalogueSource(source.slice(0, first) + variant + source.slice(end)), /canonical form/, variant);
+  }
+});
+
+test('each generated copy keeps the line endings of its source on every checkout', () => {
+  const eol = path => run('git', ['check-attr', 'eol', '--', path]).trim().split(': ').pop();
+  for (const [source, copy] of [
+    ['typescript/error-catalogue.json', 'crates/allowit-core/resources/error-catalogue.json'],
+    ['typescript/canonical-functions.json', 'crates/allowit-core/resources/canonical-functions.json'],
+  ]) {
+    assert.equal(eol(source), 'lf', source);
+    assert.equal(eol(copy), eol(source), copy);
+  }
+});
+
+test('every release checks that the generated copies are the bytes of their sources', async () => {
+  const release = await readFile(join(root, '.github/workflows/release.yml'), 'utf8');
+  // Either line ending: the workflow's line endings are not part of the catalogue's bytes.
+  assert.match(release, /- run: node scripts\/generate-presentation\.mjs --check\r?\n/);
 });
