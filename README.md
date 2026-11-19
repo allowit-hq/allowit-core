@@ -280,6 +280,54 @@ A policy that needs another param or its own state uses the `custom` kind.
 | `expires_at` | Unix timestamp in seconds | Require unexpired parameters and request. |
 | `operations` | `*` or a list of operation names | Require a permitted operation. |
 
+## Error catalogue
+
+[`error-catalogue.json`](typescript/error-catalogue.json) is a registry of the typed error codes that a server, a rail
+or a client sends. An entry has the code, who reads it (`owner`, `agent` or `operator`) and a title: a few words that
+name the code, such as "Operation expired" or "Credit limit reached", and say nothing about why the error happened or
+what happened before. A host shows the title, then the sender's own message as the cause and the step, then the help
+link of the code, `<app origin>/help/<code>`.
+
+A cause or a step in the catalogue is a claim about every sender of its code. So an entry has a cause only when the
+allow-list `causes` names its code, and a step (the owner's `next` and, for a terminal reader that does something
+else, the agent's `agent`) only when `staticSteps` names it. Each list holds one code per line, so each addition is one
+line of a review against that code's senders. Both lists are empty in this release.
+
+`scripts/generate-presentation.mjs` checks the source and writes it to
+[`crates/allowit-core/resources/error-catalogue.json`](crates/allowit-core/resources/error-catalogue.json) and to
+`errorCatalogue` in the npm package.
+
+```rust
+use allowit_core::errors;
+let sender_message = "The policy denied this payment: daily limit.";
+if let Some(entry) = errors::entry("policy_denied") {
+    // The cause and the step are the sender's unless the catalogue lists the code.
+    let cause = entry.cause.as_deref().unwrap_or(sender_message);
+    println!("{}\n{cause}", entry.title);
+}
+// With the `client` feature. None unless `origin` is an HTTP or HTTPS origin as a URL parser writes it.
+let page = errors::help_url("https://app.allowit.ai", "policy_denied");
+```
+
+```ts
+import { errorEntry, errorHelpPath } from "@allowit/core";
+const entry = errorEntry(code); // null for a code that this release does not know
+const page = errorHelpPath(code); // "/help/policy_denied"
+```
+
+The catalogue holds Allowit's own refusal codes. The reason codes of the payment protocol that a facilitator sends
+a seller, such as `invalidReason` and `errorReason`, belong to that protocol and are not in the catalogue.
+
+A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
+missing or overlong title, a second entry for a code, a cause or a step for a code that its allow-list does not name, or
+an unknown field. Catalogue text is printable ASCII, so a page, a terminal and a Rust host show it as written, and a
+title or a cause names no reader ("you"): an owner and an agent read the same entry. The Rust test checks each word of
+each entry against fixed word lists: a title or a cause has no retry word and no payment outcome word (`paid`,
+`unpaid`, the forms of `settle`, `charged`, the forms of `refund`), and a step also no ID, request, resume or payment
+word.
+
+Each repository that defines codes or shows errors has a test that fails for a code without an entry.
+
 ## Asset units
 
 A rail supplies the unit of every amount. `RailPlugin::native_asset(network)` and
@@ -450,7 +498,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.0", version = "0.15", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.1", version = "0.15", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

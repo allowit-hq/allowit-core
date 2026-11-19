@@ -23,8 +23,10 @@ pub mod code {
     pub const CODE_HASH_MISMATCH: &str = "custom_code_hash_mismatch";
     /// A tool that the build needs is missing or has another version.
     pub const TOOLCHAIN_MISSING: &str = "custom_toolchain_missing";
-    /// The tools ran and the build failed.
+    /// The tools ran and the build failed on this device.
     pub const BUILD_FAILED: &str = "custom_build_failed";
+    /// The policy source does not pass the source gate of the build: it needs a revised policy.
+    pub const SOURCE_REJECTED: &str = "custom_source_rejected";
     /// The policy has no build yet.
     pub const BUILD_MISSING: &str = "custom_build_missing";
 }
