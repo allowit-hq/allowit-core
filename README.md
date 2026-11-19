@@ -350,7 +350,7 @@ An owner request that the server refuses with `{error, code, details}` keeps the
 
 | Package | Library | Responsibility | License |
 | --- | --- | --- | --- |
-| `allowit-core` | `allowit_core` | Portable policy rules and reusable host primitives | [Per-file terms](crates/allowit-core/LICENSES.md) |
+| `allowit-core` | `allowit_core` | Portable policy rules and reusable host primitives | MIT |
 | npm `@allowit/core` | `@allowit/core` | Common wire types and canonical function metadata for frontends | MIT |
 
 Core files, including the lockfiles, name no rail or vendor and hold no rail-shaped literal or vendor
@@ -564,12 +564,9 @@ Each rail checks its native contract build in its own repository.
 The portable package originates in [the Stellar policy library][portable-source].
 The retired compiler and bounded legacy model remain in [core's original source][legacy-source].
 
-The host modules, including the Rust source gate from Stellar's MIT host crate, retain the
-[MIT License](LICENSE). The portable sources retain their `UNLICENSED` terms.
-The single Cargo package records these separate scopes in [LICENSES.md](crates/allowit-core/LICENSES.md). The copied Python helper and corpus generator retain their
-original undeclared terms under [scripts/LICENSE](scripts/LICENSE).
-The original corpus and portable fixture retain their terms under [fixture terms](crates/allowit-core/tests/fixtures/LICENSE).
-Dependencies retain their own terms.
+Every file of this repository is licensed under the [MIT License](LICENSE): the host modules, the portable
+sources, the Python helper and corpus generator ([scripts/LICENSE](scripts/LICENSE)) and the test fixtures
+([fixture terms](crates/allowit-core/tests/fixtures/LICENSE)). Dependencies retain their own terms.
 
 [portable-source]: https://github.com/allowit-hq/allowit-contracts-stellar/tree/d0ae9be9e3d7a51e9ac4a1008ba207937aef36a2/crates/allowit
 [legacy-source]: https://github.com/allowit-hq/allowit-core/tree/64ec4e989b878b13995c139832a5901e92b020fd

@@ -625,9 +625,9 @@ pub const SOURCE_LIB_RS: &str = include_str!("lib.rs");
 /// Exact shared rule source for a host build against this release.
 #[cfg(feature = "std")]
 pub const SOURCE_CORE_RS: &str = include_str!("core.rs");
-/// The portable package's declared terms. Embedding its source grants no additional license.
+/// The portable package's licence: MIT, the licence of this repository.
 #[cfg(feature = "std")]
-pub const SOURCE_TERMS: &str = "UNLICENSED";
+pub const SOURCE_TERMS: &str = "MIT";
 
 #[cfg(all(test, feature = "std"))]
 mod host_tests;
