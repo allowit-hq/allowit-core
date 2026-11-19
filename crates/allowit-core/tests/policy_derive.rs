@@ -2051,37 +2051,63 @@ fn source_calls_lists_rules_and_host_calls_in_source_order() {
 }
 
 /// `daily_window_end`: the keeper of a daily value keeps its window after an operation by
-/// Core's rule. A read renews nothing, also when the operation takes effect after the window
-/// ended; the first write after the window ended opens one at the operation's time; a write
-/// in an open window keeps its end.
+/// Core's portable rule, which a rail's contract includes too. The end is the window's last
+/// unit, inclusive. A read renews nothing, also when the operation takes effect after the window
+/// ended; the first write after the window ended opens one at the operation's time; a write in
+/// an open window keeps its end. An end past the clock's range is an error, never an ended window.
 #[test]
 fn a_daily_window_opens_with_the_first_write_after_it_ended() {
-    use allowit_core::AllowitValue;
-    use allowit_core::policy_source::daily_window_end;
+    use allowit_core::policy_source::{daily_window_end, daily_window_open};
+    use allowit_core::{AllowitError, AllowitValue};
     const DAY: u64 = 86_400;
     let (one, two) = (AllowitValue::Int(1), AllowitValue::Int(2));
-    // No value before: the write opens a window at the operation's time.
-    assert_eq!(daily_window_end(None, &one, 1_000, DAY), 1_000 + DAY);
+    // The policy source module re-exports the portable rule.
+    assert_eq!(
+        allowit_core::daily_window_end(None, &one, 0, DAY),
+        daily_window_end(None, &one, 0, DAY)
+    );
+    // The end is inclusive: the window is open at its end and closed one unit later.
+    assert!(daily_window_open(5_000, 5_000));
+    assert!(!daily_window_open(5_000, 5_001));
+    // No value before: the write opens a window of `length` units from the operation's time.
+    assert_eq!(
+        daily_window_end(None, &one, 1_000, DAY),
+        Ok(1_000 + DAY - 1)
+    );
     // A read just before the end that takes effect just after it: no renewal.
     assert_eq!(
         daily_window_end(Some((&one, 5_000)), &one, 5_001, DAY),
-        5_000
+        Ok(5_000)
     );
     // A read inside the window keeps the end.
     assert_eq!(
         daily_window_end(Some((&one, 5_000)), &one, 4_000, DAY),
-        5_000
+        Ok(5_000)
     );
-    // A write inside the window keeps the end.
-    assert_eq!(
-        daily_window_end(Some((&one, 5_000)), &two, 4_000, DAY),
-        5_000
-    );
+    // A write inside the window, up to its last unit, keeps the end.
+    for at in [4_000, 5_000] {
+        assert_eq!(
+            daily_window_end(Some((&one, 5_000)), &two, at, DAY),
+            Ok(5_000)
+        );
+    }
     // A write read in an open window that takes effect after its end opens the next window.
     assert_eq!(
-        daily_window_end(Some((&one, 5_000)), &two, 5_000, DAY),
-        5_000 + DAY
+        daily_window_end(Some((&one, 5_000)), &two, 5_001, DAY),
+        Ok(5_001 + DAY - 1)
     );
     // The keeper's clock may count ledgers.
-    assert_eq!(daily_window_end(None, &two, 77, 17_280), 77 + 17_280);
+    assert_eq!(daily_window_end(None, &two, 77, 17_280), Ok(77 + 17_279));
+    // A one-unit window ends where it opens.
+    assert_eq!(daily_window_end(None, &two, 77, 1), Ok(77));
+    // An end that the clock cannot state, and a window of no unit, are errors.
+    assert_eq!(
+        daily_window_end(None, &one, u64::MAX, 2),
+        Err(AllowitError::Overflow)
+    );
+    assert_eq!(daily_window_end(None, &one, u64::MAX, 1), Ok(u64::MAX));
+    assert_eq!(
+        daily_window_end(None, &one, 0, 0),
+        Err(AllowitError::InvalidParam)
+    );
 }

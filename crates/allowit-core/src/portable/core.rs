@@ -721,6 +721,43 @@ fn daily(ctx: &AllowitContext, s: &AllowitStandardState) -> Result<(i128, i128, 
     }
 }
 
+/// Whether a daily window that ends at `end` is open at `at`. The end is inclusive: it is the last
+/// unit of the window, so the window is open while `at <= end`, and the value kept in it reads as
+/// absent from `end + 1` on. Each keeper of a daily policy value reads and stores the end in these
+/// terms in its own clock: the wallet contract in ledgers, the server in seconds.
+pub fn daily_window_open(end: u64, at: u64) -> bool {
+    at <= end
+}
+
+/// The end of the window of a daily policy value after an admitted operation, as its keeper
+/// stores it: the window's last unit, inclusive ([`daily_window_open`]).
+///
+/// `before` is the value that the operation read under the key, with the end of its window: `None`
+/// when the key read as absent, also because its window had ended when the operation read it.
+/// `after` is the value in the operation's state. `at` is the time at which the operation took
+/// effect, and `length` the number of units in one window, both in the keeper's own clock.
+///
+/// A value that the operation left unchanged was not written: it keeps the end of its window, also
+/// when that end has passed by `at`, so a read renews nothing. A changed value keeps a window that
+/// is still open at `at`; otherwise the write is the first after the last window ended, and it
+/// opens a window from `at` to `at + length - 1`. A `length` of 0 is `InvalidParam`, and an end
+/// past the clock's range is `Overflow`.
+pub fn daily_window_end(
+    before: Option<(&AllowitValue, u64)>,
+    after: &AllowitValue,
+    at: u64,
+    length: u64,
+) -> Result<u64> {
+    match before {
+        Some((value, end)) if value == after => Ok(end),
+        Some((_, end)) if daily_window_open(end, at) => Ok(end),
+        _ => {
+            let last = length.checked_sub(1).ok_or(AllowitError::InvalidParam)?;
+            at.checked_add(last).ok_or(AllowitError::Overflow)
+        }
+    }
+}
+
 /// Check one accounting limit: `used + add <= limit`, against only the facts it reads.
 fn accounting(
     limit: i128,

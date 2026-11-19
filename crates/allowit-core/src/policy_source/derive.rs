@@ -228,8 +228,9 @@ pub struct StateEntry {
     ///
     /// The keeper enforces the window. The evaluator of this crate reads the state map as it
     /// gets it and carries every key forward: the contract and the server each leave an
-    /// ended value out of the state that they give to an evaluation, and each keeps the window
-    /// of a value after an operation by [`daily_window_end`].
+    /// ended value out of the state that they give to an evaluation
+    /// ([`crate::daily_window_open`]), and each keeps the window of a value after an operation
+    /// by [`crate::daily_window_end`], Core's portable rule.
     pub daily: bool,
     /// Who stores the value.
     pub keeper: Keeper,
@@ -238,31 +239,6 @@ pub struct StateEntry {
 /// The prefix of a state key whose value lives one daily window.
 pub const DAILY_PREFIX: &str = "day_";
 
-/// The end of the window of a daily value after an admitted operation, as its keeper stores it
-/// ([`StateEntry::daily`]).
-///
-/// `before` is the value that the operation's evaluation read under the key, with the end of
-/// its window: `None` when the key read as absent, also because its window had ended. `after`
-/// is the value in the operation's state. `at` is the time at which the operation took effect,
-/// and `length` the length of one window, both in the keeper's own clock (seconds or ledgers).
-///
-/// A value that the operation left unchanged was not written: it keeps the end of its window,
-/// also when that end has passed by `at`, so a read renews nothing and the value reads as absent
-/// from its end on. A changed value was written: it keeps a window that is still open at `at`,
-/// and otherwise the write is the first after the last window ended and opens a window that
-/// ends at `at + length`.
-pub fn daily_window_end(
-    before: Option<(&allowit::AllowitValue, u64)>,
-    after: &allowit::AllowitValue,
-    at: u64,
-    length: u64,
-) -> u64 {
-    match before {
-        Some((value, end)) if value == after => end,
-        Some((_, end)) if at < end => end,
-        _ => at.saturating_add(length),
-    }
-}
 /// The most bytes of a state key.
 pub const MAX_STATE_KEY_BYTES: usize = 32;
 

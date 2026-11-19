@@ -37,6 +37,10 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `ServerHooks`: per-network configuration, wallet profiles, sign-in verification and the charged
   fee. `ReceiptInfo.fee.charged_units` is in installed-asset units and counts against spending and
   volume limits.
+- `Receipt::settled_at`: when a verified receipt's operation settled, in Unix seconds, as the rail
+  states it from the network (`PacketProvider::receipt_settled_at`; default `None`). A server opens the
+  daily window of a policy value that it keeps there; when the rail states none, it takes the time at
+  which it first retained the receipt, never a later processing time.
 - Gas carry: a contract wallet repays the network fee of its operation to the server's sending account
   in the same transaction, and the signed repayment can exceed the fee that the ledger charges. The
   server keeps the difference per wallet as the rail counts it: it gives the wallet's carry to
@@ -252,7 +256,10 @@ spells the key itself: a key with an escape, such as `"\x61"`, is refused.
 
 `daily_window_end` is the rule by which each keeper keeps the window of a daily value after an operation: a value
 that the operation left unchanged keeps its window, also an ended one, so a read renews nothing; a changed value keeps
-an open window, and otherwise opens one at the time the operation took effect, in the keeper's own clock.
+an open window, and otherwise opens one at the time the operation took effect, in the keeper's own clock. The rule is
+portable (`core.rs`), so a rail's contract includes it with its native value bindings, and `policy_source` re-exports
+it. A window's end is its last unit, inclusive: `daily_window_open(end, at)` is `at <= end`. An end past the clock's
+range is `Overflow`.
 
 `source_calls` lists the canonical rules and the host calls of a source in source order, as `derive` reads them: a
 host takes the rules of the placements that it reports from there, the whole source's from `source_calls` and the
