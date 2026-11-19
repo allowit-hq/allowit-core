@@ -442,25 +442,26 @@ pub struct Usage {
     pub spent_units: i128,
     pub unpriced: bool,
 }
-/// What a receipt of a transaction means for the operation that the transaction carries.
+/// What a receipt means for the one operation that the settlement is about, whatever else the
+/// receipt's transaction carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationOutcome {
-    /// The transaction executed the operation: its effects and its figures count.
+    /// The operation executed in the receipt's transaction: its effects and its figures count.
     Executed,
-    /// The transaction failed, and no other transaction can carry the operation any more: it is
-    /// over and counts no effect.
+    /// The operation can no longer execute: it failed in the receipt's transaction, or that
+    /// transaction consumed it without executing it. It is over and counts no effect.
     Failed,
-    /// The transaction did not execute the operation, and another transaction can still carry
-    /// it, as another envelope of a contract wallet's authorization. The caller keeps the
-    /// operation and its reservation, looks for its other envelopes
+    /// The operation did not execute in the receipt's transaction, and another transaction can
+    /// still carry it, as another envelope of a contract wallet's authorization. The caller keeps
+    /// the operation and its reservation, looks for its other envelopes
     /// (`RuntimeProvider::observe_authorizations`) and for its lapse (`RuntimeProvider::lapsed`),
-    /// and releases it only on a receipt whose outcome is `Executed` or `Failed`, or on its lapse.
+    /// and releases it only on a settlement whose outcome is `Executed` or `Failed`, or on its
+    /// lapse.
     Open,
 }
-/// What one receipt changes: the outcome of the operation, and the figures that a server keeps
+/// What one receipt changes for one operation: its outcome, and the figures that a server keeps
 /// for the wallet beside those that the wallet keeps itself. The caller stores each value as the
-/// rail gives it, computes none of them, and applies one settlement once for each operation and
-/// `transaction`.
+/// rail gives it and applies one settlement once for each operation and `transaction`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settlement {
     /// The identity of the transaction that the receipt shows, in the rail's own bytes and length
@@ -469,18 +470,27 @@ pub struct Settlement {
     pub transaction: Vec<u8>,
     pub outcome: OperationOutcome,
     /// What the operation adds to its wallet's figures, as the wallet counts it ([`Usage`], its
-    /// gas included), for an executed operation of a rail that counts it. The caller adds it to
-    /// the figures that it keeps for the wallet with Core's post-flight, in the UTC day in which
-    /// the operation was evaluated: the day whose limits admitted it. `None` otherwise.
+    /// gas included), for an executed operation of a rail that counts it; `None` otherwise. The
+    /// caller counts what [`Settlement::usage_for`] gives, never this field alone.
     pub usage: Option<Usage>,
-    /// The gas that the wallet counted itself for the receipt's transaction, in installed-asset
-    /// units, for a wallet that counts its own gas: zero when its gas carry covered the repayment
-    /// or the transaction failed. It is a report; the caller charges no fee of its own for this
-    /// transaction. `None` for a wallet that counts no gas itself: the caller prices the receipt's
-    /// fee (`ServerHooks::charged_fee`) and charges it to the figures that it keeps.
+    /// The gas that the wallet counted itself for this operation in the receipt's transaction, in
+    /// installed-asset units, for a wallet that counts its own gas: zero when it counted none, as
+    /// when its gas carry covered the repayment or the operation did not execute. It is a report:
+    /// the caller charges no fee of its own for this operation's transaction.
+    ///
+    /// `None` for a wallet that counts no gas itself, as a keypair wallet: the caller prices the
+    /// fee that the receipt's transaction paid with `ServerHooks::price_fee` (the wallet's asset
+    /// and the receipt's native fee) and charges it to the figures that it keeps with
+    /// `accounting::charge_fee`, in the UTC day in which the operation was evaluated. Figures that
+    /// already hold a reserved fee bound for this operation, as a keypair wallet's policy state
+    /// does when its policy counts the fee, take the priced fee less that reservation: a negative
+    /// difference releases the unused part. Figures without a reservation take the priced fee.
     pub counted_gas: Option<i128>,
     /// The nonce of the wallet's next operation, for a wallet whose server keeps its replay state
-    /// ([`Accounting::nonce`]). `None` for a wallet that refuses a replay by itself.
+    /// ([`Accounting::nonce`]): the nonce of `accounting` plus one after an executed operation,
+    /// and the nonce of `accounting` otherwise. The rail refuses the receipt of such a wallet when
+    /// the call gives no `accounting`. `None` for a wallet that refuses a replay by itself, as a
+    /// contract wallet, whatever `accounting` is.
     pub next_nonce: Option<u64>,
     /// The server's gas carry after the receipt's transaction ([`Terms::gas_carry_units`]), in
     /// native units: what the wallet has repaid above the network fees of its operations, as this
@@ -488,18 +498,55 @@ pub struct Settlement {
     /// took.
     pub gas_carry: u128,
 }
+impl Settlement {
+    /// What the operation adds to the figures that a server keeps for its wallet, with
+    /// `debit_units`, the operation's debit (`PreparedMetadata::debit_units`): `None` for an
+    /// operation that did not execute; for an executed one, the rail's `usage`, or, when the
+    /// receipt reports none, the debit as its spent units, with no gross amount, no gas and no
+    /// unpriced mark. The caller adds it with Core's post-flight in the UTC day in which the
+    /// operation was evaluated: the day whose limits admitted it.
+    pub fn usage_for(&self, debit_units: i128) -> Option<Usage> {
+        if self.outcome != OperationOutcome::Executed {
+            return None;
+        }
+        Some(self.usage.unwrap_or(Usage {
+            amount_units: 0,
+            gas_units: 0,
+            spent_units: debit_units,
+            unpriced: false,
+        }))
+    }
+}
 /// The fee ceiling of an operation and the facts of its admission, as the server gives them to
 /// the rail's expense bound (`RuntimeProvider::expense`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FeeCeiling {
     /// The fee ceiling in the network's native units.
     pub max_fee_units: u128,
-    /// The server's price of that ceiling in installed-asset units
-    /// (`ServerHooks::price_fee`).
+    /// The server's price of that ceiling in installed-asset units (`ServerHooks::price_fee` of
+    /// the wallet's asset).
     pub gas_units: i128,
     /// The ledger height that the server's admission read observed.
     pub observed_height: u64,
     /// The UTC day of the evaluation (`accounting::day`).
+    pub day: u64,
+}
+/// The expense bound of one operation that its wallet counts against the spending limits, as a
+/// rail gives it (`RuntimeProvider::expense`). Amounts are in installed-asset units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpenseBound {
+    /// The priced fee ceiling (`FeeCeiling::gas_units`).
+    pub gas_units: i128,
+    /// The worst-case conversion loss of a vault operation; zero for a transfer.
+    pub conversion_units: i128,
+    /// The principal plus `gas_units`: a transfer's principal is its amount, a vault operation's
+    /// is its `conversion_units`.
+    pub spent_units: i128,
+    /// The fee ceiling in native units, as `FeeCeiling::max_fee_units` gives it.
+    pub max_fee_units: u128,
+    /// `FeeCeiling::observed_height`.
+    pub observed_height: u64,
+    /// `FeeCeiling::day`.
     pub day: u64,
 }
 impl Receipt {
@@ -962,6 +1009,41 @@ mod tests {
             // A local check: no HTTP status and no HTTP wording.
             assert_eq!(refused.status, None);
             assert!(!refused.message.contains("HTTP"));
+        }
+    }
+    /// An executed operation counts the rail's usage, or its debit when the receipt reports none;
+    /// an operation that did not execute counts nothing.
+    #[test]
+    fn an_executed_operation_counts_its_usage_or_its_debit() {
+        let usage = Usage {
+            amount_units: 2_000,
+            gas_units: 136,
+            spent_units: 2_136,
+            unpriced: true,
+        };
+        let settlement = |outcome, usage| Settlement {
+            transaction: vec![1; 64],
+            outcome,
+            usage,
+            counted_gas: None,
+            next_nonce: None,
+            gas_carry: 0,
+        };
+        assert_eq!(
+            settlement(OperationOutcome::Executed, Some(usage)).usage_for(500),
+            Some(usage)
+        );
+        assert_eq!(
+            settlement(OperationOutcome::Executed, None).usage_for(500),
+            Some(Usage {
+                amount_units: 0,
+                gas_units: 0,
+                spent_units: 500,
+                unpriced: false
+            })
+        );
+        for outcome in [OperationOutcome::Failed, OperationOutcome::Open] {
+            assert_eq!(settlement(outcome, Some(usage)).usage_for(500), None);
         }
     }
     #[test]

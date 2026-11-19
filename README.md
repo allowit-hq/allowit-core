@@ -47,10 +47,11 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   transaction within the caller's time bound, and `configuration_change` gives the version of an
   owner's configuration change that the rail verified.
 - What a receipt means and what an operation may spend, each refused by a rail that does not
-  implement it: `settle_receipt` reads a receipt into a `Settlement` (the transaction's identity in
-  the rail's own bytes, the `OperationOutcome`, the usage, the counted gas, the next nonce and the
-  gas carry), `expense` bounds an operation's expense from the server's `FeeCeiling`, and
-  `ServerHooks::price_fee` prices a native fee before its receipt.
+  implement it: `settle_receipt` reads a receipt into a `Settlement` for one operation (the
+  transaction's identity in the rail's own bytes, the `OperationOutcome`, the usage, the counted gas,
+  the next nonce and the gas carry; `Settlement::usage_for` is what a server counts), `expense`
+  bounds an operation's expense from the server's `FeeCeiling` into an `ExpenseBound`, and
+  `ServerHooks::price_fee` prices a native fee in the wallet's asset before its receipt.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.

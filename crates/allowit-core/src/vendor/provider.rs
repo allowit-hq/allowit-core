@@ -145,7 +145,8 @@ pub trait RuntimeProvider {
     /// read after that and from the operation's preparation on, holds none. The time bound alone
     /// proves no lapse: once that history no longer holds the preparation, the rail cannot tell,
     /// and the operation stays open until its owner releases it. A caller releases an open
-    /// operation on its receipt or on this lapse. `false` means that the operation can still
+    /// operation on a final settlement of one of its receipts (`settle_receipt`: `Executed` or
+    /// `Failed`) or on this lapse. `false` means that the operation can still
     /// execute, that it executed, or that the rail cannot tell, and it stays open; a read that
     /// fails is an error. A rail without such a bound keeps this default.
     fn lapsed(&self, p: &crate::vendor::runtime::Prepared) -> Result<bool> {
@@ -191,9 +192,10 @@ pub trait RuntimeProvider {
         Err(Error::unsupported("This rail does not settle a receipt"))
     }
     /// The expense bound of `action` on the installation, which its wallet counts against the
-    /// spending limits, from the fee ceiling `ceiling`. The result's `gas_units`,
-    /// `max_fee_units`, `observed_height` and `day` are those of `ceiling` (`max_fee_units` as the
-    /// rail's own width allows; a ceiling that it cannot sign is refused). `conversion_units` is the
+    /// spending limits, from the fee ceiling `ceiling`
+    /// ([`crate::vendor::runtime::ExpenseBound`]). Its `gas_units`, `max_fee_units`,
+    /// `observed_height` and `day` are those of `ceiling`; a ceiling that the rail cannot sign is
+    /// refused. `conversion_units` is the
     /// worst-case conversion loss of a vault operation, which this rail values itself, and zero
     /// for a transfer. `spent_units` is the principal plus `gas_units`: a transfer's principal is
     /// its amount, and a vault operation's principal is its `conversion_units`. A deposit of 100
@@ -204,7 +206,7 @@ pub trait RuntimeProvider {
         i: &crate::vendor::runtime::Installation,
         action: &crate::vendor::runtime::Action,
         ceiling: &crate::vendor::runtime::FeeCeiling,
-    ) -> Result<crate::vendor::runtime::Expense> {
+    ) -> Result<crate::vendor::runtime::ExpenseBound> {
         let _ = (i, action, ceiling);
         Err(Error::unsupported(
             "This rail does not bound the expense of an operation",
