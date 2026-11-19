@@ -161,6 +161,12 @@ fn packaged_resources_compile_and_reject_against_their_own_portable_library() {
         }
     }
     let _cleanup = RemoveDirectory(directory.clone());
+    // The texts that a host ships beside the sources are the repository's licence files.
+    assert_eq!(PORTABLE_TERMS, include_str!("../src/portable/LICENSE"));
+    assert_eq!(
+        PYTHON_HELPER_TERMS,
+        include_str!("../../../scripts/LICENSE")
+    );
     for subdirectory in ["scripts", "crates/allowit-core/src/portable"] {
         fs::create_dir_all(directory.join(subdirectory)).unwrap();
     }
