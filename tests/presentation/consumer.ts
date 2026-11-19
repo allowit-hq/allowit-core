@@ -41,7 +41,9 @@ const ownAsset: WalletAsset = { symbol: 'XYZ', issuer: null };
 const reviewed: ReviewedPolicy = { source: 's', params: {}, asset: walletAsset };
 const reviewedOwnAsset: ReviewedPolicy = { source: 's', params: {}, asset: null };
 const reviewedWithoutAsset: ReviewedPolicy = { source: 's', params: {} };
-const signedSetup: SignedKeypairSetup = { hash: 'h', owner: 'o', wallet: 'w', agent: 'a', server: 's', validUntil: 1, asset: ownAsset };
+const signedSetup: SignedKeypairSetup = { hash: 'h', owner: 'o', wallet: 'w', agent: 'a', server: 's', validUntil: 1, asset: ownAsset, amount: '0.01' };
+// @ts-expect-error The amount of signed setup bytes is decimal text.
+const numericAmount: SignedKeypairSetup = { ...signedSetup, amount: 1 };
 // A rail that reads no asset from signed bytes states none: the read of an earlier release still has the type.
 const signedSetupWithoutAsset: SignedKeypairSetup = { hash: 'h', owner: 'o', wallet: 'w', agent: 'a', server: 's', validUntil: 1 };
 // A rail written before the asset: its hooks take no asset and read none, and they still have the contract's type.

@@ -688,7 +688,10 @@ export interface WalletAsset {
   readonly symbol: string;
   readonly issuer: string | null;
 }
-/** What signed setup bytes are: their hash, roles and own time bound in unix seconds, and the asset of their wallet when the rail reads it. */
+/**
+ * What signed setup bytes are: their hash, roles and own time bound in unix seconds. A rail that reads them from the
+ * bytes also states the asset of their wallet and the amount that they fund it with, as decimal text in that asset.
+ */
 export interface SignedKeypairSetup {
   readonly hash: string;
   readonly owner: string;
@@ -697,6 +700,7 @@ export interface SignedKeypairSetup {
   readonly server: string;
   readonly validUntil: number;
   readonly asset?: WalletAsset;
+  readonly amount?: string;
 }
 /** The fields of a keypair wallet's policy approval that the workflow checks. */
 export interface ApprovalFields {
