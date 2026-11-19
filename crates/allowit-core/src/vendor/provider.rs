@@ -145,7 +145,8 @@ pub trait RuntimeProvider {
     /// read after that and from the operation's preparation on, holds none. The time bound alone
     /// proves no lapse: once that history no longer holds the preparation, the rail cannot tell,
     /// and the operation stays open until its owner releases it. A caller releases an open
-    /// operation on its receipt or on this lapse. `false` means that the operation can still
+    /// operation on a final settlement of one of its receipts (`settle_receipt`: `Executed` or
+    /// `Failed`) or on this lapse. `false` means that the operation can still
     /// execute, that it executed, or that the rail cannot tell, and it stays open; a read that
     /// fails is an error. A rail without such a bound keeps this default.
     fn lapsed(&self, p: &crate::vendor::runtime::Prepared) -> Result<bool> {
@@ -169,6 +170,47 @@ pub trait RuntimeProvider {
     ) -> Result<Option<crate::vendor::runtime::Usage>> {
         let _ = p;
         Ok(None)
+    }
+    /// What the receipt `r` of the operation `p`, carried by the signed envelope `signed`, changes
+    /// ([`crate::vendor::runtime::Settlement`]). `p` is the operation as the agent signed it,
+    /// whichever envelope `signed` is. `accounting` is the server's account of the wallet before
+    /// the receipt, and `carry` its gas carry. The rail verifies `r` against `signed` as
+    /// [`crate::vendor::runtime::Receipt::verify_operation`] does: the receipt of `signed`'s
+    /// transaction, or, for a payment authorization that another party settles, the receipt of
+    /// that party's transaction. It refuses a receipt that does not verify, and a `signed` that
+    /// does not carry the operation of `p`. Only the rail reads what a receipt means; the default
+    /// refuses.
+    fn settle_receipt(
+        &self,
+        p: &crate::vendor::runtime::Prepared,
+        signed: &crate::vendor::runtime::Signed,
+        r: &crate::vendor::runtime::Receipt,
+        accounting: Option<&crate::vendor::runtime::Accounting>,
+        carry: u128,
+    ) -> Result<crate::vendor::runtime::Settlement> {
+        let _ = (p, signed, r, accounting, carry);
+        Err(Error::unsupported("This rail does not settle a receipt"))
+    }
+    /// The expense bound of `action` on the installation, which its wallet counts against the
+    /// spending limits, from the fee ceiling `ceiling`
+    /// ([`crate::vendor::runtime::ExpenseBound`]). Its `gas_units`, `max_fee_units`,
+    /// `observed_height` and `day` are those of `ceiling`; a ceiling that the rail cannot sign is
+    /// refused. `conversion_units` is the
+    /// worst-case conversion loss of a vault operation, which this rail values itself, and zero
+    /// for a transfer. `spent_units` is the principal plus `gas_units`: a transfer's principal is
+    /// its amount, and a vault operation's principal is its `conversion_units`. A deposit of 100
+    /// whose shares redeem for at least 95, with a fee ceiling priced at 2, spends 7. An action
+    /// whose loss the rail cannot bound is refused. The default refuses.
+    fn expense(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        action: &crate::vendor::runtime::Action,
+        ceiling: &crate::vendor::runtime::FeeCeiling,
+    ) -> Result<crate::vendor::runtime::ExpenseBound> {
+        let _ = (i, action, ceiling);
+        Err(Error::unsupported(
+            "This rail does not bound the expense of an operation",
+        ))
     }
     /// The configuration version that a host takes for the wallet of `i` from the admission read
     /// `observed`, compared with its own account `retained`: the version of an owner's
@@ -744,6 +786,36 @@ mod defaults {
         );
         assert_eq!(
             refused(Bare.prepare_code_renewal_until(&[1; 32], 1, validity)),
+            3
+        );
+    }
+    /// A rail that does not read a receipt or bound an operation's expense is refused, never
+    /// given an answer.
+    #[test]
+    fn a_rail_refuses_the_receipts_and_expenses_that_it_does_not_implement() {
+        use crate::vendor::runtime::{Action, FeeCeiling, Prepared, Receipt, Signed};
+        assert_eq!(
+            refused(Bare.settle_receipt(
+                &Prepared(packet()),
+                &Signed(packet()),
+                &Receipt(packet()),
+                None,
+                7
+            )),
+            3
+        );
+        let transfer = Action::Transfer {
+            recipient: String::new(),
+            units: 1,
+        };
+        let ceiling = FeeCeiling {
+            max_fee_units: 1,
+            gas_units: 1,
+            observed_height: 1,
+            day: 1,
+        };
+        assert_eq!(
+            refused(Bare.expense(&installation(), &transfer, &ceiling)),
             3
         );
     }

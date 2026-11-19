@@ -351,6 +351,23 @@ pub trait ServerHooks: Sync {
     /// The native fee of a receipt in installed-asset units. It counts against spending and
     /// volume limits.
     fn charged_fee(&self, network: &str, config: &Value, receipt: &ReceiptInfo) -> Result<i128>;
+    /// The price of a native fee of `native_units` in units of the wallet's asset `asset` (the
+    /// installed asset as this rail names it, `Description::asset`), rounded as this rail rounds a
+    /// charge, with the network's block `config` of the server's configuration: the server's price
+    /// of an operation's fee ceiling before any receipt, and of a receipt's fee. The default
+    /// refuses.
+    fn price_fee(
+        &self,
+        network: &str,
+        config: &Value,
+        asset: &str,
+        native_units: u128,
+    ) -> Result<i128> {
+        let _ = (network, config, asset, native_units);
+        Err(Error::unsupported(
+            "This rail does not price a native fee in a wallet's asset",
+        ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -444,4 +461,32 @@ pub struct Fixtures {
 #[derive(Clone, Copy, Debug)]
 pub struct LiveConfig {
     pub env: &'static [&'static str],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// A rail that does not price a fee before its receipt is refused, never given a price.
+    #[test]
+    fn a_rail_without_a_fee_price_refuses_it() {
+        struct Hooks;
+        impl ServerHooks for Hooks {
+            fn configure(&self, _: &str, _: &Value) -> Result<()> {
+                unimplemented!()
+            }
+            fn profiles(&self) -> &'static [ProfileInfo] {
+                unimplemented!()
+            }
+            fn verify_sign_in(&self, _: &str, _: &str, _: &[u8], _: &[u8]) -> Result<()> {
+                unimplemented!()
+            }
+            fn charged_fee(&self, _: &str, _: &Value, _: &ReceiptInfo) -> Result<i128> {
+                unimplemented!()
+            }
+        }
+        let refused = Hooks
+            .price_fee("test:network", &Value::Null, "asset", 100)
+            .unwrap_err();
+        assert_eq!(refused.code, 3);
+    }
 }
