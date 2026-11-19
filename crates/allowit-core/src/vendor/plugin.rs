@@ -365,7 +365,7 @@ pub trait ServerHooks: Sync {
     ) -> Result<i128> {
         let _ = (network, config, asset, native_units);
         Err(Error::unsupported(
-            "This rail does not price a fee before its receipt",
+            "This rail does not price a native fee in a wallet's asset",
         ))
     }
 }

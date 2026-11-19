@@ -456,7 +456,8 @@ pub enum OperationOutcome {
     /// the operation and its reservation, looks for its other envelopes
     /// (`RuntimeProvider::observe_authorizations`) and for its lapse (`RuntimeProvider::lapsed`),
     /// and releases it only on a settlement whose outcome is `Executed` or `Failed`, or on its
-    /// lapse.
+    /// lapse. The fee of this settlement (`Settlement::fee_units`) is charged once, by its
+    /// `transaction`, and the reservation stays whole until the final settlement.
     Open,
 }
 /// What one receipt changes for one operation: its outcome, and the figures that a server keeps
@@ -473,18 +474,25 @@ pub struct Settlement {
     /// gas included), for an executed operation of a rail that counts it; `None` otherwise. The
     /// caller counts what [`Settlement::usage_for`] gives, never this field alone.
     pub usage: Option<Usage>,
+    /// The network fee in native units that this operation's wallet is charged for the receipt's
+    /// transaction, as the rail defines it: zero when a settlement service or another party paid
+    /// the transaction's fee; for a transaction that carries several operations, this operation's
+    /// own share. It is the only fee figure that a caller prices.
+    pub fee_units: u128,
     /// The gas that the wallet counted itself for this operation in the receipt's transaction, in
     /// installed-asset units, for a wallet that counts its own gas: zero when it counted none, as
     /// when its gas carry covered the repayment or the operation did not execute. It is a report:
-    /// the caller charges no fee of its own for this operation's transaction.
+    /// the caller charges no fee of its own for this operation.
     ///
-    /// `None` for a wallet that counts no gas itself, as a keypair wallet: the caller prices the
-    /// fee that the receipt's transaction paid with `ServerHooks::price_fee` (the wallet's asset
-    /// and the receipt's native fee) and charges it to the figures that it keeps with
-    /// `accounting::charge_fee`, in the UTC day in which the operation was evaluated. Figures that
-    /// already hold a reserved fee bound for this operation, as a keypair wallet's policy state
-    /// does when its policy counts the fee, take the priced fee less that reservation: a negative
-    /// difference releases the unused part. Figures without a reservation take the priced fee.
+    /// `None` for a wallet that counts no gas itself, as a keypair wallet: the caller prices
+    /// `fee_units` with `ServerHooks::price_fee` (the wallet's asset) and charges the price to the
+    /// figures that it keeps with `accounting::charge_fee`, once for each `transaction`, in the
+    /// UTC day in which the operation was evaluated. A settlement whose outcome is `Executed` or
+    /// `Failed` is final: figures that hold a reserved fee bound for this operation, as a keypair
+    /// wallet's policy state does when its policy counts the fee, take the price less that
+    /// reservation (a negative difference releases the unused part), and figures without a
+    /// reservation take the price. An `Open` settlement charges the price to every figure that it
+    /// reaches and leaves the reservation whole for the final settlement.
     pub counted_gas: Option<i128>,
     /// The nonce of the wallet's next operation, for a wallet whose server keeps its replay state
     /// ([`Accounting::nonce`]): the nonce of `accounting` plus one after an executed operation,
@@ -1025,6 +1033,7 @@ mod tests {
             transaction: vec![1; 64],
             outcome,
             usage,
+            fee_units: 0,
             counted_gas: None,
             next_nonce: None,
             gas_carry: 0,
