@@ -353,25 +353,86 @@ mod tests {
         }
     }
 
+    /// The files whose string constants are policy parameter and state names, not error codes.
+    const POLICY_NAME_FILES: [&str; 2] = ["portable/core.rs", "policy_source/derive.rs"];
+    /// The other string constants of code form that are no error code: JSON keys and names of
+    /// the policy language, by file and constant.
+    const NOT_CODES: [(&str, &str); 4] = [
+        ("policy_source.rs", "SERVER_TEXT"),
+        ("policy_source.rs", "INDEXED_FIELD"),
+        ("vendor/execution.rs", "KEY"),
+        ("vendor/execution.rs", "EXPLORER_KEY"),
+    ];
+
+    /// Each string constant of code form in `text`, as (name, value): a line such as
+    /// `pub const NAME: &str = "value";`.
+    fn code_constants(text: &str) -> Vec<(&str, &str)> {
+        text.lines()
+            .filter_map(|line| {
+                let line = line.trim_start();
+                let line = ["pub(crate) ", "pub(super) ", "pub "]
+                    .iter()
+                    .find_map(|prefix| line.strip_prefix(prefix))
+                    .unwrap_or(line);
+                let (name, rest) = line.strip_prefix("const ")?.split_once(':')?;
+                let rest = rest.trim_start();
+                let rest = ["&str", "&'static str"]
+                    .iter()
+                    .find_map(|ty| rest.strip_prefix(ty))?;
+                let value = rest.trim().strip_prefix("= \"")?.strip_suffix("\";")?;
+                is_code(value).then_some((name.trim(), value))
+            })
+            .collect()
+    }
+
     #[test]
     fn this_crate_has_an_entry_for_each_code_that_it_defines() {
-        #[cfg(feature = "vendor")]
-        {
-            use crate::vendor::custom_build::code;
-            for defined in [
-                code::UNKNOWN_POLICY,
-                code::CODE_HASH_MISMATCH,
-                code::TOOLCHAIN_MISSING,
-                code::BUILD_FAILED,
-                code::SOURCE_REJECTED,
-                code::BUILD_MISSING,
-                crate::vendor::owner_session::NETWORK_UNAVAILABLE,
-                crate::vendor::runtime::CONTRACT_EXPIRED,
-                crate::vendor::request_proof::REQUEST_PROOF_EXPIRED,
-            ] {
-                assert!(entry(defined).is_some(), "{defined} has no catalogue entry");
+        // Every string constant of code form in this crate's source is an error code, apart from
+        // the listed names: a new code constant without an entry fails here.
+        fn files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for item in std::fs::read_dir(dir).expect("the source folder") {
+                let path = item.expect("a source file").path();
+                if path.is_dir() {
+                    files(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    found.push(path);
+                }
             }
         }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources = Vec::new();
+        files(&root, &mut sources);
+        let mut codes = BTreeSet::new();
+        for path in sources {
+            let file = path
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if POLICY_NAME_FILES.contains(&file.as_str()) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (name, value) in code_constants(&text) {
+                if NOT_CODES.contains(&(file.as_str(), name)) {
+                    continue;
+                }
+                assert!(
+                    entry(value).is_some(),
+                    "{file} {name} = {value} has no entry"
+                );
+                codes.insert(value.to_owned());
+            }
+        }
+        // The custom build's six codes, the owner session's, the runtime's and the proof's.
+        assert!(codes.len() >= 9, "{codes:?}");
+        assert!(codes.contains("request_proof_expired"), "{codes:?}");
+        assert_eq!(
+            code_constants(
+                "pub const A: &str = \"abc_def\";\n    const B: &'static str = \"xyz\";\nconst C: &str = \"/x/\";\nlet d = \"abc\";"
+            ),
+            [("A", "abc_def"), ("B", "xyz")]
+        );
         assert!(entry("no_such_code").is_none());
         let denied = entry("policy_denied").unwrap();
         assert_eq!(denied.audience, Audience::Agent);

@@ -83,11 +83,16 @@ pub fn verify(
                 .expect("checked hexadecimal")
         })
         .collect::<Vec<_>>();
+    // A proof that does not verify is invalid, whatever code the native verifier gave it.
     (protocol.verify)(
         parts[1],
         &digest(&protocol, issued_at, path, body),
         &signature,
-    )?;
+    )
+    .map_err(|mut invalid| {
+        invalid.api_code = None;
+        invalid
+    })?;
     // The time is checked last: a proof that does not verify is invalid whatever its time, and
     // only a valid proof of another time is out of date.
     if now.abs_diff(issued_at) > 120 {
@@ -144,5 +149,16 @@ mod tests {
         let malformed =
             verify(protocol(), "other.ACCOUNT.1000.abcd", 1_000, "/p", b"").unwrap_err();
         assert_eq!(malformed.api_code, None);
+        // A native verifier that refuses with a code of its own: the proof is still only invalid.
+        let coded = Protocol {
+            verify: |_, _, _| {
+                let mut refused = Error::config("Invalid native signature");
+                refused.api_code = Some("native_signature_refused".into());
+                Err(refused)
+            },
+            ..protocol()
+        };
+        let refused = verify(coded, &proof(1_000, "abcd"), 5_000, "/p", b"").unwrap_err();
+        assert_eq!(refused.api_code, None);
     }
 }
