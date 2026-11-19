@@ -27,7 +27,9 @@ pub fn day_end(now: u64) -> u64 {
 /// zero. The figures of the operation's day then take `delta` in the day's spending and in the
 /// day's volume, which counts gas. A fee of a day that is over counts in the lifetime spending
 /// only, and a release never starts a day. A release takes no figure below zero. The calls and
-/// the unpriced marks do not change otherwise. A sum that overflows is `Overflow`.
+/// the unpriced marks do not change otherwise. A sum that overflows is `Overflow`, and figures
+/// that leave no room for one more unit, which `post_flight` would refuse at the next operation,
+/// are `InvalidState`.
 pub fn charge_fee(
     state: &AllowitStandardState,
     day: u64,
@@ -53,6 +55,9 @@ pub fn charge_fee(
     if s.day == day {
         s.day_spent = add(s.day_spent)?;
         s.day_total = add(s.day_total)?;
+    }
+    if [s.spent, s.day_spent, s.day_total].contains(&i128::MAX) {
+        return Err(AllowitError::InvalidState);
     }
     Ok(s)
 }
@@ -132,10 +137,17 @@ mod tests {
         assert_eq!(charge_fee(&s, 12, 0).unwrap(), s);
     }
 
-    /// A sum past the largest figure is refused.
+    /// A sum past the largest figure is refused, and so are figures that leave no room for the
+    /// next operation, which `post_flight` would refuse.
     #[test]
-    fn an_overflow_is_refused() {
+    fn an_overflow_and_a_full_figure_are_refused() {
         let s = figures(9, i128::MAX, 0, 0);
         assert_eq!(charge_fee(&s, 9, 1), Err(AllowitError::Overflow));
+        let s = figures(9, i128::MAX - 1, 0, 0);
+        assert_eq!(charge_fee(&s, 9, 1), Err(AllowitError::InvalidState));
+        assert_eq!(charge_fee(&s, 8, 1), Err(AllowitError::InvalidState));
+        let s = figures(9, 0, i128::MAX - 1, 0);
+        assert_eq!(charge_fee(&s, 9, 1), Err(AllowitError::InvalidState));
+        assert!(charge_fee(&figures(9, i128::MAX - 2, 0, 0), 9, 1).is_ok());
     }
 }
