@@ -66,11 +66,6 @@ pub fn verify(
     let issued_at = parts[2]
         .parse::<u64>()
         .map_err(|_| Error::config("Invalid request time"))?;
-    if now.abs_diff(issued_at) > 120 {
-        let mut expired = Error::config("Native request proof is not current");
-        expired.api_code = Some(REQUEST_PROOF_EXPIRED.into());
-        return Err(expired);
-    }
     let encoded = parts[3];
     if encoded.len() != protocol.signature_bytes * 2
         || !encoded.bytes().all(|b| b.is_ascii_hexdigit())
@@ -93,6 +88,13 @@ pub fn verify(
         &digest(&protocol, issued_at, path, body),
         &signature,
     )?;
+    // The time is checked last: a proof that does not verify is invalid whatever its time, and
+    // only a valid proof of another time is out of date.
+    if now.abs_diff(issued_at) > 120 {
+        let mut expired = Error::config("Native request proof is not current");
+        expired.api_code = Some(REQUEST_PROOF_EXPIRED.into());
+        return Err(expired);
+    }
     Ok(parts[1].into())
 }
 
@@ -130,9 +132,15 @@ mod tests {
                 "{now}"
             );
         }
-        // A proof that does not verify needs a valid proof, not a clock.
+        // A proof that does not verify needs a valid proof, not a clock, also when its time is old.
         let wrong = verify(protocol(), &proof(1_000, "abce"), 1_000, "/p", b"").unwrap_err();
         assert_eq!(wrong.api_code, None);
+        let stale_and_wrong =
+            verify(protocol(), &proof(1_000, "abce"), 5_000, "/p", b"").unwrap_err();
+        assert_eq!(stale_and_wrong.api_code, None);
+        let stale_and_damaged =
+            verify(protocol(), &proof(1_000, "zz"), 5_000, "/p", b"").unwrap_err();
+        assert_eq!(stale_and_damaged.api_code, None);
         let malformed =
             verify(protocol(), "other.ACCOUNT.1000.abcd", 1_000, "/p", b"").unwrap_err();
         assert_eq!(malformed.api_code, None);

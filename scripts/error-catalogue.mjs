@@ -72,7 +72,8 @@ export function checkErrorCatalogue(errors) {
   for (const kind of RETRY_KINDS) {
     const template = errors.retry[kind];
     if (Object.keys(template ?? {}).join() !== TEMPLATE_FIELDS.join()) throw new Error(`The retry template ${kind} has the fields ${TEMPLATE_FIELDS.join(', ')}`);
-    if (!(template.first === '' || plain(template.first, 260)) || !plain(template.then, 260) || !plain(template.owner, 260)) {
+    // A template sentence may be longer than an entry's own step: it carries the whole retry rule of its kind.
+    if (!(template.first === '' || plain(template.first, 400)) || !plain(template.then, 400) || !plain(template.owner, 260)) {
       throw new Error(`The retry template ${kind} is plain text: an optional first sentence, then the agent's and the owner's`);
     }
   }
