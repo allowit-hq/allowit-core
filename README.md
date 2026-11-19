@@ -141,8 +141,9 @@ wallets need no sending account returns its plain `runtime`.
 
 An agent's authorization of a contract-wallet operation can run in any envelope until it expires, not only in the one
 that the server sent. So the server releases an open operation only on its terminal receipt or on
-`RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run. `false` means not
-proven, and the operation stays open. The method has a default that proves nothing. `RuntimeProvider::owner_lapsed`
+`RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run, from the ledger past
+its signed time bound and the network's history of its executions in any envelope; once that history no longer holds
+its preparation, the time bound alone decides. `false` means not proven, and the operation stays open. The method has a default that proves nothing. `RuntimeProvider::owner_lapsed`
 gives the same proof for a sent owner transaction, by its hash, the height at which the server prepared it and its
 expiry: the server drops the owner's pending step only on this proof or on its receipt.
 
