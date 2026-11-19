@@ -46,6 +46,8 @@ test('the packed public entry points have usable types and contain no guest sour
     await cp(join(root, 'tests/presentation/consumer.ts'), join(scratch, 'consumer.ts'));
     const tsc = process.env.ALLOWIT_TEST_TSC ?? join(root, 'node_modules/typescript/bin/tsc');
     run(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', join(scratch, 'consumer.ts')], { cwd: scratch });
+    // The optional fields take an explicit undefined also for a host that compiles with exact optional properties.
+    run(process.execPath, [tsc, '--noEmit', '--strict', '--exactOptionalPropertyTypes', '--target', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', join(scratch, 'consumer.ts')], { cwd: scratch });
     await writeFile(join(scratch, 'consumer.mjs'), `import assert from 'node:assert/strict';\nimport { canonicalFunctions, canonicalFunctionsSource, canonicalFunctionMetadataHash } from '@allowit/core';\nimport { canonicalFunctions as alias } from '@allowit/core/core';\nassert.strictEqual(canonicalFunctions, alias);\nconsole.log(JSON.stringify({ names: canonicalFunctions.map(item => item.name), source: canonicalFunctionsSource, hash: canonicalFunctionMetadataHash }));\n`);
     const actual = JSON.parse(run(process.execPath, [join(scratch, 'consumer.mjs')], { cwd: scratch }));
     const source = await readFile(join(root, 'typescript/canonical-functions.json'), 'utf8');

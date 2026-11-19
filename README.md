@@ -430,6 +430,14 @@ The exported metadata hash identifies the exact JSON bytes shared by Rust and Ja
 params-update workflows with their journal and recovery rules. A rail supplies `ownerChain`: the network's
 `TransactionRecord` of a transaction, the record of an expired signed step, and, for a keypair wallet, the steps of
 its account setup (`prepare`, `read`, `send`, `configuration`) and the check of the owner's policy approval.
+A keypair wallet holds one asset. `WalletAsset` names it by its code and its issuer, as the policy does; the asset
+of the network itself has `issuer: null`. Every place of the asset is optional. The host can state it in
+`ReviewedPolicy.asset`, and the workflow hands it to `prepare` and `configuration`: in these three inputs, no asset
+means the asset of the network itself. A rail can read the asset back from signed setup bytes in
+`SignedKeypairSetup.asset`, and the funded amount as decimal text in `SignedKeypairSetup.amount`; a workflow then
+checks a saved setup against its signed bytes. Each of these two fields is absent when the rail did not report it.
+An absent asset there does not mean the asset of the network, and for an absent amount the workflow has only the
+amount that it saved beside the bytes.
 
 The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, `PastDecision`, `OwnerAnswer` and the
 types that they use) describe what a server answers about a request that waits for its policy owner and about a
@@ -503,7 +511,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.2", version = "0.15", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.3", version = "0.15", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
