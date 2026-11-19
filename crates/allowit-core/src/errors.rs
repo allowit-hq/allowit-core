@@ -486,6 +486,8 @@ mod tests {
                 code::SOURCE_REJECTED,
                 code::BUILD_MISSING,
                 crate::vendor::owner_session::NETWORK_UNAVAILABLE,
+                crate::vendor::runtime::CONTRACT_EXPIRED,
+                crate::vendor::request_proof::REQUEST_PROOF_EXPIRED,
             ] {
                 assert!(entry(defined).is_some(), "{defined} has no catalogue entry");
             }
