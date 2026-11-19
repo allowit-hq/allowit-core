@@ -1571,8 +1571,15 @@ fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
         "    let answer = allowit::decision(ctx, &allowit::AllowitDecision { id: \"day\", query: \"Is today a working day?\", deny_below: 5000, allow_above: 5000 })?;\n    if answer > 1 {\n        let day: Option<u64> = allowit::get_state(ctx, \"day\")?;\n        assert!(day.is_none() || calls != Some(1_000));\n    }",
     );
     assert_ne!(served, source);
-    let branch = derive(&served.replace("\"day\")?", "\"day_spent\")?")).unwrap();
+    let branch = derive(&served.replace("\"day\")?", "\"spent\")?")).unwrap();
     assert!(!branch.source.contains("answer > 1") && branch.server_only.len() == 1);
+    // The wallet keeps `day_spent` for the kept rule, in a window of its own: a statement that
+    // left cannot read it.
+    let error = derive(&served.replace("\"day\")?", "\"day_spent\")?")).unwrap_err();
+    assert!(
+        error.contains("depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
     let written = source.replace(
         "    assert!(calls != Some(1_000));",
         "    allowit::set_state(ctx, \"day\", 1u64)?;",
@@ -2109,5 +2116,174 @@ fn a_daily_window_opens_with_the_first_write_after_it_ended() {
     assert_eq!(
         daily_window_end(None, &one, 0, 0),
         Err(AllowitError::InvalidParam)
+    );
+}
+
+/// A policy with a daily counter that the contract keeps, a question of the server and the
+/// lines of `chain` and `server` at their places.
+fn daily_and_question(chain: &str, server: &str) -> String {
+    format!(
+        "use allowit::prelude::*;\nuse allowit::AllowitDecision;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    let n: u64 = allowit::get_state(ctx, \"day_n\")?.unwrap_or(0);\n    if n >= 5 {{\n        return Err(AllowitError::DestinationNotAllowed);\n    }}\n    allowit::set_state(ctx, \"day_n\", n + 1)?;\n{chain}    let score = allowit::decision(ctx, &AllowitDecision {{ id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 }})?;\n{server}    if score < 5000 {{\n        return Err(AllowitError::DestinationNotAllowed);\n    }}\n    Ok(())\n}}\n"
+    )
+}
+
+/// The refusal of a source in which a daily value that the chain keeps reaches a statement
+/// that left: it names the key and the line of that statement.
+fn reaches(source: &str, key: &str, line: u32) {
+    let error = derive(source).unwrap_err();
+    assert!(
+        error.contains(&format!("(line {line}) depends on the daily"))
+            && error.contains(&format!("{key:?}, which the wallet contract keeps")),
+        "{error}"
+    );
+}
+
+/// The chain keeps a daily value in a window of its own clock, and it does not run a statement
+/// that left. A daily counter that only kept statements use stands beside a question: the
+/// contract checks the counter again when it executes. A statement that left and reads the
+/// value is refused, also when the value comes through a name or a local function.
+#[test]
+fn a_daily_value_of_the_chain_that_a_leaving_statement_reads_is_refused() {
+    let plain = daily_and_question("", "");
+    assert_eq!(keys(&plain), [("day_n".to_owned(), Keeper::Chain, true)]);
+    // A deterministic statement sets a permit, and a branch on the question requires it.
+    let permit = daily_and_question(
+        "    if ctx.request.amount < 10 {\n        allowit::set_state(ctx, \"day_permit\", true)?;\n    }\n",
+        "    if score < 9000 {\n        let permit: Option<bool> = allowit::get_state(ctx, \"day_permit\")?;\n        assert!(permit.is_some());\n    }\n",
+    );
+    reaches(&permit, "day_permit", 14);
+    // The same read in one statement with the server value.
+    let direct = daily_and_question(
+        "",
+        "    assert!(score > 9000 || allowit::get_state::<u64>(ctx, \"day_n\")?.is_some());\n",
+    );
+    reaches(&direct, "day_n", 10);
+    // The value comes through the name that a kept statement binds.
+    let named = daily_and_question("", "    assert!(score > 9000 || n < 3);\n");
+    reaches(&named, "day_n", 10);
+    // Through a second name. Its `let` only reads, and only a statement that left reads the
+    // name, so the `let` leaves too: it is the statement that reads `n`.
+    let second = daily_and_question(
+        "    let busy = n > 2;\n",
+        "    assert!(score > 9000 || !busy);\n",
+    );
+    reaches(&second, "day_n", 9);
+    // Through a name that a statement in a branch on the value assigns. The assignment leaves
+    // with the statement that reads the name, and it stands in that branch.
+    let assigned = daily_and_question(
+        "    let mut busy = false;\n    if n > 2 {\n        busy = true;\n    }\n",
+        "    assert!(score > 9000 || !busy);\n",
+    );
+    reaches(&assigned, "day_n", 11);
+    // Through a local function that reads the key, also one that another function calls. A
+    // function that only a statement that left calls leaves with it: its read is the one named.
+    let function = daily_and_question("", "    assert!(score > 9000 || paid(ctx)? < 3);\n")
+        .replace(
+            "pub fn execute",
+            "fn paid(ctx: &AllowitContext) -> Result<u64> {\n    Ok(allowit::get_state(ctx, \"day_n\")?.unwrap_or(0))\n}\npub fn execute",
+        );
+    reaches(&function, "day_n", 4);
+    // A kept statement calls the function too, so it stays: the call that left is named.
+    let shared = function.replace(
+        "    allowit::set_state(ctx, \"day_n\", n + 1)?;\n",
+        "    allowit::set_state(ctx, \"day_n\", paid(ctx)? + 1)?;\n",
+    );
+    reaches(&shared, "day_n", 13);
+    let nested = function
+        .replace(
+            "pub fn execute",
+            "fn count(ctx: &AllowitContext) -> Result<u64> {\n    paid(ctx)\n}\npub fn execute",
+        )
+        .replace("|| paid(ctx)? < 3", "|| count(ctx)? < 3");
+    reaches(&nested, "day_n", 4);
+    let shared = shared
+        .replace(
+            "pub fn execute",
+            "fn count(ctx: &AllowitContext) -> Result<u64> {\n    paid(ctx)\n}\npub fn execute",
+        )
+        .replace("|| paid(ctx)? < 3", "|| count(ctx)? < 3");
+    // `count` leaves with its one caller: its call of `paid` is the read that left.
+    reaches(&shared, "day_n", 7);
+}
+
+/// A statement that left can depend on a daily value of the chain without reading it: it
+/// stands in a branch or a loop on the value, or it comes after an approval that depends on the
+/// value. A denial that depends on the value hides no statement: the contract denies again.
+#[test]
+fn a_leaving_statement_that_a_daily_value_of_the_chain_decides_is_refused() {
+    let question = "allowit::decision(ctx, &AllowitDecision { id: \"b\", query: \"Is this seller known?\", deny_below: 1, allow_above: 2 })?";
+    // The question is asked only while the counter is low.
+    let branch = daily_and_question(
+        &format!(
+            "    if n > 2 {{\n        let known = {question};\n        assert!(known > 5000);\n    }}\n"
+        ),
+        "",
+    );
+    reaches(&branch, "day_n", 10);
+    // An approval that depends on the counter skips the question.
+    let approved = daily_and_question("    if n == 0 {\n        return Ok(());\n    }\n", "");
+    reaches(&approved, "day_n", 12);
+    // A loop that the counter ends decides what a later statement reads. The statement of the
+    // loop that assigns the name leaves with the statement that reads it.
+    let looped = daily_and_question(
+        "    let mut rounds = 0u64;\n    for _ in 0..3u64 {\n        if n > 1 {\n            break;\n        }\n        rounds += 1;\n    }\n",
+        "    assert!(score > 9000 || rounds > 0);\n",
+    );
+    reaches(&looped, "day_n", 14);
+    // A denial on the counter stands before the question in the plain policy: it is admitted.
+    assert!(derive(&daily_and_question("", "")).is_ok());
+}
+
+/// The rule holds only for a daily value that the chain keeps. The server keeps a key whose
+/// write leaves and a key that only leaving statements read, and it holds an operation inside
+/// their window. A value that is not daily has no window. A standard daily figure follows the
+/// rule when the wallet keeps it and a statement that left reads it with `get_state`; its
+/// canonical rule needs no bound, because the figure only grows inside its window.
+#[test]
+fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_statement() {
+    // The write depends on the question: the server keeps the key, and its reader leaves.
+    let server = daily_and_question(
+        "",
+        "    let low: u64 = allowit::get_state(ctx, \"day_low\")?.unwrap_or(0);\n    if score < 9000 {\n        allowit::set_state(ctx, \"day_low\", low + 1)?;\n    }\n",
+    );
+    assert!(keys(&server).contains(&("day_low".to_owned(), Keeper::Server, true)));
+    // No statement writes the key, and only a statement that left reads it.
+    let unwritten = daily_and_question(
+        "",
+        "    assert!(score > 9000 || allowit::get_state::<u64>(ctx, \"day_seen\")?.is_none());\n",
+    );
+    assert!(keys(&unwritten).contains(&("day_seen".to_owned(), Keeper::Server, true)));
+    // A lasting value of the chain has no window.
+    let lasting = daily_and_question(
+        "    let paid: u64 = allowit::get_state(ctx, \"paid\")?.unwrap_or(0);\n    allowit::set_state(ctx, \"paid\", paid + 1)?;\n",
+        "    assert!(score > 9000 || paid < 3);\n",
+    );
+    assert!(keys(&lasting).contains(&("paid".to_owned(), Keeper::Chain, false)));
+    // A daily figure: the wallet keeps it for the kept rule, and a statement that left reads it.
+    let rule =
+        "    allowit::daily_spending_limit(ctx, &ctx.params[allowit::DAILY_SPENDING_LIMIT])?;\n";
+    let read =
+        "    assert!(score > 9000 || allowit::get_state::<i128>(ctx, \"day_spent\")?.is_none());\n";
+    let error = derive(&daily_and_question(rule, read)).unwrap_err();
+    assert!(
+        error.contains("(line 11) depends on the daily figure \"day_spent\"")
+            && error.contains("canonical rule"),
+        "{error}"
+    );
+    // The wallet keeps no figure that only a statement that left reads: the server gives it.
+    let derived = derive(&daily_and_question("", read)).unwrap();
+    assert!(derived.figures.is_empty());
+    // The canonical rule in a branch on the question, beside the same rule on chain.
+    let ruled = daily_and_question(
+        rule,
+        "    if score < 9000 {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n",
+    );
+    let derived = derive(&ruled).unwrap();
+    assert_eq!(derived.server_only.len(), 2);
+    assert!(
+        derived
+            .figures
+            .iter()
+            .any(|figure| figure.key == "day_spent")
     );
 }

@@ -39,8 +39,11 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   volume limits.
 - `Receipt::settled_at`: when a verified receipt's operation settled, in Unix seconds, as the rail
   states it from the network (`PacketProvider::receipt_settled_at`; default `None`). A server opens the
-  daily window of a policy value that it keeps there; when the rail states none, it takes the time at
-  which it first retained the receipt, never a later processing time.
+  daily window of a policy value that it keeps there.
+- `Snapshot::observed_at`: when the ledger or block of a read closed, in Unix seconds, as the rail
+  states it from the network (`PacketProvider::snapshot_observed_at`; default `None`). A server judges
+  a time-dependent value of the read at this time, such as an open daily window, and not on its own
+  clock: the network applies the operation at a later ledger, whose time is never earlier.
 - Gas carry: a contract wallet repays the network fee of its operation to the server's sending account
   in the same transaction, and the signed repayment can exceed the fee that the ledger charges. The
   server keeps the difference per wallet as the rail counts it: it gives the wallet's carry to
@@ -253,6 +256,15 @@ later write replaces it. The keeper enforces the window: Core's evaluator reads 
 contract and the server each leave an ended value out of it. `derive` refuses a state call whose key is not a string
 literal of 1 to 32 ASCII letters, digits or `_`, a write of a standard figure and a use of the stored day. The literal
 spells the key itself: a key with an escape, such as `"\x61"`, is refused.
+
+`derive` also refuses a source in which a daily value that the chain keeps reaches a statement that left. The chain
+keeps the value in a window of its own clock and does not run that statement again, so nothing holds the operation
+inside the window in which the server evaluated the statement. The value reaches a statement that left when the
+statement reads the key (also through a local function), reads a name that depends on the value, stands in a branch or
+a loop on it, or comes after an approval that depends on it. A denial on the value hides nothing: the contract denies
+again. The owner keeps the key on the server, by a write that depends on the server function, or moves the check
+before the server function. A daily figure that the wallet keeps follows the same rule for a read with `get_state`;
+its canonical rule needs no bound, because the figure only grows inside its window.
 
 `daily_window_end` is the rule by which each keeper keeps the window of a daily value after an operation: a value
 that the operation left unchanged keeps its window, also an ended one, so a read renews nothing; a changed value keeps
@@ -549,7 +561,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.16.1", version = "0.16", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.17.0", version = "0.17", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

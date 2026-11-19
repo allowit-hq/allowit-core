@@ -377,6 +377,14 @@ impl Snapshot {
     pub fn same_known_state(&self, other: &Self) -> Result<bool> {
         self.evidence.provider.same_snapshot(self, other)
     }
+    /// When the ledger or block at `observed_height` closed, in Unix seconds, or `None` when the
+    /// rail does not state it ([`PacketProvider::snapshot_observed_at`]). It is the network's
+    /// time at the read that gave this snapshot. A host that judges a time-dependent value of the
+    /// read, such as a daily window, judges it at this time and not on its own clock: the network
+    /// applies an operation at a later ledger, whose time is never earlier.
+    pub fn observed_at(&self) -> Result<Option<u64>> {
+        self.evidence.provider.snapshot_observed_at(self)
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Lifetime {
@@ -747,10 +755,16 @@ pub trait PacketProvider: Send + Sync {
     fn receipt_info(&self, p: &Packet) -> Result<ReceiptInfo>;
     /// When the operation of the verified receipt `p` settled, in Unix seconds: the close time of
     /// the ledger or block that holds its transaction, as the network states it in the receipt.
-    /// `None` when the rail does not state it; a caller then takes the time at which it first
-    /// retained the receipt, never a later time at which it processes it. The default states none.
+    /// `None` when the rail does not state it. The default states none.
     fn receipt_settled_at(&self, p: &Packet) -> Result<Option<u64>> {
         let _ = p;
+        Ok(None)
+    }
+    /// When the ledger or block at `Snapshot::observed_height` of `s` closed, in Unix seconds, as
+    /// the network states it in the read that gave the snapshot. `None` when the rail does not
+    /// state it. The default states none.
+    fn snapshot_observed_at(&self, s: &Snapshot) -> Result<Option<u64>> {
+        let _ = s;
         Ok(None)
     }
 }
@@ -850,9 +864,30 @@ mod tests {
                 .map_err(|_| crate::client::error::Error::usage("unreadable receipt"))?;
             Ok(document["closedAt"].as_u64())
         }
+        fn snapshot_observed_at(&self, s: &Snapshot) -> Result<Option<u64>> {
+            let document: serde_json::Value = serde_json::from_str(s.evidence.document().get())
+                .map_err(|_| crate::client::error::Error::usage("unreadable snapshot"))?;
+            Ok(document["closedAt"].as_u64())
+        }
+    }
+    /// A snapshot states when the ledger of its read closed only when its rail states it: a rail
+    /// without the hook states none.
+    #[test]
+    fn a_snapshot_states_the_close_time_of_its_ledger_when_its_rail_does() {
+        let document = serde_json::json!({"closedAt": 1_795_000_000u64});
+        let snapshot = |provider: &'static dyn PacketProvider| Snapshot {
+            accounting: Accounting::default(),
+            observed_height: 7,
+            paused: false,
+            params: BTreeMap::new(),
+            state: BTreeMap::new(),
+            evidence: Packet::new("test:network", &document, provider).unwrap(),
+        };
+        assert_eq!(snapshot(&PROVIDER).observed_at().unwrap(), None);
+        assert_eq!(snapshot(&DATED).observed_at().unwrap(), Some(1_795_000_000));
     }
     /// A receipt states when its operation settled only when its rail states it: a rail without
-    /// the hook states none, and the caller takes the time at which it first retained the receipt.
+    /// the hook states none.
     #[test]
     fn a_receipt_states_its_settlement_time_when_its_rail_does() {
         let document = serde_json::json!({"closedAt": 1_795_000_000u64});
