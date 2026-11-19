@@ -300,6 +300,23 @@ impl OwnerPacket {
         self.0.provider.owner_info(&self.0)
     }
 }
+/// The identity of an owner-signed step ([`OwnerSigned::info`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerSignedInfo {
+    /// The rail's own action name of the step, as [`OwnerInfo::action`] names it.
+    pub action: String,
+    /// The identity of the step's transaction, in the rail's own bytes and length (a hash, a
+    /// signature): the key under which a caller keeps the sent step. A rail whose transaction
+    /// identity is its signature knows it only once the owner signed.
+    pub identity: Vec<u8>,
+    /// The step's time bound in Unix seconds: the network applies the step before it or never.
+    pub expires_at: u64,
+}
+impl OwnerSigned {
+    pub fn info(&self) -> Result<OwnerSignedInfo> {
+        self.0.provider.owner_signed_info(&self.0)
+    }
+}
 #[derive(Clone, Debug)]
 pub struct PacketInfo {
     pub operation_id: [u8; 32],
@@ -428,10 +445,12 @@ pub struct Fee {
     pub native_units: u128,
     pub charged_units: i128,
     /// The native units that the wallet repaid to the transaction's source for the network fee
-    /// in the same transaction. Zero for a failed transaction and for a wallet that repays no
-    /// gas. A confirmed operation moves its wallet's gas carry by this amount less the
-    /// operation's own share of `native_units`, which the rail allocates (all of it when the
-    /// transaction carries one operation); [`Settlement::gas_carry`] gives the result.
+    /// of the operation in the same transaction: the repayment of this operation, not of the
+    /// other operations that the transaction carries. Zero for a failed transaction and for a
+    /// wallet that repays no gas. A confirmed operation moves its wallet's gas carry by this
+    /// amount less the operation's own share of `native_units`, which the rail allocates (all of
+    /// it when the transaction carries one operation), down to zero; [`Settlement::gas_carry`]
+    /// gives the result.
     pub repaid_native_units: u128,
 }
 /// What one executed operation adds to its wallet's figures, as the wallet counts it (Core's
@@ -478,9 +497,10 @@ pub struct Settlement {
     pub usage: Option<Usage>,
     /// The network fee in native units that this operation's wallet is charged for the receipt's
     /// transaction, as the rail defines it: zero when a settlement service or another party bears
-    /// the transaction's fee and the wallet pays none of it; what the wallet repaid when it repays
-    /// the party that paid the fee; for a transaction that carries several operations, this
-    /// operation's own share. It is the only fee figure that a caller prices.
+    /// the transaction's fee and the wallet pays none of it; what the wallet repaid for this
+    /// operation when it repays the party that paid the fee; for a transaction that carries
+    /// several operations, this operation's own share or repayment. It is the only fee figure
+    /// that a caller prices.
     pub fee_units: u128,
     /// The gas that the wallet counted itself for this operation in the receipt's transaction, in
     /// installed-asset units, for a wallet that counts its own gas: zero when it counted none, as
@@ -714,6 +734,16 @@ pub trait Transport: Send + Sync {
 /// wallet. Its owner keeps it live, or renews or restores it outside Allowit.
 pub const CONTRACT_EXPIRED: &str = "contract_expired";
 
+/// The problem code of an owner step past its time bound: the network can no longer apply it,
+/// and the rail refuses to send it. A step that was sent before ends only on its receipt or on
+/// the proof of its lapse.
+pub const OWNER_TRANSACTION_EXPIRED: &str = "owner_transaction_expired";
+
+/// The problem code of an owner step's preparation whose reads of the ledger crossed more than
+/// one ledger: nothing was signed or retained, and the caller prepares the step once more with
+/// the same inputs.
+pub const STALE_OWNER_OBSERVATION: &str = "stale_owner_observation";
+
 /// Public failure information.
 #[derive(Clone, Debug)]
 pub struct Problem {
@@ -752,6 +782,13 @@ pub trait PacketProvider: Send + Sync {
     fn receipt_settled_at(&self, p: &Packet) -> Result<Option<u64>> {
         let _ = p;
         Ok(None)
+    }
+    /// The identity of an owner-signed packet ([`OwnerSigned::info`]). The default refuses.
+    fn owner_signed_info(&self, p: &Packet) -> Result<OwnerSignedInfo> {
+        let _ = p;
+        Err(crate::client::error::Error::unsupported(
+            "This rail does not give the identity of an owner-signed step",
+        ))
     }
 }
 

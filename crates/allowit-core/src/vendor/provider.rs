@@ -157,6 +157,8 @@ pub trait RuntimeProvider {
     /// apply. The server prepared it at height `since`, valid until `expires_at` (Unix seconds).
     /// The server drops a sent owner step only on this proof or on its receipt. `false` means
     /// not proven, and the step stays pending. A rail without such a proof keeps this default.
+    /// [`Self::owner_step_lapsed`] takes the signed step itself, for a rail whose step identity
+    /// is not a 32-byte hash.
     fn owner_lapsed(&self, hash: &[u8; 32], expires_at: u64, since: u64) -> Result<bool> {
         let _ = (hash, expires_at, since);
         Ok(false)
@@ -358,6 +360,95 @@ pub trait RuntimeProvider {
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
     ) -> Result<Option<crate::vendor::runtime::Receipt>>;
+    /// Whether the owner-signed step `p` can still be sent at `now`, by the rail's own rules:
+    /// its time bound, and the liveness of the wallet that it acts on (a step that funds a
+    /// contract wallet does not call the wallet, so a network can accept it after the wallet
+    /// lapsed). A definite refusal, after which the step can never be sent, is a typed error
+    /// (`Error::coded`): [`crate::vendor::runtime::OWNER_TRANSACTION_EXPIRED`] past the time bound,
+    /// [`crate::vendor::runtime::CONTRACT_EXPIRED`] for a step on a lapsed wallet. A read that
+    /// fails is an uncertain error (`Error::uncertain`): the caller asks again. The default
+    /// refuses.
+    fn validate_owner_signed(
+        &self,
+        p: &crate::vendor::runtime::OwnerSigned,
+        now: u64,
+    ) -> Result<()> {
+        let _ = (p, now);
+        Err(Error::unsupported(
+            "This rail does not check an owner step before it is sent",
+        ))
+    }
+    /// Send the owner-signed step `p` once, after the checks of [`Self::validate_owner_signed`]
+    /// at `now`: a step that they refuse is that refusal, and nothing is sent. `Submitted` once
+    /// the network accepted it. `Prepared` when the network did not accept it yet: nothing is
+    /// pending, and the caller can send the same bytes again. `SubmissionUnknown` when the
+    /// outcome is uncertain: the caller looks the step up ([`Self::owner_status`],
+    /// [`Self::observe_owner`]) before any other send. Never a final status: only the step's
+    /// receipt (`observe_owner`) or its lapse ([`Self::owner_step_lapsed`]) ends a sent step. The
+    /// default refuses.
+    fn broadcast_owner(
+        &self,
+        p: &crate::vendor::runtime::OwnerSigned,
+        now: u64,
+    ) -> Result<crate::vendor::runtime::Status> {
+        let _ = (p, now);
+        Err(Error::unsupported(
+            "This rail does not send an owner step once",
+        ))
+    }
+    /// What the network holds of the owner-signed step `p` now, never a final status:
+    /// `Submitted` when it accepted or included the step (the receipt of an included step is
+    /// `observe_owner`'s); `SubmissionUnknown` when the lookup cannot rule out that it accepted
+    /// or included the step; `Prepared` only on evidence that it did not accept the step and
+    /// nothing is pending. The default refuses.
+    fn owner_status(
+        &self,
+        p: &crate::vendor::runtime::OwnerSigned,
+    ) -> Result<crate::vendor::runtime::Status> {
+        let _ = p;
+        Err(Error::unsupported(
+            "This rail does not look up an owner step",
+        ))
+    }
+    /// Whether the sent owner step `p` lapsed: it never applied and can no longer apply. The
+    /// server prepared it at height `since`. The rail looks the step up by its own identity
+    /// ([`crate::vendor::runtime::OwnerSigned::info`]). `false` means not proven, and the step
+    /// stays pending; a read that fails is an error. A caller drops a sent step only on its
+    /// receipt or on this proof. The default refuses.
+    fn owner_step_lapsed(
+        &self,
+        p: &crate::vendor::runtime::OwnerSigned,
+        since: u64,
+    ) -> Result<bool> {
+        let _ = (p, since);
+        Err(Error::unsupported(
+            "This rail does not prove that an owner step lapsed",
+        ))
+    }
+    /// Whether the wallet of `i` is closed: a wallet of a kind that closes
+    /// ([`Self::prepare_close`]) is gone from its network and takes no operation or owner step.
+    /// `false` for a wallet that is there and for a wallet kind that never closes. A read that
+    /// fails is an error. The default refuses.
+    fn wallet_closed(&self, i: &crate::vendor::runtime::Installation) -> Result<bool> {
+        let _ = i;
+        Err(Error::unsupported(
+            "This rail does not say whether a wallet is closed",
+        ))
+    }
+    /// Prepare the owner step that closes the wallet of `i`, for a wallet kind that closes: the
+    /// wallet returns what it holds to its owner and leaves its network. The network fee is
+    /// bounded by `fee` in the rail's native units, and the step's time bound starts at `now`.
+    /// The packet takes the path of every owner packet: `read_owner_signed`, `broadcast_owner`
+    /// and `observe_owner`. A wallet kind that does not close refuses, and so does the default.
+    fn prepare_close(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        fee: u64,
+        now: u64,
+    ) -> Result<crate::vendor::runtime::OwnerPacket> {
+        let _ = (i, fee, now);
+        Err(Error::unsupported("This rail does not close a wallet"))
+    }
 }
 
 pub trait OwnerProvider {
@@ -818,6 +909,20 @@ mod defaults {
             refused(Bare.expense(&installation(), &transfer, &ceiling)),
             3
         );
+    }
+    /// A rail that does not send, look up, prove the lapse of or close an owner step is refused,
+    /// never given an answer.
+    #[test]
+    fn a_rail_refuses_the_owner_steps_that_it_does_not_implement() {
+        use crate::vendor::runtime::OwnerSigned;
+        let step = OwnerSigned(packet());
+        assert_eq!(refused(Bare.validate_owner_signed(&step, 1)), 3);
+        assert_eq!(refused(Bare.broadcast_owner(&step, 1)), 3);
+        assert_eq!(refused(Bare.owner_status(&step)), 3);
+        assert_eq!(refused(Bare.owner_step_lapsed(&step, 1)), 3);
+        assert_eq!(refused(Bare.wallet_closed(&installation())), 3);
+        assert_eq!(refused(Bare.prepare_close(&installation(), 100, 1)), 3);
+        assert_eq!(refused(step.info()), 3);
     }
     /// A rail that does not say whether a code transaction is still needed refuses: only the
     /// rail can observe its code, and a caller that took a default answer could send again a

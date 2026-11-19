@@ -44,10 +44,10 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - Gas carry: a contract wallet repays the network fee of its operation to the server's sending account
   in the same transaction, and the signed repayment can exceed the fee that the ledger charges. The
   server keeps the difference per wallet as the rail counts it: it gives the wallet's carry to
-  `settle_receipt` and stores the `Settlement::gas_carry` that the rail returns, which moves by what
-  the operation repaid less the operation's own share of the transaction's fee. It passes that
-  carry as `Terms::gas_carry_units`, and the rail subtracts it from the next repayment, down to
-  zero.
+  `settle_receipt` and stores the `Settlement::gas_carry` that the rail returns. After an executed
+  operation the carry moves by what the operation repaid less its own share of the transaction's
+  fee, down to zero; an `Open` or `Failed` operation keeps it. The server passes the carry as
+  `Terms::gas_carry_units`, and the rail subtracts it from the next repayment, down to zero.
 - Time bounds and configuration changes that only a rail can decide, each refused by a rail that
   does not implement it: `prepare_code_until` and `prepare_code_renewal_until` sign a code
   transaction within the caller's time bound, and `configuration_change` gives the version of an
@@ -60,6 +60,13 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   an `ExpenseBound`, and `ServerHooks::price_fee` prices a native fee in the wallet's asset: the fee
   ceiling at admission, and the operation's `Settlement::fee_units` at settlement when
   `Settlement::counted_gas` is `None`.
+- Owner steps that the caller sends, each refused by a rail that does not implement it:
+  `validate_owner_signed` says whether a signed step can still be sent (a typed refusal,
+  `OWNER_TRANSACTION_EXPIRED` or `CONTRACT_EXPIRED`, when it never can; an uncertain error when a read
+  failed), `broadcast_owner` sends it once and `owner_status` looks it up, neither with a final
+  status; only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the
+  step's own identity, `OwnerSigned::info`) ends a sent step. `prepare_close` prepares the step
+  that closes a wallet of a kind that closes, and `wallet_closed` says whether it is closed.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
