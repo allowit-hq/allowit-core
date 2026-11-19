@@ -1565,11 +1565,14 @@ fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
         "    let day: Option<u64> = allowit::get_state(ctx, \"day\")?;\n    assert!(day.is_none() || calls != Some(1_000));",
     );
     assert_ne!(day, source);
-    let served = day.replace(
-        "    let day: Option<u64>",
-        "    let answer = allowit::decision(ctx, &allowit::AllowitDecision { id: \"day\", query: \"Is today a working day?\", deny_below: 5000, allow_above: 5000 })?;\n    let day: Option<u64>",
+    // In a branch that leaves whatever key it reads: its condition reads a server value.
+    let served = source.replace(
+        "    assert!(calls != Some(1_000));",
+        "    let answer = allowit::decision(ctx, &allowit::AllowitDecision { id: \"day\", query: \"Is today a working day?\", deny_below: 5000, allow_above: 5000 })?;\n    if answer > 1 {\n        let day: Option<u64> = allowit::get_state(ctx, \"day\")?;\n        assert!(day.is_none() || calls != Some(1_000));\n    }",
     );
-    assert_ne!(served, day);
+    assert_ne!(served, source);
+    let branch = derive(&served.replace("\"day\")?", "\"day_spent\")?")).unwrap();
+    assert!(!branch.source.contains("answer > 1") && branch.server_only.len() == 1);
     let written = source.replace(
         "    assert!(calls != Some(1_000));",
         "    allowit::set_state(ctx, \"day\", 1u64)?;",
