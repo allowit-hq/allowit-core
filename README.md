@@ -202,7 +202,7 @@ can check by itself. Nobody writes the derived part. It is a pure function of th
 client derives the same part, byte for byte. A source with no server function is its own on-chain part.
 
 A statement of `execute` leaves the derived part when it calls a server function, a package function or a
-local function that calls one, reads owner text with `as_str()` or reads stored state with `get_state`;
+local function that calls one, reads owner text with `as_str()` or uses policy state that the server keeps;
 when it reads a name that a leaving statement sets; when it is a branch or loop whose condition does so; and
 when it comes after an early approval that depends on a server function. A rule inside a branch whose
 condition depends on a server function leaves with the branch: kept alone, it could deny on chain what the
@@ -210,9 +210,31 @@ owner's policy allows. `Derived::server_only` lists each check that leaves, with
 `ServerOnly::movable` says whether the owner can move it out of the branch so that the chain enforces it too.
 The derived part never denies a request that the whole source allows.
 
-A contract wallet stores no policy state of its own. `Derived::figures` names the cumulated figures that the
-kept canonical rules read, each daily or total, and the wallet keeps only those. `derive` refuses a source
-that writes policy state with `set_state`.
+A policy may keep its own state with `allowit::get_state(ctx, "key")` and `allowit::set_state(ctx, "key", value)`.
+Each key has one keeper, and `Derived::state` names it:
+
+| Keeper | When | Where the value lives |
+| --- | --- | --- |
+| `chain` | A statement that uses the key stays in the derived part, and no statement that writes it leaves | In the wallet contract. The server reads it from there when it evaluates the whole source, also in a statement that left |
+| `server` | A statement that writes the key leaves, or the key has no write and only leaving statements read it | With the server. Every statement that reads or writes the key leaves the derived part |
+
+A call of a local function that writes a key counts as a write of that key; a function inside another function
+writes only where it is called. A key that starts with `day_` lives one daily window; any other key lives until a
+later write replaces it. The keeper enforces the window: Core's evaluator reads the state map as it gets it, so the
+contract and the server each leave an ended value out of it. `derive` refuses a state call whose key is not a string
+literal of 1 to 32 ASCII letters, digits or `_`, and a write of a standard figure. The literal spells the key itself:
+a key with an escape, such as `"\x61"`, is refused.
+
+`Derived::figures` names the cumulated figures that the kept statements read, each daily or total: those of the
+kept canonical rules, and each standard figure that a kept statement reads with `get_state`. The wallet keeps
+those figures and the keys whose keeper is `chain`. A statement that reads the stored day (`get_state(ctx, "day")`)
+leaves: a contract wallet stores no day. The server evaluates the whole source on the wallet's values of those
+figures, as it does for a key that the chain keeps. The wallet gives a daily figure of its current window and
+leaves an ended one out, so a direct read of `day_spent`, `day_total` or `day_unpriced` gets the same value on
+the chain and on the server.
+
+Write a policy so that it stores little. Prefer, in this order: no state; a figure that a canonical rule keeps
+or that the request gives; then one small value under a short key. A daily count belongs under a `day_` key.
 
 ## Wallet kinds
 
@@ -422,7 +444,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.13.1", version = "0.13", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.0", version = "0.14", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

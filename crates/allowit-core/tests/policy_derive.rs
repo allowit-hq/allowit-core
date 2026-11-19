@@ -1,6 +1,8 @@
 //! The on-chain part of a policy source: golden files of the sample mandate and of each
 //! tricky shape, and the properties that every derivation keeps.
-use allowit_core::policy_source::{Cause, derive, source_shape, source_shape_with_host_calls};
+use allowit_core::policy_source::{
+    Cause, Keeper, derive, source_shape, source_shape_with_host_calls,
+};
 
 /// The server functions of Core and one package function, as a server's registry.
 const REGISTRY: &[(&str, &str)] = &[
@@ -116,13 +118,28 @@ golden!(
     unsplit_tail => "unsplit-tail",
     server_range => "server-range",
     block_condition => "block-condition",
+    state_on_chain => "state-on-chain",
+    state_on_server => "state-on-server",
+    state_helpers => "state-helpers",
+    state_braced_macro => "state-braced-macro",
+    state_after_approval => "state-after-approval",
+    negated_block_condition => "negated-block-condition",
+    shadowed_after_macro => "shadowed-after-macro",
+    statement_after_branch => "statement-after-branch",
+    loop_in_condition => "loop-in-condition",
+    range_loop => "range-loop",
+    iterator_break => "iterator-break",
+    inferred_number => "inferred-number",
+    pruned_type => "pruned-type",
+    arm_without_comma => "arm-without-comma",
+    for_pattern => "for-pattern",
+    arm_generic_comma => "arm-generic-comma",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
     include_str!("fixtures/derive/package-function.rs"),
     include_str!("fixtures/derive/package-function.onchain.rs"),
 );
-const STATE_WRITE: &str = include_str!("fixtures/derive/state-write.rs");
 
 fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
     let mut cases = GOLDEN.to_vec();
@@ -154,6 +171,14 @@ fn a_derived_policy_is_portable_and_derives_to_itself() {
         assert_eq!(again.source, expected, "{name}");
         assert!(
             again.left.is_empty() && again.server_only.is_empty(),
+            "{name}"
+        );
+        // The contract keeps every state key of its own part.
+        assert!(
+            again
+                .state
+                .iter()
+                .all(|entry| entry.keeper == Keeper::Chain),
             "{name}"
         );
     }
@@ -489,94 +514,1084 @@ fn a_range_bound_is_a_read_and_a_block_condition_takes_no_later_rule() {
     assert_eq!((check.line, check.cause), (13, Cause::NotSplit));
 }
 
-/// A contract wallet keeps only the figures of its canonical rules, and the server keeps no
-/// policy state of its own. So a policy that writes state is refused wherever the write
-/// stands: before a server call, after one, in a local function, or with no server call.
+/// The keys of a derived policy with their keepers and whether they live one daily window.
+fn keys(source: &str) -> Vec<(String, Keeper, bool)> {
+    derive(source)
+        .unwrap()
+        .state
+        .into_iter()
+        .map(|entry| (entry.key, entry.keeper, entry.daily))
+        .collect()
+}
+
+/// A policy may keep its own state. A state statement that depends on no server function
+/// stays: the contract keeps its key, and the server reads the key from the contract. A source
+/// with no server part is its own on-chain part, with its state.
 #[test]
-fn a_policy_that_writes_state_is_refused() {
-    let error = derive(STATE_WRITE).unwrap_err();
+fn a_state_statement_that_needs_no_server_stays_and_the_chain_keeps_its_key() {
+    let source = include_str!("fixtures/derive/state-on-chain.rs");
+    let derived = derive(source).unwrap();
     assert!(
-        error.contains("cannot write policy state") && error.contains("line 5"),
-        "{error}"
+        derived
+            .source
+            .contains("allowit::get_state(ctx, \"day_payments\")")
     );
-    let first = STATE_WRITE.replace("    allowit::set_state(ctx, \"seen\", true)?;\n", "");
-    assert!(derive(&first).unwrap_err().contains("line 6"));
-    let second = STATE_WRITE.replace("    allowit::set_state(ctx, \"score\", score)?;\n", "");
-    assert!(derive(&second).unwrap_err().contains("line 5"));
-    // A local function that writes state, called or not.
-    let helper = second.replace(
-        "pub fn execute",
-        "fn remember(ctx: &AllowitContext) -> allowit::Result {\n    Ok(())\n}\nfn unused(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"score\", 1u32)\n}\npub fn execute",
-    ).replace("    allowit::set_state(ctx, \"seen\", true)?;\n", "    remember(ctx)?;\n");
-    assert!(derive(&helper).unwrap_err().contains("line 8"), "{helper}");
-    // A source with no server function that writes state.
+    assert!(
+        derived
+            .source
+            .contains("allowit::set_state(ctx, \"day_payments\", payments + 1)?;")
+    );
+    assert_eq!(derived.kept, ["destinations", "deny"]);
+    assert_eq!(
+        keys(source),
+        [("day_payments".to_owned(), Keeper::Chain, true)]
+    );
+    assert_eq!(Keeper::Chain.code(), "chain");
+    // The counter is the policy's own figure: the wallet keeps no standard figure for it.
+    assert!(derived.figures.is_empty());
+
     let plain = include_str!("fixtures/derive/no-server-function.rs").replace(
         "    Ok(())\n}",
         "    allowit::set_state(ctx, \"last\", ctx.request.amount)?;\n    Ok(())\n}",
     );
-    assert!(plain.contains("set_state"));
-    assert!(
-        derive(&plain)
-            .unwrap_err()
-            .contains("cannot write policy state")
+    let derived = derive(&plain).unwrap();
+    assert_eq!(derived.source, plain);
+    assert_eq!(keys(&plain), [("last".to_owned(), Keeper::Chain, false)]);
+}
+
+/// A write that depends on a server function leaves, so the server keeps its key. Then every
+/// statement that reads or writes that key leaves too, also one that depends on no server
+/// function: the contract never stores the key. A write before the server call stays.
+#[test]
+fn a_key_whose_write_leaves_is_the_servers_with_every_statement_that_uses_it() {
+    let source = include_str!("fixtures/derive/state-on-server.rs");
+    let derived = derive(source).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("last_score".to_owned(), Keeper::Server, false),
+            ("seen".to_owned(), Keeper::Chain, false)
+        ]
+    );
+    assert_eq!(Keeper::Server.code(), "server");
+    assert!(!derived.source.contains("last_score"));
+    assert_eq!(derived.kept, ["payment_limit"]);
+    // The check of the stored score runs only on the server, and the owner cannot move it.
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (
+            check.line,
+            check.check.as_str(),
+            check.cause,
+            check.movable()
+        ),
+        (8, "assert", Cause::StoredState, false)
+    );
+    assert_eq!(Cause::StoredState.code(), "stored_state");
+
+    // A write in a branch that depends on a server function leaves like any statement there.
+    let branched = source.replace(
+        "    allowit::set_state(ctx, \"last_score\", score)?;\n",
+        "    if score > 5 {\n        allowit::set_state(ctx, \"last_score\", 1u32)?;\n    }\n",
+    );
+    assert_ne!(branched, source);
+    assert_eq!(keys(&branched), keys(source));
+    // A write after an early approval that depends on a server function leaves too, with the
+    // key of the write before it: one key has one keeper.
+    let early = source
+        .replace(
+            "    allowit::set_state(ctx, \"last_score\", score)?;\n",
+            "    if score > 5 {\n        return Ok(());\n    }\n    allowit::set_state(ctx, \"seen\", false)?;\n",
+        )
+        .replace(
+            "    let last: Option<u32> = allowit::get_state(ctx, \"last_score\")?;\n    assert!(last != Some(0));\n",
+            "",
+        );
+    let derived = derive(&early).unwrap();
+    assert_eq!(keys(&early), [("seen".to_owned(), Keeper::Server, false)]);
+    assert!(!derived.source.contains("set_state"));
+    assert_eq!(derived.kept, ["payment_limit"]);
+    // A key that only leaving statements read is the server's.
+    let read = source.replace(
+        "    allowit::set_state(ctx, \"last_score\", score)?;\n",
+        "    let floor: u32 = allowit::get_state(ctx, \"floor\")?.unwrap_or(score);\n    assert!(floor > 0);\n",
+    );
+    assert!(keys(&read).contains(&("floor".to_owned(), Keeper::Server, false)));
+}
+
+/// A call of a local function that writes a key is a write of that key. When such a call
+/// leaves, the server keeps the key: the function leaves, and so does every other call of it.
+/// A function whose calls all stay keeps its key in the contract.
+#[test]
+fn a_local_function_that_writes_state_follows_its_calls() {
+    let source = include_str!("fixtures/derive/state-helpers.rs");
+    let derived = derive(source).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("flagged".to_owned(), Keeper::Server, false),
+            ("paid".to_owned(), Keeper::Chain, false),
+            ("passed".to_owned(), Keeper::Server, false)
+        ]
+    );
+    assert!(derived.source.contains("fn count(") && derived.source.contains("    count(ctx)?;"));
+    for gone in [
+        "fn pass(",
+        "fn flag(",
+        "pass(ctx)",
+        "\"flagged\"",
+        "\"passed\"",
+    ] {
+        assert!(!derived.source.contains(gone), "{gone}");
+    }
+    assert_eq!(derived.kept, ["payment_limit", "destinations"]);
+    // The denial on the stored flag is the verdict of its branch.
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (check.line, check.check.as_str(), check.movable()),
+        (21, "deny", false)
     );
 }
 
-/// A statement that reads stored state leaves: the server reads the same figures when it
-/// evaluates the whole source. The chain keeps the figures that its kept rules read.
+/// A macro with braces is a statement that needs no `;`. A function that stands after it is
+/// a function of its own: when one of its calls leaves, the server keeps the key that it
+/// writes, and the other call leaves too. The same holds after a `const` block.
 #[test]
-fn a_read_of_stored_state_leaves_and_the_kept_rules_name_their_figures() {
-    let derived = derive(include_str!("fixtures/derive/stored-state.rs")).unwrap();
-    let reported: Vec<(u32, &str, Cause, bool)> = derived
-        .server_only
-        .iter()
-        .map(|check| {
-            (
-                check.line,
-                check.check.as_str(),
-                check.cause,
-                check.movable(),
-            )
-        })
-        .collect();
+fn a_function_after_a_statement_with_braces_follows_its_calls() {
+    let source = include_str!("fixtures/derive/state-braced-macro.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
     assert_eq!(
-        reported,
+        keys(source),
         [
-            (6, "assert", Cause::StoredState, false),
-            (8, "destinations", Cause::ServerBranch, true)
+            ("seen".to_owned(), Keeper::Server, false),
+            ("visits".to_owned(), Keeper::Chain, false)
         ]
     );
-    assert_eq!(Cause::StoredState.code(), "stored_state");
-    assert_eq!(derived.kept, ["payment_limit", "daily_spending_limit"]);
-    let figures: Vec<(&str, bool)> = derived
-        .figures
-        .iter()
-        .map(|figure| (figure.key, figure.daily))
-        .collect();
-    assert_eq!(figures, [("day_spent", true), ("day_unpriced", true)]);
+    for gone in ["fn remember(", "remember(ctx", "\"seen\""] {
+        assert!(!derived.source.contains(gone), "{gone}");
+    }
+    assert_eq!(derived.kept, ["payment_limit", "assert"]);
+    // With every call of the function before the server function, the contract keeps the key.
+    let kept = source.replace("        remember(ctx, true)?;\n", "");
+    assert!(keys(&kept).contains(&("seen".to_owned(), Keeper::Chain, false)));
+    assert!(derive(&kept).unwrap().source.contains("fn remember("));
+    // A macro with braces that a method call continues is one statement with that call.
+    let continued = source.replace(
+        "    assert! { ctx.request.amount > 0 }\n",
+        "    matches! { ctx.request.amount, 1 }.then_some(());\n",
+    );
+    assert!(keys(&continued).contains(&("seen".to_owned(), Keeper::Server, false)));
+    assert!(!derive(&continued).unwrap().source.contains("fn remember("));
+    // A `const` block is such a statement too.
+    let constant = source.replace(
+        "    assert! { ctx.request.amount > 0 }\n",
+        "    const { assert!(u8::MAX == 255) }\n",
+    );
+    assert!(keys(&constant).contains(&("seen".to_owned(), Keeper::Server, false)));
+    assert!(!derive(&constant).unwrap().source.contains("fn remember("));
+}
 
-    // A local function that only reads state leaves as a read of state, not as a server call.
-    let helper = include_str!("fixtures/derive/stored-state.rs")
-        .replace(
+/// `!` before a block negates the block: only the name of a macro before `!` starts a macro.
+/// A branch whose condition is such a block is one statement, so its denial never stays
+/// without its condition.
+#[test]
+fn a_negated_block_condition_is_no_macro() {
+    let source = include_str!("fixtures/derive/negated-block-condition.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("DestinationNotAllowed"));
+    assert_eq!(derived.kept, ["payment_limit"]);
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!((check.line, check.cause), (6, Cause::NotSplit));
+    for header in [
+        "while ! { allowit::new_decision_context(ctx, None).is_ok() } {",
+        "if matches! { allowit::new_decision_context(ctx, None), Ok(()) } == false {",
+        "if !matches! { allowit::new_decision_context(ctx, None), Ok(()) } {",
+        "if ! const { false } || allowit::new_decision_context(ctx, None).is_err() {",
+    ] {
+        let other = source.replace(
+            "if ! { allowit::new_decision_context(ctx, None).is_ok() } {",
+            header,
+        );
+        assert_ne!(other, source);
+        let derived = derive(&other).unwrap();
+        assert!(
+            !derived.source.contains("DestinationNotAllowed"),
+            "{header}"
+        );
+    }
+}
+
+/// A name that a leaving `let` binds leaves with it, also when the `let` stands after a
+/// statement that needs no `;`: a later statement never reads an earlier value of the name.
+#[test]
+fn a_shadowed_name_after_a_statement_with_braces_leaves() {
+    let source = include_str!("fixtures/derive/shadowed-after-macro.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    for (from, to) in [
+        ("", ""),
+        // A plain macro name, and an empty block after it.
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "assert! { ctx.request.amount > 0 } {}",
+        ),
+        // A `const` block, and a branch with a block after it.
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "const { assert!(true) }",
+        ),
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "if ctx.request.amount > 0 {} {}",
+        ),
+        (
+            "r#assert! { ctx.request.amount > 0 }",
+            "if ctx.request.amount > 0 {} - 1;",
+        ),
+    ] {
+        let other = source.replace(from, to);
+        assert_eq!(other == source, from.is_empty());
+        let derived = derive(&other).unwrap();
+        assert_eq!(
+            keys(&other),
+            [("last_score".to_owned(), Keeper::Server, false)],
+            "{to}"
+        );
+        assert!(!derived.source.contains("last_score"), "{to}");
+    }
+}
+
+/// A raw name such as `r#mut` is a name. When a `let` that binds it leaves, a later statement
+/// that reads the name leaves too.
+#[test]
+fn a_binding_with_a_raw_keyword_name_is_followed() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let r#mut = false;\n    let r#mut = allowit::new_decision_context(ctx, None).is_ok();\n    allowit::set_state(ctx, \"paid\", r#mut)?;\n    assert!(r#mut);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    for name in ["r#mut", "r#ref", "seen"] {
+        let other = source.replace("r#mut", name);
+        let derived = derive(&other).unwrap();
+        assert_eq!(
+            keys(&other),
+            [("paid".to_owned(), Keeper::Server, false)],
+            "{name}"
+        );
+        assert!(
+            !derived.source.contains("paid") && !derived.source.contains("assert"),
+            "{name}"
+        );
+    }
+}
+
+/// A call names a local function only in the block that holds the function. Outside that
+/// block the name is another item, such as `Some`, and its call writes nothing.
+#[test]
+fn a_call_outside_the_block_of_a_function_is_no_call_of_it() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    {\n        fn Some(ctx: &AllowitContext) -> allowit::Result {\n            allowit::set_state(ctx, \"paid\", true)\n        }\n    }\n    let paid: bool = allowit::get_state(ctx, \"paid\")?.unwrap_or(false);\n    assert!(!paid);\n    allowit::set_state(ctx, \"paid\", true)?;\n    let _answer = Some(allowit::new_decision_context(ctx, None)?);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("paid".to_owned(), Keeper::Chain, false)]);
+    assert!(derive(source).unwrap().source.contains("assert!(!paid)"));
+    // Inside the block, the call is a call of the function: a leaving call moves the key.
+    let inside = source.replace(
+        "        }\n    }\n",
+        "        }\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            Some(ctx)?;\n        }\n    }\n",
+    );
+    assert_ne!(inside, source);
+    assert_eq!(keys(&inside), [("paid".to_owned(), Keeper::Server, false)]);
+}
+
+/// A `const` block in the condition of a branch is an operand, and the branch ends at its own
+/// body: a statement after the branch stays by itself.
+#[test]
+fn a_const_block_in_a_condition_is_an_operand() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if const { true } && allowit::new_decision_context(ctx, None).is_ok() {}\n    allowit::set_state(ctx, \"paid\", true)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("paid".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("\"paid\"") && !derived.source.contains("const"));
+}
+
+/// A block-like statement ends at its last `}`, as the Rust parser ends it: a block, a
+/// declaration or an operator after it starts the next statement. So the statements after
+/// `if ok {} {}` are steps of their own, and a block that asks the server leaves alone.
+#[test]
+fn a_statement_after_a_block_like_statement_is_a_step_of_its_own() {
+    let source = include_str!("fixtures/derive/statement-after-branch.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("limit".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("    const LIMIT: i128 = 3;\n"));
+    assert!(
+        derived
+            .source
+            .contains("assert!(ctx.request.amount < limit() * 1_000_000)")
+    );
+    assert!(!derived.source.contains("new_decision_context"));
+    // A function after such a statement: a leaving call of it moves its key, and every
+    // statement that names it leaves with it.
+    let function = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    if ctx.request.amount > 0 {} {}\n    fn Some(ctx: &AllowitContext) -> Option<bool> {\n        allowit::set_state(ctx, \"n\", true).is_ok();\n        None\n    }\n    Some(ctx);\n    assert!(Some(ctx).is_none());\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        Some(ctx);\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(function, REGISTRY).unwrap();
+    assert_eq!(keys(function), [("n".to_owned(), Keeper::Server, false)]);
+    let derived = derive(function).unwrap();
+    assert!(!derived.source.contains("Some"), "{}", derived.source);
+    assert!(
+        derived
+            .source
+            .contains("    if ctx.request.amount > 0 {} {}\n")
+    );
+    // A constant that shadows a constant of the file is refused: the rule cannot tell which
+    // one a statement reads.
+    let shadowed = source.replace("pub fn execute", "const LIMIT: i128 = 2;\npub fn execute");
+    let error = derive(&shadowed).unwrap_err();
+    assert!(error.contains("declare `LIMIT` twice"), "{error}");
+    // So is one inside a statement that is not split.
+    let nested = source.replace(
+        "    const LIMIT: i128 = 3;\n",
+        "    while { const LIMIT: i128 = 4; ctx.request.amount > LIMIT } {\n        return Err(AllowitError::DestinationNotAllowed);\n    }\n    const LIMIT: i128 = 3;\n",
+    );
+    assert_ne!(nested, source);
+    let error = derive(&nested).unwrap_err();
+    assert!(error.contains("declare `LIMIT` twice"), "{error}");
+    // A method call after the last `}` continues the statement, as in Rust.
+    let continued = source.replace(
+        "    if ctx.request.amount > 0 {} {\n        allowit::new_decision_context(ctx, None)?;\n    }\n",
+        "    if ctx.request.amount > 0 { 1 } else { 2 }.max(allowit::new_decision_context(ctx, None).map_or(0, |_| 1));\n",
+    );
+    assert_ne!(continued, source);
+    let derived = derive(&continued).unwrap();
+    assert!(!derived.source.contains("max(") && derived.source.contains("const LIMIT"));
+}
+
+/// A branch or a loop inside the condition of a branch is a value with its own blocks. The
+/// body of the outer branch is the block after that value, so the body leaves with the
+/// condition that asks the server.
+#[test]
+fn a_branch_or_a_loop_in_a_condition_keeps_the_body_with_its_condition() {
+    let source = include_str!("fixtures/derive/loop-in-condition.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("seen".to_owned(), Keeper::Server, false)]);
+    for value in [
+        "loop { break true; }",
+        "if ctx.request.amount > 1 { true } else { false }",
+        "match ctx.request.amount { 0 => false, _ => true }",
+        "'a: loop { break 'a true; }",
+        "{ while false {} true }",
+    ] {
+        let other = source.replace("loop { break true; }", value);
+        assert_eq!(other == source, value == "loop { break true; }");
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        let derived = derive(&other).unwrap();
+        assert_eq!(
+            keys(&other),
+            [("seen".to_owned(), Keeper::Server, false)],
+            "{value}"
+        );
+        assert!(!derived.source.contains("seen"), "{value}");
+    }
+    // Without the server function in the condition, the branch stays whole on chain.
+    let local = source.replace(" && allowit::new_decision_context(ctx, None).is_ok()", "");
+    let derived = derive(&local).unwrap();
+    assert_eq!(derived.source, local);
+    assert_eq!(keys(&local), [("seen".to_owned(), Keeper::Chain, false)]);
+}
+
+/// In a header, a `{` after `..` opens the body, as the Rust parser reads it. The loop ends
+/// at that body, and the `let` after it is a statement of its own: when it leaves, the write
+/// that reads its name leaves too.
+#[test]
+fn a_block_after_an_open_range_is_the_body_of_the_loop() {
+    let source = include_str!("fixtures/derive/range-loop.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(
+        keys(source),
+        [("passed_last".to_owned(), Keeper::Server, false)]
+    );
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("for i in 0u64.. {") && !derived.source.contains("passed"));
+    let header = source.replace(
+        "    for i in 0u64.. {\n        if i > 2 {\n            break;\n        }\n    }\n",
+        "    while ctx.request.amount > 0.. {\n        break;\n    }\n",
+    );
+    assert_ne!(header, source);
+    assert_eq!(
+        keys(&header),
+        [("passed_last".to_owned(), Keeper::Server, false)]
+    );
+}
+
+/// Where a `;` is missing, the parser reads the next statement with the one before. A `let`
+/// or an item inside such a group would stay seen by later statements while it left with the
+/// group, so a source with a server part is refused there.
+#[test]
+fn a_declaration_that_the_parser_reads_with_the_statement_before_is_refused() {
+    let source = include_str!("fixtures/derive/range-loop.rs");
+    for (from, to, line) in [
+        // After a call.
+        (
+            "PAYMENT_LIMIT])?;\n    let passed: bool",
+            "PAYMENT_LIMIT])?\n    let passed: bool",
+            5,
+        ),
+        // After a `let`, with a loop between.
+        ("let passed: bool = false;", "let passed: bool = false", 11),
+        // An attribute before the `let`.
+        (
+            "PAYMENT_LIMIT])?;\n    let passed: bool",
+            "PAYMENT_LIMIT])?\n    #[allow(unused_variables)]\n    let passed: bool",
+            6,
+        ),
+    ] {
+        let other = source.replace(from, to);
+        assert_ne!(other, source);
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        let error = derive(&other).unwrap_err();
+        let expected = format!("must end the statement before line {line} with `;`");
+        assert!(error.contains(&expected), "{to}: {error}");
+        // Without a server part, the source is its own on-chain part.
+        let local = other.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
+        assert_eq!(derive(&local).unwrap().source, local);
+    }
+    // Generic arguments end where they close: the loop is a statement of its own.
+    let generic = source.replace(
+        "    for i in 0u64.. {\n        if i > 2 {\n            break;\n        }\n    }\n",
+        "    while ctx.request.amount == u64::MAX::<> {}\n",
+    );
+    assert_ne!(generic, source);
+    assert_eq!(
+        keys(&generic),
+        [("passed_last".to_owned(), Keeper::Server, false)]
+    );
+    assert!(!derive(&generic).unwrap().source.contains("passed"));
+}
+
+/// The iterated value of a `for` runs before the loop: a `break` there ends the enclosing loop.
+/// When that `break` depends on the server, the enclosing loop leaves with its write.
+#[test]
+fn an_exit_in_the_iterated_value_of_a_for_ends_the_enclosing_loop() {
+    let source = include_str!("fixtures/derive/iterator-break.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("seen".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(source).unwrap().source.contains("loop"));
+    // An exit there that needs no server stays, with the loop and its write.
+    let local = source.replace(
+        "allowit::new_decision_context(ctx, None).is_ok()",
+        "ctx.request.amount > 5",
+    );
+    assert_ne!(local, source);
+    assert_eq!(keys(&local), [("seen".to_owned(), Keeper::Chain, false)]);
+    assert_eq!(derive(&local).unwrap().source, local);
+}
+
+/// A `const _` that uses a key of the server or calls the server leaves. No statement that
+/// stays then uses that key.
+#[test]
+fn an_anonymous_constant_that_uses_a_server_key_leaves() {
+    let source = "use allowit::prelude::*;\nconst _: () = {\n    fn unused(ctx: &AllowitContext) -> bool {\n        let flag: Option<bool> = allowit::get_state(ctx, \"flag\").unwrap_or(None);\n        flag.unwrap_or(false)\n    }\n};\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let flag: bool = allowit::get_state(ctx, \"flag\")?.unwrap_or(false);\n    if flag {\n        return Err(AllowitError::DestinationNotAllowed);\n    }\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        allowit::set_state(ctx, \"flag\", true)?;\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("flag") && !derived.source.contains("const _"));
+    // A `const _` that uses no server value stays.
+    let local = source.replace("allowit::get_state(ctx, \"flag\").unwrap_or(None)", "None");
+    assert!(derive(&local).unwrap().source.contains("const _"));
+}
+
+/// A local function is seen only in the block that declares it. When it leaves, a statement
+/// outside that block that names another item of the same name, such as `Some`, stays.
+#[test]
+fn a_helper_is_named_only_in_the_block_that_declares_it() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    {\n        fn Some(ctx: &AllowitContext) -> allowit::Result {\n            allowit::set_state(ctx, \"flag\", true)\n        }\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            Some(ctx)?;\n        }\n    }\n    let seen = Some(true);\n    allowit::set_state(ctx, \"keep\", seen.is_some())?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("flag".to_owned(), Keeper::Server, false),
+            ("keep".to_owned(), Keeper::Chain, false)
+        ]
+    );
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("let seen = Some(true);"));
+    assert!(!derived.source.contains("fn Some") && !derived.source.contains("\"flag\""));
+}
+
+/// A number without a type takes its type from the code that uses it, and `i32` when no code
+/// does. A leaving statement can give that type, so a kept statement that reads a name of such
+/// a number, or a name that shares its type, leaves too. A stated type keeps it on chain.
+#[test]
+fn a_number_whose_type_a_leaving_statement_gives_is_followed() {
+    let source = include_str!("fixtures/derive/inferred-number.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(source).unwrap().source.contains("flag"));
+    let flag = |other: &str| keys(other).into_iter().next().map(|(_, keeper, _)| keeper);
+    for (from, to, keeper) in [
+        // A stated type, or a suffix, fixes the type on both sides.
+        ("let n = ", "let n: u64 = ", Keeper::Chain),
+        // A branch is no form whose type the rule knows: it counts as open.
+        (
+            "if ctx.request.amount > 0 { 1 } else { 2 }",
+            "if ctx.request.amount > 0i128 { 1u64 } else { 2u64 }",
+            Keeper::Server,
+        ),
+        // A value of the request has its own type.
+        (
+            "if ctx.request.amount > 0 { 1 } else { 2 }",
+            "ctx.request.amount",
+            Keeper::Chain,
+        ),
+        // A name that takes its type from the number shares it.
+        (
+            "    let n = if",
+            "    let m = 1;\n    let n = m + if",
+            Keeper::Server,
+        ),
+        // So does a name that one statement uses with it.
+        (
+            "    allowit::set_state(ctx, \"flag\", (n << 31) > 0)?;",
+            "    let k = 1;\n    assert!(k <= n);\n    allowit::set_state(ctx, \"flag\", (k << 31) > 0)?;",
+            Keeper::Server,
+        ),
+    ] {
+        let other = source.replace(from, to);
+        assert_ne!(other, source, "{to}");
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        assert_eq!(flag(&other), Some(keeper), "{to}");
+    }
+    // A name that a `for` binds from numbers without a type.
+    let looped = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    for i in 0..2 {\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            assert!(i < 2u64);\n        }\n        allowit::set_state(ctx, \"flag\", (i << 31) > 0)?;\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(looped, REGISTRY).unwrap();
+    assert_eq!(flag(looped), Some(Keeper::Server));
+    assert_eq!(
+        flag(&looped.replace("0..2", "0u64..2u64")),
+        Some(Keeper::Chain)
+    );
+}
+
+/// The type of a number can also pass through a name that holds no number, such as `None`, or
+/// through a read whose type its uses give. Such names are followed too; a stated type or a
+/// turbofish fixes them.
+#[test]
+fn an_open_type_that_passes_through_another_name_is_followed() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let n = 1;\n    let other = None;\n    assert_ne!(other, Some(n));\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert_ne!(other, Some(1u64));\n    }\n    allowit::set_state(ctx, \"flag\", (n << 31) > 0)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let flag = |source: &str| {
+        keys(source)
+            .into_iter()
+            .find(|(key, ..)| key == "flag")
+            .map(|(_, keeper, _)| keeper)
+    };
+    assert_eq!(flag(source), Some(Keeper::Server));
+    let typed = source
+        .replace("let n = 1;", "let n: u64 = 1;")
+        .replace("let other = None;", "let other: Option<u64> = None;");
+    assert_eq!(flag(&typed), Some(Keeper::Chain));
+    // A state read without a stated type takes its type from its uses.
+    let read = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let paid = allowit::get_state(ctx, \"paid\")?;\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert!(paid != Some(5u64));\n    }\n    allowit::set_state(ctx, \"flag\", paid == Some(1))?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(read, REGISTRY).unwrap();
+    assert_eq!(flag(read), Some(Keeper::Server));
+    let turbofish = read.replace("get_state(ctx", "get_state::<u64>(ctx");
+    assert_eq!(flag(&turbofish), Some(Keeper::Chain));
+    let open = read.replace("get_state(ctx", "get_state::<_>(ctx");
+    assert_eq!(flag(&open), Some(Keeper::Server));
+    // Any form that the rule does not know counts as open: a raw spelling, a call of a local
+    // function, an owner param read with `.ok()`.
+    for (from, to) in [
+        ("let other = None;", "let other = r#None;"),
+        ("let other = None;", "let other = empty();"),
+    ] {
+        let other = source.replace(from, to).replace(
             "pub fn execute",
-            "fn count(ctx: &AllowitContext) -> Option<u64> {\n    allowit::get_state(ctx, \"calls\").ok().flatten()\n}\npub fn execute",
+            "fn empty<Result>() -> Option<Result> {\n    None\n}\npub fn execute",
+        );
+        source_shape_with_host_calls(&other, REGISTRY).unwrap();
+        assert_eq!(flag(&other), Some(Keeper::Server), "{to}");
+    }
+    let param = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let n = ctx.params[\"threshold\"].ok();\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert_eq!(n, 1u64);\n    }\n    assert_eq!(Some(n), Some(1));\n    allowit::set_state(ctx, \"flag\", true)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(param, REGISTRY).unwrap();
+    let derived = derive(param).unwrap();
+    assert!(
+        !derived.source.contains("assert_eq!(Some(n)"),
+        "{}",
+        derived.source
+    );
+    let typed_param = param.replace("let n = ", "let n: u64 = ");
+    assert!(
+        derive(&typed_param)
+            .unwrap()
+            .source
+            .contains("assert_eq!(Some(n)")
+    );
+    // `Ok(())` leaves its error type open.
+    let result = source
+        .replace("let other = None;", "let other = Ok(());")
+        .replace("assert_ne!(other, Some(n));", "assert!(other != Err(n));")
+        .replace(
+            "assert_ne!(other, Some(1u64));",
+            "assert!(other != Err(1u64));",
+        );
+    assert_ne!(result, source);
+    source_shape_with_host_calls(&result, REGISTRY).unwrap();
+    assert_eq!(flag(&result), Some(Keeper::Server));
+}
+
+/// A `let` that only leaving code reads leaves too. When it states a type, it can be what
+/// gives the type of a name that a kept statement reads: that name is followed too.
+#[test]
+fn a_type_that_a_removed_let_gives_is_followed() {
+    let source = include_str!("fixtures/derive/pruned-type.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+    let derived = derive(source).unwrap();
+    assert!(!derived.source.contains("flag") && !derived.source.contains("let copy"));
+    let typed = source.replace("let n = 1;", "let n: u64 = 1;");
+    assert_eq!(keys(&typed), [("flag".to_owned(), Keeper::Chain, false)]);
+}
+
+/// A match arm whose body is block-like, such as `if ok {}`, needs no comma. When it leaves,
+/// the arm after it stays.
+#[test]
+fn an_arm_without_a_comma_leaves_alone() {
+    let source = include_str!("fixtures/derive/arm-without-comma.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(
+        derived
+            .source
+            .contains("        1 => {}\n        400 => {},\n")
+    );
+    assert_eq!(
+        keys(source),
+        [("fallback".to_owned(), Keeper::Chain, false)]
+    );
+    // A method call after the body continues it, up to the comma.
+    let continued = source.replace(
+        "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
+        "1 => if allowit::new_decision_context(ctx, None).is_ok() { 1 } else { 2 }.max(1),\n",
+    );
+    assert_ne!(continued, source);
+    assert!(derive(&continued).unwrap().source.contains("400 => {},"));
+    // A `const` block needs no comma either.
+    let constant = source
+        .replace(
+            "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
+            "1 => const {}\n",
         )
-        .replace("allowit::get_state(ctx, \"calls\")?;", "count(ctx);");
-    let derived = derive(&helper).unwrap();
-    assert!(!derived.source.contains("fn count") && !derived.source.contains("get_state"));
-    assert_eq!(derived.server_only[0].cause, Cause::StoredState);
-    // A server value comes before stored state.
-    let mixed = include_str!("fixtures/derive/stored-state.rs").replace(
+        .replace(
+            "400 => {},",
+            "400 => {\n            allowit::new_decision_context(ctx, None)?;\n        },",
+        );
+    assert_ne!(constant, source);
+    source_shape_with_host_calls(&constant, REGISTRY).unwrap();
+    let derived = derive(&constant).unwrap();
+    assert!(
+        derived.source.contains("1 => const {}\n"),
+        "{}",
+        derived.source
+    );
+    assert!(
+        derived.source.contains("400 => {") && !derived.source.contains("new_decision_context")
+    );
+}
+
+/// The pattern of a `for` can hold braces, and a `,` between generic arguments ends no arm:
+/// both sources derive to a part that compiles (the golden test compiles it).
+#[test]
+fn a_for_pattern_with_braces_and_a_generic_comma_in_an_arm_derive_whole() {
+    for name in ["for-pattern", "arm-generic-comma"] {
+        let source = GOLDEN
+            .iter()
+            .find(|(golden, ..)| *golden == name)
+            .unwrap()
+            .1;
+        source_shape_with_host_calls(source, REGISTRY).unwrap();
+        assert_eq!(
+            keys(source),
+            [("flag".to_owned(), Keeper::Server, false)],
+            "{name}"
+        );
+    }
+    let arm = derive(include_str!("fixtures/derive/arm-generic-comma.rs")).unwrap();
+    assert!(
+        arm.source.contains("        1 => {},\n        _ => {}\n"),
+        "{}",
+        arm.source
+    );
+}
+
+/// The on-chain part leaves code out, so it states `warn` where the source states `deny` or
+/// `forbid`: a lint that turns unused code into an error could stop it from compiling.
+#[test]
+fn a_lint_that_denies_is_a_warning_in_the_on_chain_part() {
+    let source = "use allowit::prelude::*;\n#[deny(unused_variables)]\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let calls: u64 = allowit::get_state(ctx, \"calls\")?.unwrap_or(0);\n    assert!(ctx.request.amount > 0);\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert!(calls < 5);\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(
+        derived.source.contains("#[warn(unused_variables)]"),
+        "{}",
+        derived.source
+    );
+    assert_eq!(derived.left, [(6, 8)]);
+    // Also under the raw spelling of the lint level.
+    let raw = source.replace("#[deny(", "#[r#forbid(");
+    assert_ne!(raw, source);
+    source_shape_with_host_calls(&raw, REGISTRY).unwrap();
+    assert!(
+        derive(&raw)
+            .unwrap()
+            .source
+            .contains("#[warn(unused_variables)]")
+    );
+    // Without a server part, the source is its own on-chain part.
+    let local = source.replace("allowit::new_decision_context(ctx, None).is_ok()", "true");
+    assert_eq!(derive(&local).unwrap().source, local);
+}
+
+/// `const fn` is one declaration, not a statement read with the next one.
+#[test]
+fn a_const_fn_is_one_declaration() {
+    let source = "use allowit::prelude::*;\nconst fn limit() -> u64 {\n    1\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    assert!(limit() > 0);\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(
+        derived.source.contains("const fn limit()")
+            && derived.source.contains("assert!(limit() > 0)")
+    );
+}
+
+/// A pattern that names a constructor of the language, such as `None`, binds no name: a
+/// later `None` keeps its open type.
+#[test]
+fn a_constructor_in_a_pattern_is_no_binding_of_a_fixed_type() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    match ctx.request.token_out {\n        None => {}\n        _ => {}\n    }\n    let x = None;\n    let n = 1;\n    assert!(x != Some(n));\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        let _typed: Option<u64> = x;\n    }\n    allowit::set_state(ctx, \"flag\", (n << 31) > 0)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
+}
+
+/// The `const` parameters of generic functions are no items: two of them with one name are
+/// no two items with one name, and none of them is a declaration inside a statement.
+#[test]
+fn const_parameters_are_no_items() {
+    let source = "use allowit::prelude::*;\nfn first<const N: u64>() -> u64 {\n    N\n}\nfn second<const N: u64>() -> u64 {\n    N\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}\n";
+    derive(source).unwrap();
+    // Also with an attribute before the parameter.
+    let attributed = source.replace("<const N", "<#[allow(dead_code)] const N");
+    assert_ne!(attributed, source);
+    derive(&attributed).unwrap();
+}
+
+/// A check outside the block of a helper that left names another item of the helper's name.
+/// It leaves because of its own branch, so the report says that the owner can move it out.
+#[test]
+fn a_check_that_names_another_item_of_a_helpers_name_reports_its_own_cause() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    {\n        fn Some(ctx: &AllowitContext) -> allowit::Result {\n            allowit::set_state(ctx, \"flag\", true)\n        }\n        if allowit::new_decision_context(ctx, None).is_ok() {\n            Some(ctx)?;\n        }\n    }\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        assert!(Some(true).is_some());\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves: {:?}", derived.server_only);
+    };
+    assert_eq!(
+        (
+            check.line,
+            check.check.as_str(),
+            check.cause,
+            check.movable()
+        ),
+        (12, "assert", Cause::ServerBranch, true)
+    );
+}
+
+/// `const _` binds no name: two of them are no two items with one name.
+#[test]
+fn anonymous_constants_are_no_duplicate_names() {
+    let source = "use allowit::prelude::*;\nfn check() -> u64 {\n    const _: u64 = 0;\n    const _: u64 = 1;\n    1\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    assert!(check() == 1);\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("assert!(check() == 1)") && derived.source.contains("const _"));
+}
+
+/// A function that leaves writes nothing by that: only a call of it writes. A function that
+/// no statement calls moves no key to the server.
+#[test]
+fn a_function_that_no_statement_calls_moves_no_key() {
+    let source = "use allowit::prelude::*;\nfn ask(ctx: &AllowitContext) -> allowit::Result {\n    fn reset(ctx: &AllowitContext) -> allowit::Result {\n        allowit::set_state(ctx, \"n\", 0u64)\n    }\n    allowit::new_decision_context(ctx, None)\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let n: u64 = allowit::get_state(ctx, \"n\")?.unwrap_or(0);\n    assert!(n < 3);\n    allowit::set_state(ctx, \"n\", n + 1)?;\n    ask(ctx)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("n".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("assert!(n < 3)") && derived.source.contains("n + 1"));
+    assert!(!derived.source.contains("fn ask(") && !derived.source.contains("fn reset("));
+    // With a call of the inner function, the leaving call of the outer one moves the key.
+    let called = source.replace(
+        "    allowit::new_decision_context(ctx, None)\n",
+        "    reset(ctx)?;\n    allowit::new_decision_context(ctx, None)\n",
+    );
+    assert_ne!(called, source);
+    assert_eq!(keys(&called), [("n".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(&called).unwrap().source.contains("\"n\""));
+    // A function at the file level that no statement calls moves no key either.
+    let unused = source.replace(
+        "pub fn execute",
+        "fn unused(ctx: &AllowitContext) -> allowit::Result {\n    allowit::new_decision_context(ctx, None)?;\n    allowit::set_state(ctx, \"n\", 9u64)\n}\npub fn execute",
+    );
+    assert_eq!(keys(&unused), [("n".to_owned(), Keeper::Chain, false)]);
+}
+
+/// A function that stands inside another function runs only where it is called. Its write is
+/// no write of the function around it.
+#[test]
+fn a_function_inside_a_function_writes_only_where_it_is_called() {
+    let source = "use allowit::prelude::*;\nuse allowit::AllowitDecision;\nfn outer(ctx: &AllowitContext) -> allowit::Result {\n    fn reset(ctx: &AllowitContext) -> allowit::Result {\n        allowit::set_state(ctx, \"n\", 0u64)\n    }\n    Ok(())\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    outer(ctx)?;\n    let n: u64 = allowit::get_state(ctx, \"n\")?.unwrap_or(0);\n    assert!(n < 3);\n    allowit::set_state(ctx, \"n\", n + 1)?;\n    let score = allowit::decision(ctx, &AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    if score > 5000 {\n        outer(ctx)?;\n    }\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("n".to_owned(), Keeper::Chain, false)]);
+    let derived = derive(source).unwrap();
+    assert!(derived.source.contains("assert!(n < 3)") && derived.source.contains("n + 1"));
+    assert_eq!(derived.source.matches("outer(ctx)?;").count(), 1);
+    // With a call of the inner function, a leaving call of the outer one moves the key.
+    let called = source.replace("    Ok(())\n}\npub fn", "    reset(ctx)\n}\npub fn");
+    assert_ne!(called, source);
+    assert_eq!(keys(&called), [("n".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(&called).unwrap().source.contains("\"n\""));
+}
+
+/// A `const` block that a method call continues is a statement, and no item. After an early
+/// approval on a server value it leaves as every later statement does, and the server keeps
+/// the key that it writes.
+#[test]
+fn a_continued_const_block_after_an_early_approval_leaves() {
+    let source = include_str!("fixtures/derive/state-after-approval.rs");
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    let derived = derive(source).unwrap();
+    assert_eq!(
+        keys(source),
+        [
+            ("marked".to_owned(), Keeper::Server, false),
+            ("visits".to_owned(), Keeper::Chain, false)
+        ]
+    );
+    assert!(!derived.source.contains("marked") && !derived.source.contains("const"));
+    assert_eq!(derived.kept, ["payment_limit"]);
+    // Before the server function, the statement stays and the contract keeps its key.
+    let early = source
+        .replace(
+            "    const { true }.then_some(allowit::set_state(ctx, \"marked\", true)?);\n",
+            "",
+        )
+        .replace(
+            "    let visits",
+            "    const { true }.then_some(allowit::set_state(ctx, \"marked\", true)?);\n    let visits",
+        );
+    assert!(keys(&early).contains(&("marked".to_owned(), Keeper::Chain, false)));
+    assert!(derive(&early).unwrap().source.contains("\"marked\""));
+}
+
+/// A write reaches its callers through any number of local functions, also when a caller
+/// stands before the function that it calls.
+#[test]
+fn a_write_reaches_its_callers_through_a_chain_of_local_functions() {
+    let mut source = String::from("use allowit::prelude::*;\n");
+    for i in 0..30 {
+        source.push_str(&format!(
+            "fn step{i}(ctx: &AllowitContext) -> allowit::Result {{\n    step{}(ctx)\n}}\n",
+            i + 1
+        ));
+    }
+    source.push_str("fn step30(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"seen\", true)\n}\n");
+    let kept = format!(
+        "{source}pub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    step0(ctx)?;\n    allowit::new_decision_context(ctx, None)?;\n    Ok(())\n}}\n"
+    );
+    assert_eq!(keys(&kept), [("seen".to_owned(), Keeper::Chain, false)]);
+    let left = format!(
+        "{source}pub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    let score = allowit::decision(ctx, &allowit::AllowitDecision {{ id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 }})?;\n    if score > 5 {{\n        step0(ctx)?;\n    }}\n    Ok(())\n}}\n"
+    );
+    assert_eq!(keys(&left), [("seen".to_owned(), Keeper::Server, false)]);
+    assert!(!derive(&left).unwrap().source.contains("fn step"));
+}
+
+/// The contract must know each key before it runs. A key that is no string literal, a key
+/// that is no valid name, a write of a standard figure and a state function that is not
+/// called are refused, with the line.
+#[test]
+fn a_state_call_that_the_contract_cannot_declare_is_refused() {
+    let with = |statements: &str| {
+        include_str!("fixtures/derive/no-server-function.rs")
+            .replace("    Ok(())\n}", &format!("{statements}    Ok(())\n}}"))
+    };
+    let lines = with("").lines().count();
+    for (statements, reason) in [
+        (
+            "    let key = \"seen\";\n    allowit::set_state(ctx, key, true)?;\n",
+            "names each state key as a string literal",
+        ),
+        (
+            "    let seen: Option<bool> = allowit::get_state(ctx, allowit::CALLS)?;\n",
+            "names each state key as a string literal",
+        ),
+        (
+            "    allowit::set_state(ctx, \"last seen\", true)?;\n",
+            "is not 1 to 32 ASCII letters, digits or `_`",
+        ),
+        (
+            "    allowit::set_state(ctx, \"a_key_that_is_longer_than_32_bytes\", true)?;\n",
+            "is not 1 to 32 ASCII letters, digits or `_`",
+        ),
+        (
+            "    allowit::set_state(ctx, \"\", true)?;\n",
+            "is not 1 to 32 ASCII letters, digits or `_`",
+        ),
+        (
+            "    allowit::set_state(ctx, \"day_spent\", 0u32)?;\n",
+            "cannot write the standard figure \"day_spent\"",
+        ),
+    ] {
+        let source = with(statements);
+        assert_ne!(source, with(""));
+        let error = derive(&source).unwrap_err();
+        assert!(error.contains(reason), "{error}");
+        let line = lines - 1 + statements.lines().count() - 1;
+        assert!(error.contains(&format!("line {line}")), "{error}");
+    }
+    // A call in a comment or in a string is no call.
+    let quiet = with(
+        "    // allowit::set_state(ctx, key, true)?;\n    assert!(\"allowit::set_state(ctx, key)\" != \"\");\n",
+    );
+    assert!(derive(&quiet).unwrap().state.is_empty());
+    // An explicit type on the read.
+    let typed = with("    let n = allowit::get_state::<u64>(ctx, \"count\")?;\n");
+    assert_eq!(keys(&typed), [("count".to_owned(), Keeper::Chain, false)]);
+    // A `,` between the generic arguments of a path ends no argument of the call.
+    let generic = with(
+        "    let n = allowit::get_state::<u64>(Result::Ok::<_, AllowitError>(ctx).unwrap(), \"count\")?;\n    allowit::set_state(Result::Ok::<&AllowitContext, AllowitError>(ctx).unwrap(), \"count\", n.unwrap_or(0) + 1)?;\n",
+    );
+    source_shape_with_host_calls(&generic, REGISTRY).unwrap();
+    assert_eq!(keys(&generic), [("count".to_owned(), Keeper::Chain, false)]);
+    // A raw string names a key as a plain string does.
+    let raw = with(
+        "    let seen: Option<bool> = allowit::get_state(ctx, r\"seen\")?;\n    allowit::set_state(ctx, r#\"seen\"#, true)?;\n",
+    );
+    assert_eq!(keys(&raw), [("seen".to_owned(), Keeper::Chain, false)]);
+    // A local function may carry the name of a state function: it is no state call.
+    let local = with("    assert!(get_state() == 1);\n").replace(
+        "pub fn execute",
+        "fn get_state() -> u64 {\n    1\n}\npub fn execute",
+    );
+    source_shape(&local).unwrap();
+    let derived = derive(&local).unwrap();
+    assert_eq!(derived.source, local);
+    assert!(derived.state.is_empty());
+}
+
+/// A function inside a function that only the server runs can carry the name of a function
+/// that writes state. The rule follows names, so it cannot tell which one a statement calls:
+/// it refuses the source. With another name for the inner function, the key stays with the
+/// contract.
+#[test]
+fn a_shadowed_writer_is_refused() {
+    let source = "use allowit::prelude::*;\nfn remember(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"seen\", true)\n}\nfn ask(ctx: &AllowitContext) -> allowit::Result {\n    fn remember(_ctx: &AllowitContext) -> allowit::Result {\n        Ok(())\n    }\n    remember(ctx)?;\n    allowit::new_decision_context(ctx, None)\n}\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    remember(ctx)?;\n    let seen: Option<bool> = allowit::get_state(ctx, \"seen\")?;\n    assert!(seen != Some(false));\n    ask(ctx)?;\n    Ok(())\n}\n";
+    let error = derive(source).unwrap_err();
+    assert!(error.contains("declare `remember` twice"), "{error}");
+    // With another name for the inner function, the contract keeps the key and its check.
+    let renamed = source
+        .replace("    fn remember(_ctx", "    fn note(_ctx")
+        .replace(
+            "    remember(ctx)?;\n    allowit::new",
+            "    note(ctx)?;\n    allowit::new",
+        );
+    let derived = derive(&renamed).unwrap();
+    assert_eq!(keys(&renamed), [("seen".to_owned(), Keeper::Chain, false)]);
+    assert!(derived.source.contains("fn remember(") && derived.source.contains("assert!(seen"));
+    assert!(!derived.source.contains("fn ask("));
+}
+
+/// A statement that reads a standard figure stays, and the contract keeps that figure for it,
+/// beside the figures of the kept rules.
+#[test]
+fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
+    let source = include_str!("fixtures/derive/stored-state.rs");
+    let derived = derive(source).unwrap();
+    assert_eq!(derived.source, source);
+    assert!(derived.server_only.is_empty() && derived.state.is_empty());
+    assert_eq!(
+        derived.kept,
+        [
+            "payment_limit",
+            "assert",
+            "destinations",
+            "daily_spending_limit"
+        ]
+    );
+    let figures = |source: &str| -> Vec<(&'static str, bool)> {
+        derive(source)
+            .unwrap()
+            .figures
+            .iter()
+            .map(|figure| (figure.key, figure.daily))
+            .collect()
+    };
+    assert_eq!(
+        figures(source),
+        [
+            ("calls", false),
+            ("day_spent", true),
+            ("day_unpriced", true)
+        ]
+    );
+    // A read of a standard key keeps that figure and no other; `day` keeps none.
+    let read = |key: &str| {
+        figures(&format!(
+            "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    let _figure: Option<AllowitValue> = allowit::get_state(ctx, \"{key}\")?;\n    Ok(())\n}}\n"
+        ))
+    };
+    for (key, daily) in [
+        ("calls", false),
+        ("spent", false),
+        ("unpriced", false),
+        ("day_spent", true),
+        ("day_total", true),
+        ("day_unpriced", true),
+    ] {
+        assert_eq!(read(key), [(key, daily)]);
+    }
+    assert!(read("day").is_empty());
+    // The stored day is the day of the last admitted operation. A contract wallet stores no
+    // day, so a statement that reads it leaves: only the server evaluates it.
+    let day = source.replace(
+        "    assert!(calls != Some(1_000));",
+        "    let day: Option<u64> = allowit::get_state(ctx, \"day\")?;\n    assert!(day.is_none() || calls != Some(1_000));",
+    );
+    assert_ne!(day, source);
+    let derived = derive(&day).unwrap();
+    assert!(!derived.source.contains("\"day\"") && derived.source.contains("\"calls\""));
+    let [check] = &derived.server_only[..] else {
+        panic!("one check leaves");
+    };
+    assert_eq!(
+        (check.check.as_str(), check.cause, check.movable()),
+        ("assert", Cause::StoredState, false)
+    );
+    assert!(derived.state.is_empty());
+
+    // A read that depends on a server function leaves, and keeps no figure for the contract.
+    let served = source.replace(
         "    assert!(calls != Some(1_000));",
         "    let score = allowit::decision(ctx, &allowit::AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    assert!(calls != Some(1_000) && score > 1);",
     );
-    let derived = derive(&mixed).unwrap();
+    let derived = derive(&served).unwrap();
     let causes: Vec<Cause> = derived
         .server_only
         .iter()
         .map(|check| check.cause)
         .collect();
-    assert_eq!(causes, [Cause::ServerValue, Cause::ServerBranch]);
+    assert_eq!(causes, [Cause::ServerValue]);
+    assert!(
+        derived
+            .source
+            .contains("allowit::get_state(ctx, \"calls\")")
+    );
 }
 
 /// Each kept canonical rule names the figures that it reads; a check that keeps no figure,
@@ -655,7 +1670,8 @@ fn a_source_that_is_no_policy_is_refused() {
 }
 
 /// Every source of the gate's vector file that the portable profile admits derives, or is
-/// refused for a state write, and the result is its own on-chain part.
+/// refused for a state call that the contract cannot declare, and the result is its own
+/// on-chain part.
 #[test]
 fn every_admitted_vector_derives_to_portable_source() {
     let canonical = include_str!("fixtures/portable-policy.rs");
@@ -686,7 +1702,9 @@ fn every_admitted_vector_derives_to_portable_source() {
                 );
             }
             Err(error) => assert!(
-                error.contains("cannot write policy state"),
+                error.contains("names each state key as a string literal")
+                    || error.contains("ASCII letters, digits or `_`")
+                    || error.contains("cannot write the standard figure"),
                 "{error}\n{source}"
             ),
         }
@@ -696,8 +1714,10 @@ fn every_admitted_vector_derives_to_portable_source() {
 }
 
 /// The property that the derivation keeps: the on-chain part never denies a request that the
-/// whole source allows, and it then stores the same figures. Every golden source runs with its
-/// on-chain part over the same requests, params, stored figures and server answers.
+/// whole source allows, and it then stores the same figures and the same state of every key
+/// that the contract keeps. Every golden source runs with its on-chain part over the same
+/// requests, params, stored figures and server answers. The contract holds no key that the
+/// server keeps, so the on-chain part runs without those keys.
 #[test]
 fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
     use allowit_core::{
@@ -769,8 +1789,9 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         set("allow_above", AllowitValue::Int(8_000));
         map
     };
-    // No state, and the figures of a wallet that made many payments today.
-    let states = [AllowitMap::new(), {
+    // No state; the figures of a wallet that made many payments today; and the same figures
+    // with the policies' own state, below their limits and at them.
+    let figures = || {
         let mut state = AllowitMap::new();
         let mut set = |key: &str, value: AllowitValue| {
             state.insert(key.into(), value);
@@ -781,7 +1802,39 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         set("day_spent", AllowitValue::Int(450));
         set("day_total", AllowitValue::Int(450));
         state
-    }];
+    };
+    let own = |payments: i128, score: i128, paid: i128, flagged: bool| {
+        let mut state = figures();
+        let mut set = |key: &str, value: AllowitValue| {
+            state.insert(key.into(), value);
+        };
+        set("day_payments", AllowitValue::Int(payments));
+        set("seen", AllowitValue::Bool(true));
+        set("last_score", AllowitValue::Int(score));
+        set("paid", AllowitValue::Int(paid));
+        set("passed", AllowitValue::Int(1));
+        set("flagged", AllowitValue::Bool(flagged));
+        set("visits", AllowitValue::Int(paid));
+        set("marked", AllowitValue::Bool(flagged));
+        state
+    };
+    // The first request of a new day. The keeper of a daily figure gives the figure of the
+    // current window: the wallet leaves an ended one out, and the server evaluates on the
+    // wallet's figures.
+    let rolled = || {
+        let mut state = figures();
+        for key in ["day_spent", "day_total"] {
+            state.remove(key);
+        }
+        state
+    };
+    let states = [
+        AllowitMap::new(),
+        figures(),
+        rolled(),
+        own(2, 5_000, 3, false),
+        own(3, 0, 9, true),
+    ];
     let operations = [
         AllowitOperation::transfer,
         AllowitOperation::swap,
@@ -789,6 +1842,8 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         AllowitOperation::deposit,
     ];
     let (mut allowed, mut denied_on_chain, mut runs) = (0, 0, 0);
+    // For each source, the allowed runs that changed a key that the contract keeps.
+    let mut wrote: std::collections::BTreeMap<&str, usize> = Default::default();
     for (name, both) in [
         ("sample-mandate", sample_mandate::BOTH),
         ("no-server-function", no_server_function::BOTH),
@@ -816,7 +1871,62 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("unsplit-tail", unsplit_tail::BOTH),
         ("server-range", server_range::BOTH),
         ("block-condition", block_condition::BOTH),
+        ("state-on-chain", state_on_chain::BOTH),
+        ("state-on-server", state_on_server::BOTH),
+        ("state-helpers", state_helpers::BOTH),
+        ("state-braced-macro", state_braced_macro::BOTH),
+        ("state-after-approval", state_after_approval::BOTH),
+        ("negated-block-condition", negated_block_condition::BOTH),
+        ("shadowed-after-macro", shadowed_after_macro::BOTH),
+        ("statement-after-branch", statement_after_branch::BOTH),
+        ("loop-in-condition", loop_in_condition::BOTH),
+        ("range-loop", range_loop::BOTH),
+        ("iterator-break", iterator_break::BOTH),
+        ("inferred-number", inferred_number::BOTH),
+        ("pruned-type", pruned_type::BOTH),
+        ("arm-without-comma", arm_without_comma::BOTH),
+        ("for-pattern", for_pattern::BOTH),
+        ("arm-generic-comma", arm_generic_comma::BOTH),
     ] {
+        // The keys that the server keeps: the contract never holds them.
+        let source = GOLDEN
+            .iter()
+            .find(|(golden, ..)| *golden == name)
+            .unwrap()
+            .1;
+        let derived = derive(source).unwrap();
+        let chain_keys: Vec<String> = derived
+            .state
+            .iter()
+            .filter(|entry| entry.keeper == Keeper::Chain)
+            .map(|entry| entry.key.clone())
+            .collect();
+        // What the contract holds: the keys that it keeps and the figures that the derivation
+        // names. It holds no key of the server, no other figure and no key of another policy.
+        let held: Vec<&str> = chain_keys
+            .iter()
+            .map(String::as_str)
+            .chain(derived.figures.iter().map(|figure| figure.key))
+            .collect();
+        let project = |state: &AllowitMap| {
+            let mut kept = AllowitMap::new();
+            for key in &held {
+                if let Some(value) = state.get(*key) {
+                    kept.insert((*key).into(), value.clone());
+                }
+            }
+            kept
+        };
+        // The contract's state for one evaluation. The stored day is no policy-visible value of
+        // a contract: a statement that reads it leaves. The evaluator's own accounting of the
+        // daily figures still needs it, as a contract knows the window of its daily entry.
+        let on_chain_state = |state: &AllowitMap| {
+            let mut kept = project(state);
+            if let Some(day) = state.get("day") {
+                kept.insert("day".into(), day.clone());
+            }
+            kept
+        };
         for operation in &operations {
             for amount in [1i128, 400, 6_000_000] {
                 for recipient in ["SELLER", "STRANGER"] {
@@ -825,10 +1935,10 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
                             .into_iter()
                             .flat_map(|answer| states.iter().map(move |state| (answer, state)))
                         {
-                            let context = || AllowitContext {
+                            let context = |state: AllowitMap| AllowitContext {
                                 env: AllowitEnv::new(),
                                 params: AllowitParams::from(params(limit)),
-                                state: state.clone(),
+                                state,
                                 request: AllowitRequest {
                                     operation: operation.clone(),
                                     asset: address("ASSET"),
@@ -848,17 +1958,28 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
                                 },
                             };
                             served::ANSWER.set(answer);
-                            let whole = evaluate(&context(), both[0], AllowitTier::Custom);
+                            let whole =
+                                evaluate(&context(state.clone()), both[0], AllowitTier::Custom);
                             // The contract has no server: its policy must not need one.
                             served::ANSWER.set((false, 0));
-                            let on_chain = evaluate(&context(), both[1], AllowitTier::Custom);
+                            let on_chain = evaluate(
+                                &context(on_chain_state(state)),
+                                both[1],
+                                AllowitTier::Custom,
+                            );
                             runs += 1;
                             denied_on_chain += usize::from(on_chain.is_err());
-                            if let Ok(state) = &whole {
+                            if let Ok(after) = &whole {
                                 allowed += 1;
+                                // A write of the contract's own key: its value changed.
+                                let changed = chain_keys
+                                    .iter()
+                                    .any(|key| state.get(key.as_str()) != after.get(key.as_str()));
+                                *wrote.entry(name).or_default() += usize::from(changed);
+                                let state = after;
                                 assert_eq!(
-                                    on_chain.as_ref(),
-                                    Ok(state),
+                                    on_chain.as_ref().map(&project),
+                                    Ok(project(state)),
                                     "{name}: {operation:?} of {amount} to {recipient}, limit {limit}, server {answer:?}"
                                 );
                             }
@@ -873,4 +1994,20 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         allowed > 300 && denied_on_chain > 300,
         "{allowed} allowed, {denied_on_chain} denied of {runs}"
     );
+    // Each source that keeps a key in the contract wrote it in some allowed runs, and no other
+    // source wrote one.
+    for (name, count) in &wrote {
+        let stateful = [
+            "state-on-chain",
+            "state-on-server",
+            "state-helpers",
+            "state-braced-macro",
+            "state-after-approval",
+            "statement-after-branch",
+            "arm-without-comma",
+        ]
+        .contains(name);
+        assert_eq!(*count > 0, stateful, "{name}: {count}");
+    }
+    assert_eq!(wrote.values().filter(|count| **count > 0).count(), 7);
 }

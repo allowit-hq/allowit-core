@@ -96,7 +96,10 @@ pub fn check_host_call_registry(host_calls: &[(&str, &str)]) -> Result<()> {
 }
 
 mod derive;
-pub use derive::{Cause, Derived, Figure, ServerOnly, derive};
+pub use derive::{
+    Cause, DAILY_PREFIX, Derived, Figure, Keeper, MAX_STATE_KEY_BYTES, ServerOnly, StateEntry,
+    derive,
+};
 
 fn source_shape_for(source: &str, host_calls: Option<&[(&str, &str)]>) -> Result<SourceShape> {
     let code = gate::checked_code(source, host_calls)?;
@@ -113,7 +116,7 @@ pub(crate) mod gate {
     use std::collections::{HashMap, HashSet};
 
     /// `policy_source.py` `MACROS`: the macros authored code may invoke.
-    const MACROS: &[&str] = &[
+    pub(super) const MACROS: &[&str] = &[
         "assert",
         "assert_eq",
         "assert_ne",

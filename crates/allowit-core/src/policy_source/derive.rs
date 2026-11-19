@@ -14,9 +14,9 @@
 //! A statement of `execute` leaves when:
 //!
 //! 1. it makes a server call, names a server request type, reads owner text with `as_str()`,
-//!    which only the server can read, or reads stored policy state with `allowit::get_state`.
-//!    A server call is a call of a server function, of a registered package function, or of a
-//!    local function that makes one;
+//!    which only the server can read, or uses policy state that the server keeps (see
+//!    [Policy state](#policy-state)). A server call is a call of a server function, of a
+//!    registered package function, or of a local function that makes one;
 //! 2. it reads a name that a leaving statement binds, or a name that a leaving statement can
 //!    assign: a `mut` name, or a name that its `let` declares without a value;
 //! 3. it is an `if`, `match`, `while` or `for` whose condition, matched value, pattern guard
@@ -37,18 +37,71 @@
 //! or a block that ends with `;`, or that is the last expression of `execute`, stays whole or
 //! leaves whole.
 //!
-//! A contract wallet stores no policy state of its own: it keeps only the cumulated figures
-//! that its kept canonical rules read ([`Derived::figures`]). So a statement that reads stored
-//! state leaves (rule 1), and the server reads the same figures when it evaluates the whole
-//! source. [`derive`] refuses a source that writes policy state (`allowit::set_state`)
-//! anywhere: neither the chain nor the server stores such a write.
+//! # Policy state
 //!
-//! [`derive`] also refuses a source with a server part that the rule cannot follow by its
-//! names: one that takes a mutable reference (`&mut`, `ref mut`), which lets a statement
-//! assign a name that it does not mention; one that declares two local functions or
-//! constants with one name; and one that declares a local `Ok` or `Err`.
+//! A policy may keep its own state: `allowit::get_state(ctx, "key")` reads the value that the
+//! last admitted operation wrote, and `allowit::set_state(ctx, "key", value)` writes when the
+//! operation is admitted. Each key has one keeper, so a statement reads the same value on the
+//! chain and on the server:
+//!
+//! - the chain keeps a key when a statement that uses it stays and no statement that writes it
+//!   leaves. The contract stores the key, the kept statements read and write it there, and
+//!   the server reads it from the contract when it evaluates the whole source, also in a
+//!   statement that left;
+//! - the server keeps a key when a statement that writes it leaves. Then every statement that
+//!   reads or writes the key leaves too (rule 1), and the contract never stores it. A key
+//!   with no write that only leaving statements read is the server's as well.
+//!
+//! A call of a local function that writes a key counts as a write of that key, also through
+//! another local function. A function that stands inside another one writes only where it is
+//! called. A key whose name
+//! starts with `day_` lives one daily window; any other key lives until a later write replaces
+//! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
+//!
+//! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
+//! contract keeps each figure that a kept statement reads ([`Derived::figures`]). A read of the
+//! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
+//! policy writes a standard figure.
+//!
+//! A value without a stated type can take its type from the code that uses it, and Rust gives a
+//! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
+//! part would compute with another type. The rule names the forms of a value whose type is
+//! fixed: a literal with a fixed type (a text, a bool, a number with a suffix), a field of the
+//! request, an owner param read whole, a call of a library function with a fixed return type
+//! or of an integer type's `from` or `try_from` (with at most `?` after it), a range with a
+//! side of a fixed type, and a name of a fixed type (with at most `.clone()` or `.as_str()`).
+//! A name bound without a stated type (by `let`, `for`, `if let`, `while let` or a `match`
+//! arm) from any other form is followed like a value of the server: when a removed statement
+//! mentions it, or a name that one statement uses together with it, a kept statement that
+//! reads those names leaves too. A form that the rule does not know counts as open, so it
+//! moves more to the server, never less. A stated type (`let n: u64 = ...`) keeps the
+//! statements on chain.
+//!
+//! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
+//! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
+//! `const` block) ends at its last `}` unless `.` or `?` follows, and any other statement ends
+//! at its `;`. A match arm whose body is block-like or a `const` block ends at its last `}` in
+//! the same way. So each
+//! statement, each item and each arm of a block is a step of its own. The on-chain part states
+//! `warn` where the source states the lint level `deny` or `forbid`: it leaves code out, and a
+//! lint level changes nothing that the policy does.
+//!
+//! The contract must know each key before it runs, and Rust source cannot pass a state function
+//! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
+//! ASCII letters, digits or `_`, and a write of a standard figure.
+//!
+//! [`derive`] also refuses a source that the rule cannot follow by its names, when a statement
+//! or a local item of it leaves: one that takes a mutable reference (`&mut`, `ref mut`), which
+//! lets a statement assign a name that it does not mention; one that declares two local
+//! functions or constants with one name; one that declares a local `Ok` or `Err`; and one in
+//! which the parser cannot tell where a statement ends, which it shows by a `let` or an item
+//! right after a `}` of that statement. A source of which only an unused server import leaves
+//! has no such statement, so it is not refused.
 use super::{Result, gate, param_keys, source_shape};
-use std::collections::HashSet;
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, HashMap, HashSet},
+};
 
 /// Why a statement runs only on the server.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,10 +110,10 @@ pub enum Cause {
     ServerCall,
     /// The statement reads a value that a server call gave.
     ServerValue,
-    /// The statement reads stored policy state, which only the server reads.
+    /// The statement reads or writes policy state that the server keeps.
     StoredState,
     /// The statement is in a branch whose condition depends on a server function or on
-    /// stored state.
+    /// policy state that the server keeps.
     ServerBranch,
     /// The statement comes after an early exit that depends on a server function.
     AfterServerExit,
@@ -125,9 +178,78 @@ pub struct Derived {
     /// The deterministic checks that stay, in source order and without repetition. An empty
     /// list means that the contract enforces nothing of the policy beyond its signatures.
     pub kept: Vec<String>,
-    /// The cumulated figures that the kept checks read, in a fixed order and without
-    /// repetition. A contract wallet keeps these figures and no other state.
+    /// The cumulated figures that the kept statements read, in a fixed order and without
+    /// repetition: those of the kept canonical rules, and those that a kept statement reads
+    /// with `allowit::get_state`. A contract wallet keeps these figures, and the server
+    /// evaluates the whole source on the wallet's values of them. The wallet gives a daily
+    /// figure of its current window and leaves an ended one out: `get_state` reads the state
+    /// map as it gets it.
     pub figures: Vec<Figure>,
+    /// The policy's own state keys, sorted by key and without repetition, each with its
+    /// keeper. An empty list means that the policy keeps no state of its own.
+    pub state: Vec<StateEntry>,
+}
+
+/// Who keeps one state key of a policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keeper {
+    /// The contract stores the key. A statement that uses it stays in the on-chain part, and
+    /// so does every statement that writes it.
+    Chain,
+    /// The server stores the key. Every statement that reads or writes it runs only on the
+    /// server: a statement that writes it left, or the key has no write and only leaving
+    /// statements read it.
+    Server,
+}
+
+impl Keeper {
+    /// The stable code of this keeper.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Chain => "chain",
+            Self::Server => "server",
+        }
+    }
+}
+
+/// One state key of a policy: a key of its `allowit::get_state` and `allowit::set_state`
+/// calls that is no standard figure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateEntry {
+    /// The key, as the source names it.
+    pub key: String,
+    /// Whether the value lives one daily window: the key starts with [`DAILY_PREFIX`]. The
+    /// window opens with the first write after the last window ended, and the value reads as
+    /// absent when it has ended. Any other value lives until a later write replaces it.
+    ///
+    /// The keeper enforces the window. The evaluator of this crate reads the state map as it
+    /// gets it and carries every key forward: the contract and the server each leave an
+    /// ended value out of the state that they give to an evaluation.
+    pub daily: bool,
+    /// Who stores the value.
+    pub keeper: Keeper,
+}
+
+/// The prefix of a state key whose value lives one daily window.
+pub const DAILY_PREFIX: &str = "day_";
+/// The most bytes of a state key.
+pub const MAX_STATE_KEY_BYTES: usize = 32;
+
+/// The standard state keys: the figures, and `day`, the day of the last admitted operation. A
+/// contract wallet stores no day, so a statement that reads it leaves.
+const STANDARD: &[&str] = &[
+    allowit::CALLS,
+    allowit::SPENT,
+    allowit::UNPRICED,
+    allowit::DAY_SPENT,
+    allowit::DAY_TOTAL,
+    allowit::DAY_UNPRICED,
+    allowit::DAY_KEY,
+];
+
+/// Whether `key` is a standard state key, and no key of the policy's own.
+fn standard(key: &str) -> bool {
+    STANDARD.contains(&key)
 }
 
 /// One cumulated figure that a kept canonical rule reads: a key of the standard state.
@@ -187,11 +309,14 @@ const FIGURES: &[(Figure, &[&str])] = &[
     ),
 ];
 
-/// The figures that the checks in `kept` read.
-fn figures(kept: &[String]) -> Vec<Figure> {
+/// The figures that the checks in `kept` read, with the figures in `read`: the standard keys
+/// that a kept statement reads with `allowit::get_state`.
+fn figures(kept: &[String], read: &BTreeSet<&str>) -> Vec<Figure> {
     FIGURES
         .iter()
-        .filter(|(_, rules)| rules.iter().any(|rule| kept.iter().any(|k| k == rule)))
+        .filter(|(figure, rules)| {
+            read.contains(figure.key) || rules.iter().any(|rule| kept.iter().any(|k| k == rule))
+        })
         .map(|(figure, _)| *figure)
         .collect()
 }
@@ -366,6 +491,19 @@ struct Parsed<'a> {
     source: &'a str,
     tokens: Vec<Token>,
     nodes: Vec<Node>,
+    /// The state keys that the server keeps. [`derive`] finds them step by step.
+    server_keys: RefCell<HashSet<String>>,
+    /// The tokens where each local function or constant is seen: the block that declares it,
+    /// or the whole file.
+    item_scopes: RefCell<HashMap<String, (usize, usize)>>,
+}
+
+/// One call of `allowit::get_state` or `allowit::set_state`.
+struct StateUse {
+    /// The token of `allowit`.
+    at: usize,
+    writes: bool,
+    key: String,
 }
 
 /// The extent of one branch statement.
@@ -482,45 +620,63 @@ impl<'a> Parsed<'a> {
     /// The `{` that opens the body after the header that starts at `from`. A block can also
     /// stand as an operand of the header, as in `if { a } { ... }` or `if x == { 1 } { ... }`:
     /// a `{` opens an operand at the start of the header and after an operator, and the body
-    /// after a name, a literal or a closing bracket.
+    /// after a name, a literal or a closing bracket. After `..` it opens the body, as the Rust
+    /// parser reads a header: `for i in 0.. { ... }`.
     fn body_after(&self, from: usize, end: usize) -> Option<usize> {
         let mut depth = 0i64;
         let mut i = from;
+        // The token after the generic arguments of a path: a `{` there opens the body.
+        let mut after_generics = None;
         while i < end {
+            // A branch or a loop inside the header is a whole value with its own blocks, as
+            // in `if ok && loop { break true; } { ... }`.
+            let nested = self.tokens[i].kind == Kind::Word
+                && matches!(self.text(i), "if" | "match" | "while" | "for" | "loop");
+            if depth == 0 && nested {
+                i = self.block_like_end(i, end)? + 1;
+                continue;
+            }
             match self.text(i) {
                 "let" if depth == 0 => i = self.find(i + 1, end, &["="])?,
+                // The generic arguments of a path, as in `u64::MAX::<>`: their `>` is no
+                // operator.
+                "::" if self.text(i + 1) == "<" => {
+                    let next = self.after_generics(i + 1)?;
+                    after_generics = Some(next);
+                    i = next - 1;
+                }
                 "(" | "[" => depth += 1,
                 ")" | "]" => depth -= 1,
                 "{" if depth == 0 => {
-                    let operand = i == from
-                        || matches!(
-                            self.text(i - 1),
-                            "if" | "while"
-                                | "match"
-                                | "in"
-                                | "return"
-                                | "=="
-                                | "!="
-                                | "&&"
-                                | "||"
-                                | "<"
-                                | ">"
-                                | "="
-                                | "+"
-                                | "-"
-                                | "*"
-                                | "/"
-                                | "%"
-                                | "!"
-                                | "&"
-                                | "|"
-                                | "^"
-                                | ","
-                                | ".."
-                                | "..="
-                                | "=>"
-                                | ":"
-                        );
+                    let operand = after_generics != Some(i)
+                        && (i == from
+                            || matches!(
+                                self.text(i - 1),
+                                "if" | "while"
+                                    | "match"
+                                    | "in"
+                                    | "return"
+                                    | "const"
+                                    | "=="
+                                    | "!="
+                                    | "&&"
+                                    | "||"
+                                    | "<"
+                                    | ">"
+                                    | "="
+                                    | "+"
+                                    | "-"
+                                    | "*"
+                                    | "/"
+                                    | "%"
+                                    | "!"
+                                    | "&"
+                                    | "|"
+                                    | "^"
+                                    | ","
+                                    | "=>"
+                                    | ":"
+                            ));
                     if !operand {
                         return Some(i);
                     }
@@ -532,6 +688,31 @@ impl<'a> Parsed<'a> {
             i += 1;
         }
         None
+    }
+
+    /// The last token of the statement that token `p` starts, when it is a macro with braces,
+    /// such as `assert! { ok }`, or a `const { ... }` block. Such a statement ends at its `}`
+    /// with no `;`, unless a method call or `?` continues it: that is the rule of the Rust
+    /// parser. Only the name of a macro counts, plain or raw (`r#assert`):
+    /// `if ! { ok } { ... }` negates a block.
+    fn braced_end(&self, p: usize, end: usize) -> Option<usize> {
+        let macro_name = self
+            .word(p)
+            .is_some_and(|name| gate::MACROS.contains(&name));
+        let open = match (self.text(p), self.text(p + 1), self.text(p + 2)) {
+            ("const", "{", _) => p + 1,
+            (_, "!", "{") if macro_name => p + 2,
+            _ => return None,
+        };
+        self.close(open)
+            .filter(|last| *last < end && !matches!(self.text(last + 1), "." | "?"))
+    }
+
+    /// The `{` that opens the body of the `for` at token `p`. Its pattern can hold braces, as
+    /// in `for S { a, .. } in xs { ... }`, so the body comes after the value that follows `in`.
+    fn for_body(&self, p: usize, end: usize) -> Option<usize> {
+        let at = self.find(p + 1, end, &["in"])?;
+        self.body_after(at + 1, end)
     }
 
     /// The last token of the branch statement whose keyword or `{` is token `p`, also when its
@@ -552,7 +733,8 @@ impl<'a> Parsed<'a> {
                     }
                 }
             }
-            "match" | "while" | "for" => self.close(self.body_after(p + 1, end)?),
+            "match" | "while" => self.close(self.body_after(p + 1, end)?),
+            "for" => self.close(self.for_body(p, end)?),
             "loop" if self.text(p + 1) == "{" => self.close(p + 1),
             "{" => self.close(p),
             _ => None,
@@ -615,7 +797,33 @@ impl<'a> Parsed<'a> {
                             c + 1
                         }
                         None => {
-                            let stop = self.find(body, close, &[","]).unwrap_or(close);
+                            // A block-like body, such as `if ok { .. } else { .. }`, needs no
+                            // comma: it ends at its last `}` unless `.` or `?` continues it,
+                            // as in Rust.
+                            let labeled = self.tokens[body].kind == Kind::Lifetime
+                                && self.text(body + 1) == ":";
+                            let start = if labeled { body + 2 } else { body };
+                            let block_like = matches!(
+                                self.text(start),
+                                "if" | "match" | "loop" | "while" | "for" | "{"
+                            );
+                            // So does a `const` block. A macro with braces needs a comma there.
+                            let braced = (self.text(start) == "const"
+                                && self.text(start + 1) == "{")
+                                .then(|| self.close(start + 1))
+                                .flatten();
+                            let exact = block_like
+                                .then(|| self.block_like_end(start, close))
+                                .flatten()
+                                .or(braced)
+                                .filter(|last| {
+                                    *last < close && !matches!(self.text(last + 1), "." | "?")
+                                });
+                            let stop = match exact {
+                                Some(last) => last + 1,
+                                // A `,` between generic arguments ends no arm.
+                                None => self.argument_end(body, close).unwrap_or(close),
+                            };
                             if stop == body {
                                 return None;
                             }
@@ -629,7 +837,12 @@ impl<'a> Parsed<'a> {
                 }
             }
             "while" | "for" => {
-                let open = self.block_after(p + 1, end).filter(|open| *open > p + 1)?;
+                // The pattern of a `for` can hold braces: its value starts after `in`.
+                let from = match self.text(p) {
+                    "for" => self.find(p + 1, end, &["in"])? + 1,
+                    _ => p + 1,
+                };
+                let open = self.block_after(from, end).filter(|open| *open > from)?;
                 let close = self.close(open)?;
                 branch.headers.push((p + 1, open));
                 branch.blocks.push((open, close));
@@ -683,7 +896,8 @@ impl<'a> Parsed<'a> {
         (from..to)
             .filter_map(|i| {
                 let name = self.word(i)?;
-                let free = !matches!(name, "mut" | "ref" | "_")
+                // The keywords of a pattern, as written: `r#mut` is a name.
+                let free = !matches!(self.text(i), "mut" | "ref" | "_")
                     && self.text(i.wrapping_sub(1)) != "::"
                     && !matches!(self.text(i + 1), "(" | "::" | "{" | "!");
                 free.then(|| name.to_owned())
@@ -741,11 +955,23 @@ impl<'a> Parsed<'a> {
                 self.nodes[id].name = self.word(name).map(str::to_owned);
                 self.nodes[id].is_fn = true;
                 id
-            } else if matches!(self.text(item), "use" | "const") {
+            } else if let Some(end) = self.braced_end(p, close) {
+                // A macro with braces or a `const` block is a statement that needs no `;`.
+                let semi = self.text(end + 1) == ";" && end + 1 < close;
+                let last = if semi { end + 1 } else { end };
+                self.node(Shape::Whole, first, last, parent)
+            } else if self.text(item) == "use"
+                || (self.text(item) == "const" && self.word(item + 1).is_some())
+            {
+                // A `const` block that a method call continues is no item: it is a statement.
                 let last = plain(self);
                 let id = self.node(Shape::Item, first, last, parent);
+                // `const _` binds no name.
                 if self.text(item) == "const" {
-                    self.nodes[id].name = self.word(item + 1).map(str::to_owned);
+                    self.nodes[id].name = self
+                        .word(item + 1)
+                        .filter(|name| *name != "_")
+                        .map(str::to_owned);
                 }
                 id
             } else if self.text(p) == "let" {
@@ -758,15 +984,18 @@ impl<'a> Parsed<'a> {
                 }
                 id
             } else {
+                // A block-like statement ends at its last `}`, as the Rust parser ends it: only
+                // `.` or `?` after that `}` continues the expression, so a `{`, an operator or
+                // a declaration after it starts the next statement. `block_like_end` finds the
+                // body after a header that holds a block, as in `while { ok } { ... }`.
+                let exact = self.block_like_end(p, close).filter(|last| *last < close);
+                let continued = |last: usize| matches!(self.text(last + 1), "." | "?");
+                // `branch` takes the first block of a header as the body. It splits the
+                // statement only when that is the statement's own last block.
                 let branch = self
                     .branch(p, close)
-                    .filter(|branch| !self.continues(branch.end + 1));
-                // A branch statement that is not split, such as one whose condition is a block,
-                // ends with its own last block, not at the next `;`.
-                let unsplit = || {
-                    self.block_like_end(p, close)
-                        .filter(|last| *last < close && !self.continues(last + 1))
-                };
+                    .filter(|branch| Some(branch.end) == exact && !continued(branch.end));
+                let unsplit = || exact.filter(|last| !continued(*last));
                 match branch {
                     None => match unsplit() {
                         Some(end) => {
@@ -833,6 +1062,45 @@ impl<'a> Parsed<'a> {
         })
     }
 
+    /// Whether token `i` names one of the local functions or constants in `wanted` where that
+    /// item is seen: outside the block that declares it, the name is another item, such as the
+    /// `Some` of the language.
+    fn names_item(&self, i: usize, wanted: &HashSet<String>) -> bool {
+        self.names(i, wanted)
+            && self.word(i).is_some_and(|name| {
+                self.item_scopes
+                    .borrow()
+                    .get(name)
+                    .is_none_or(|(from, to)| (*from..=*to).contains(&i))
+            })
+    }
+
+    /// The text of the token before token `at`, past the attributes (`#[...]`) that stand
+    /// right before it, or "" at the start of the file.
+    fn before_attributes(&self, at: usize) -> &'a str {
+        let mut i = at;
+        while i > 0 && self.text(i - 1) == "]" {
+            let mut depth = 0i64;
+            let mut j = i - 1;
+            loop {
+                match self.text(j) {
+                    "]" => depth += 1,
+                    "[" => depth -= 1,
+                    _ => {}
+                }
+                if depth == 0 || j == 0 {
+                    break;
+                }
+                j -= 1;
+            }
+            if depth != 0 || j == 0 || self.text(j - 1) != "#" {
+                break;
+            }
+            i = j - 1;
+        }
+        if i == 0 { "" } else { self.text(i - 1) }
+    }
+
     fn mentions(&self, from: usize, to: usize, wanted: &HashSet<String>) -> bool {
         !wanted.is_empty() && (from..to).any(|i| self.names(i, wanted))
     }
@@ -857,7 +1125,7 @@ impl<'a> Parsed<'a> {
             return true;
         }
         if let Some(function) = self.allowit_path(i) {
-            return gate::SERVER_FUNCTIONS.contains(&function) || function == "get_state";
+            return gate::SERVER_FUNCTIONS.contains(&function) || self.state_at(i);
         }
         let package = self.text(i + 1) == "::"
             && self.text(i + 3) == "("
@@ -877,22 +1145,141 @@ impl<'a> Parsed<'a> {
             && self.text(i + 1) == "("
     }
 
-    /// Whether token `i` reads stored policy state: `allowit::get_state`.
+    /// The token after the generic arguments that the `<` at token `open` starts, as in
+    /// `get_state::<Option<u64>>`.
+    fn after_generics(&self, open: usize) -> Option<usize> {
+        let mut depth = 0i64;
+        let mut i = open;
+        loop {
+            match self.text(i) {
+                "<" => depth += 1,
+                ">" => depth -= 1,
+                // A type can hold brackets: a tuple, an array with its length.
+                "(" | "[" | "{" => i = self.close(i)?,
+                "" | ")" | "]" | "}" | ";" => return None,
+                _ => {}
+            }
+            i += 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+
+    /// The `,` that ends the call argument that starts at token `from`, before the closing
+    /// bracket `end`. A `,` in brackets or between the generic arguments of a path, as in
+    /// `Ok::<_, AllowitError>(ctx)`, ends no argument.
+    fn argument_end(&self, from: usize, end: usize) -> Option<usize> {
+        let mut i = from;
+        while i < end {
+            match self.text(i) {
+                "," => return Some(i),
+                "(" | "[" | "{" => i = self.close(i)?,
+                "::" if self.text(i + 1) == "<" => i = self.after_generics(i + 1)? - 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// The state call that token `i` starts, `allowit::get_state(ctx, "key")` or
+    /// `allowit::set_state(ctx, "key", value)`: whether it writes, and its key. `None` for
+    /// another token and for a call whose key is no string literal.
+    fn state_use(&self, i: usize) -> Option<(bool, &'a str)> {
+        let writes = match self.allowit_path(i)? {
+            "get_state" => false,
+            "set_state" => true,
+            _ => return None,
+        };
+        // An explicit type: `get_state::<u64>(...)`.
+        let mut open = i + 3;
+        if self.text(open) == "::" && self.text(open + 1) == "<" {
+            open = self.after_generics(open + 1)?;
+        }
+        if self.text(open) != "(" {
+            return None;
+        }
+        let close = self.close(open)?;
+        // The key is the second argument, and the literal alone.
+        let key = self.argument_end(open + 1, close)? + 1;
+        let token = self
+            .tokens
+            .get(key)
+            .filter(|token| token.kind == Kind::Literal)?;
+        let ends = key + 1 == close || (self.text(key + 1) == "," && key + 1 < close);
+        // A plain string, or a raw string such as `r"key"` or `r#"key"#`.
+        let text = &self.source[token.start..token.end];
+        let raw = text.strip_prefix('r').map(|text| text.trim_matches('#'));
+        raw.unwrap_or(text)
+            .strip_prefix('"')
+            .and_then(|text| text.strip_suffix('"'))
+            .filter(|_| ends)
+            .map(|key| (writes, key))
+    }
+
+    /// Every state call of the source. A use of `allowit::get_state` or `allowit::set_state`
+    /// that is no such call, a key that is no valid literal and a write of a standard figure
+    /// are refused.
+    fn state_uses(&self) -> Result<Vec<StateUse>> {
+        let mut uses = vec![];
+        for at in 0..self.tokens.len() {
+            // Only the library's own functions: a local item may carry one of the two names.
+            let Some(name) = self
+                .allowit_path(at)
+                .filter(|name| matches!(*name, "get_state" | "set_state"))
+            else {
+                continue;
+            };
+            let line = self.line(self.tokens[at].start);
+            let Some((writes, key)) = self.state_use(at) else {
+                return Err(format!(
+                    "A policy for a contract wallet names each state key as a string literal: `allowit::{name}(ctx, \"key\"{})` (line {line}). The wallet must know each key before it runs.",
+                    if name == "set_state" { ", value" } else { "" }
+                ));
+            };
+            let valid = !key.is_empty()
+                && key.len() <= MAX_STATE_KEY_BYTES
+                && key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_');
+            if !valid {
+                return Err(format!(
+                    "The state key {key:?} (line {line}) is not 1 to {MAX_STATE_KEY_BYTES} ASCII letters, digits or `_`."
+                ));
+            }
+            if writes && standard(key) {
+                return Err(format!(
+                    "A policy cannot write the standard figure {key:?} (`allowit::set_state`, line {line}): the wallet keeps it. Use another key."
+                ));
+            }
+            uses.push(StateUse {
+                at,
+                writes,
+                key: key.to_owned(),
+            });
+        }
+        Ok(uses)
+    }
+
+    /// Whether token `i` starts a call that reads or writes policy state that the server
+    /// keeps: a key of the server, or the stored day, which no contract wallet stores.
     fn state_at(&self, i: usize) -> bool {
-        self.allowit_path(i) == Some("get_state")
+        self.state_use(i).is_some_and(|(_, key)| {
+            key == allowit::DAY_KEY || self.server_keys.borrow().contains(key)
+        })
     }
 
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {
-        (from..to).any(|i| self.server_at(i) || self.server_text_at(i) || self.names(i, helpers))
+        (from..to)
+            .any(|i| self.server_at(i) || self.server_text_at(i) || self.names_item(i, helpers))
     }
 
-    /// Whether the tokens make a server call other than a read of stored state. `callers` are
-    /// the local functions that make one.
+    /// Whether the tokens make a server call other than a use of state that the server keeps.
+    /// `callers` are the local functions that make one.
     fn calls(&self, from: usize, to: usize, callers: &HashSet<String>) -> bool {
         (from..to).any(|i| {
             (self.server_at(i) && !self.state_at(i))
                 || self.server_text_at(i)
-                || self.names(i, callers)
+                || self.names_item(i, callers)
         })
     }
 
@@ -956,19 +1343,21 @@ impl<'a> Parsed<'a> {
     /// Whether the tokens hold a `break` or `continue` of a loop that encloses them.
     fn breaks(&self, from: usize, to: usize) -> bool {
         let mut loops: Vec<bool> = vec![];
-        let (mut pending, mut depth, mut pending_depth) = (false, 0i64, 0i64);
+        // The `{` of each loop body. A block in the header of a loop, such as the iterated
+        // value of `for _ in { ... } {}`, runs outside the loop: an exit there ends an
+        // enclosing loop.
+        let mut bodies: HashSet<usize> = HashSet::new();
         for i in self.steps(from, to) {
             match self.text(i) {
                 "loop" | "while" | "for" if self.tokens[i].kind == Kind::Word => {
-                    pending = true;
-                    pending_depth = depth;
+                    let body = match self.text(i) {
+                        "loop" => Some(i + 1).filter(|open| self.text(*open) == "{"),
+                        "for" => self.for_body(i, to),
+                        _ => self.body_after(i + 1, to),
+                    };
+                    bodies.extend(body);
                 }
-                "(" | "[" => depth += 1,
-                ")" | "]" => depth -= 1,
-                "{" => {
-                    loops.push(pending && depth == pending_depth);
-                    pending = false;
-                }
+                "{" => loops.push(bodies.contains(&i)),
                 "}" => {
                     loops.pop();
                 }
@@ -990,7 +1379,7 @@ impl<'a> Parsed<'a> {
     fn reads_only(&self, from: usize, to: usize, functions: &HashSet<String>) -> bool {
         (from..to).all(|i| {
             let text = self.text(i);
-            if matches!(text, "?" | "!" | "=" | "{" | "}") || self.names(i, functions) {
+            if matches!(text, "?" | "!" | "=" | "{" | "}") || self.names_item(i, functions) {
                 return false;
             }
             let Some(name) = self.word(i) else {
@@ -1030,6 +1419,9 @@ struct Scope<'a> {
     body: &'a [usize],
     /// Every name of `execute` that a later statement can assign.
     mutable: &'a HashSet<String>,
+    /// Each name of `execute` whose type a number without a type can leave open, with every
+    /// name whose type the same statements can tie to it.
+    inferred: &'a HashMap<String, BTreeSet<String>>,
 }
 
 /// One change of the source text.
@@ -1079,6 +1471,8 @@ pub fn derive(source: &str) -> Result<Derived> {
         source,
         tokens: lex(source)?,
         nodes: vec![],
+        server_keys: RefCell::default(),
+        item_scopes: RefCell::default(),
     };
     let count = parsed.tokens.len();
     // The file is a list of items. `execute` is the one function that is split.
@@ -1104,13 +1498,36 @@ pub fn derive(source: &str) -> Result<Derived> {
     let all: Vec<usize> = (0..p.nodes.len()).collect();
     let in_execute = |id: usize| p.nodes[id].first > open && p.nodes[id].last < last;
 
-    // Local functions and constants that make a server call, and local functions that write
-    // state. A function is one statement here, whether it stands in the file or in a block.
+    // Local functions and constants. A function is one statement here, whether it stands in the
+    // file or in a block.
     let named: Vec<usize> = all
         .iter()
         .copied()
         .filter(|id| *id != execute && p.nodes[*id].name.is_some())
         .collect();
+    // Where each of them is seen: the block that declares it, or the whole file.
+    {
+        let mut inside: Vec<Option<usize>> = vec![None; count];
+        let mut blocks: Vec<usize> = vec![];
+        for (i, block) in inside.iter_mut().enumerate() {
+            *block = blocks.last().copied();
+            match p.text(i) {
+                "{" => blocks.push(i),
+                "}" => {
+                    blocks.pop();
+                }
+                _ => {}
+            }
+        }
+        let mut scopes = p.item_scopes.borrow_mut();
+        for id in &named {
+            let block = inside[p.nodes[*id].first];
+            let scope = block.map_or((0, count), |open| (open, p.close(open).unwrap_or(count)));
+            if let Some(name) = &p.nodes[*id].name {
+                scopes.entry(name.clone()).or_insert(scope);
+            }
+        }
+    }
     let closure = |start: &dyn Fn(usize, usize, &HashSet<String>) -> bool| {
         let mut found: HashSet<String> = HashSet::new();
         loop {
@@ -1129,19 +1546,107 @@ pub fn derive(source: &str) -> Result<Derived> {
             }
         }
     };
-    let helpers = closure(&|from, to, found| p.server(from, to, found));
-    // The helpers that make a server call other than a read of stored state. The others only
-    // read stored state.
-    let callers = closure(&|from, to, found| p.calls(from, to, found));
-    let readers: HashSet<String> = helpers.difference(&callers).cloned().collect();
 
-    // Neither a contract wallet nor the server stores a policy's own state: the wallet keeps
-    // only the figures of its canonical rules.
-    if let Some(write) = (0..count).find(|i| p.allowit_path(*i) == Some("set_state")) {
-        return Err(format!(
-            "A policy for a contract wallet cannot write policy state (`allowit::set_state`, line {}). The wallet keeps only the cumulated figures that its canonical rules read, and no policy state of its own. State the limit with a canonical rule.",
-            p.line(p.tokens[write].start)
-        ));
+    // The state calls of the source, and the keys that each local function can write, itself
+    // or through a local function that it calls.
+    let uses = p.state_uses()?;
+    // A call of a local function: its name, before `(`, that is no field, method, path segment
+    // or declaration. The gate admits no function value, so a function is only ever called.
+    let call_at = |i: usize| {
+        p.word(i).filter(|_| {
+            p.text(i + 1) == "(" && !matches!(p.text(i.wrapping_sub(1)), "." | "::" | "fn")
+        })
+    };
+    // Every local function with its tokens, read from each `fn` of the file: a function can
+    // stand inside a statement that is not split, where it is no statement of its own.
+    // `execute` itself is no local function. A function is seen in the block that holds its
+    // declaration, or in the whole file: `scope` is that range of tokens.
+    struct LocalFn<'a> {
+        name: &'a str,
+        tokens: (usize, usize),
+        scope: (usize, usize),
+    }
+    let mut local_fns: Vec<LocalFn> = vec![];
+    let mut blocks: Vec<usize> = vec![];
+    for i in 0..count {
+        match p.text(i) {
+            "{" => blocks.push(i),
+            "}" => {
+                blocks.pop();
+            }
+            "fn" if !(first..open).contains(&i) => {
+                let body = p
+                    .find(i + 1, count, &["{", ";"])
+                    .filter(|at| p.text(*at) == "{")
+                    .and_then(|at| p.close(at));
+                let scope = match blocks.last() {
+                    Some(block) => (*block, p.close(*block).unwrap_or(count)),
+                    None => (0, count),
+                };
+                if let (Some(end), Some(name)) = (body, p.word(i + 1)) {
+                    local_fns.push(LocalFn {
+                        name,
+                        tokens: (i, end + 1),
+                        scope,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    // The local function that the call at token `i` names: one that is seen there. Another
+    // item can carry the same name outside that block, such as `Some`.
+    let called_at = |i: usize| {
+        call_at(i).filter(|name| {
+            local_fns
+                .iter()
+                .any(|f| f.name == *name && (f.scope.0..f.scope.1).contains(&i))
+        })
+    };
+    let in_local_fn = |i: usize| {
+        local_fns
+            .iter()
+            .any(|f| (f.tokens.0..f.tokens.1).contains(&i))
+    };
+    let mut writers: HashMap<String, BTreeSet<String>> = HashMap::new();
+    // The local functions that each function calls, read once.
+    let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for function in &local_fns {
+        let (from, to) = function.tokens;
+        // A function that stands inside this one runs only when it is called: its tokens
+        // are its own.
+        let inner: Vec<(usize, usize)> = local_fns
+            .iter()
+            .map(|other| other.tokens)
+            .filter(|(start, end)| *start > from && *end <= to)
+            .collect();
+        let own = |i: usize| {
+            (from..to).contains(&i) && !inner.iter().any(|(start, end)| (*start..*end).contains(&i))
+        };
+        let direct = uses
+            .iter()
+            .filter(|state| state.writes && own(state.at))
+            .map(|state| state.key.clone());
+        writers
+            .entry(function.name.to_owned())
+            .or_default()
+            .extend(direct);
+        for callee in (from..to).filter(|i| own(*i)).filter_map(called_at) {
+            callers_of.entry(callee).or_default().push(function.name);
+        }
+    }
+    // Each written key goes from a function to its callers until no set grows.
+    let mut pending: Vec<&str> = local_fns.iter().map(|f| f.name).collect();
+    while let Some(callee) = pending.pop() {
+        let written = writers.get(callee).cloned().unwrap_or_default();
+        for caller in callers_of.get(callee).into_iter().flatten() {
+            let keys = writers.entry((*caller).to_owned()).or_default();
+            let before = keys.len();
+            keys.extend(written.iter().cloned());
+            if keys.len() > before {
+                pending.push(caller);
+            }
+        }
     }
 
     let mut mutable: HashSet<String> = (open..last)
@@ -1159,10 +1664,225 @@ pub fn derive(source: &str) -> Result<Derived> {
             mutable.extend(p.bound(i + 1, pattern));
         }
     }
+    // A value without a stated type can take its type from the code that uses it, and a
+    // statement that leaves can be that code. The names that can hold such a value are found
+    // here: those bound with no stated type from a value of a form that `fixed` does not
+    // know. Names that one statement uses together can share a type, so they form one group,
+    // and a removed statement that mentions one marks the group.
+    let inferred = {
+        const SUFFIXES: &[&str] = &[
+            "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
+        ];
+        // Whether the tokens `from..to` are one value of a form whose type is fixed, whatever
+        // code uses it. Every other form counts as open: the rule names the fixed forms, so a
+        // form that it does not know moves more to the server, never less.
+        let fixed = |from: usize, to: usize, known: &HashSet<String>| -> bool {
+            let mut i = from;
+            // `&value` and `&mut value` have the type of the value.
+            while i < to && p.text(i) == "&" {
+                i += 1;
+            }
+            if i < to && p.text(i) == "mut" {
+                i += 1;
+            }
+            if i >= to {
+                return false;
+            }
+            let one = |at: usize| {
+                let text = p.text(at);
+                match p.tokens[at].kind {
+                    Kind::Literal => {
+                        !text.starts_with(|c: char| c.is_ascii_digit())
+                            || SUFFIXES.iter().any(|suffix| text.ends_with(suffix))
+                    }
+                    // The constructors of the language are no bindings, also where a pattern
+                    // names one: `None` has an open type.
+                    Kind::Word => {
+                        matches!(text, "true" | "false")
+                            || p.word(at).is_some_and(|name| {
+                                known.contains(name)
+                                    && !matches!(name, "None" | "Some" | "Ok" | "Err")
+                            })
+                    }
+                    _ => false,
+                }
+            };
+            // A value read whole, with at most `.clone()` or `.as_str()` after it.
+            let plain_end = |mut at: usize| {
+                while at + 3 < to + 1
+                    && p.text(at) == "."
+                    && matches!(p.text(at + 1), "clone" | "as_str")
+                    && p.text(at + 2) == "("
+                    && p.text(at + 3) == ")"
+                {
+                    at += 4;
+                }
+                at == to
+            };
+            // A range takes the type of a side whose type is fixed. A side is one token: a
+            // number, or a value that `one` takes.
+            if let Some(dots) = p.find(i, to, &["..", "..="]) {
+                let number = |at: usize| {
+                    p.tokens[at].kind == Kind::Literal
+                        && p.text(at).starts_with(|c: char| c.is_ascii_digit())
+                };
+                let side = |(a, b): (usize, usize)| b == a + 1 && (number(a) || one(a));
+                let typed = |(a, b): (usize, usize)| b == a + 1 && one(a);
+                let (left, right) = ((i, dots), (dots + 1, to));
+                return side(left) && side(right) && (typed(left) || typed(right));
+            }
+            if one(i) && plain_end(i + 1) {
+                return true;
+            }
+            // A field of the request.
+            if p.text(i) == "ctx" && p.text(i + 1) == "." && p.text(i + 2) == "request" {
+                let mut at = i + 3;
+                while p.text(at) == "." && p.word(at + 1).is_some() && p.text(at + 2) != "(" {
+                    at += 2;
+                }
+                return plain_end(at);
+            }
+            // An owner param read whole: an `AllowitValue`.
+            if p.text(i) == "ctx" && p.text(i + 1) == "." && p.text(i + 2) == "params" {
+                return p.text(i + 3) == "[" && p.close(i + 3).is_some_and(|close| close + 1 == to);
+            }
+            // A call of a library function with a fixed return type, or of `from` or
+            // `try_from` of an integer type, with at most `?` after it.
+            let call = if let Some(function) = p.allowit_path(i) {
+                let generic = matches!(function, "get_state" | "param" | "arg");
+                let open = if p.text(i + 3) == "::" && p.text(i + 4) == "<" {
+                    p.after_generics(i + 4)
+                        .filter(|end| !(i + 4..*end).any(|at| p.text(at) == "_"))
+                } else {
+                    (!generic).then_some(i + 3)
+                };
+                open.filter(|at| p.text(*at) == "(")
+            } else {
+                (SUFFIXES.contains(&p.text(i))
+                    && p.text(i + 1) == "::"
+                    && matches!(p.text(i + 2), "from" | "try_from"))
+                .then_some(i + 3)
+                .filter(|at| p.text(*at) == "(")
+            };
+            call.and_then(|open| p.close(open)).is_some_and(|close| {
+                close + 1 == to || (close + 2 == to && p.text(close + 1) == "?")
+            })
+        };
+        // The bindings of `execute`: each pattern with the value that it takes.
+        type Tokens = (usize, usize);
+        let mut bindings: Vec<(Tokens, Option<Tokens>)> = vec![];
+        for id in all.iter().copied().filter(|id| in_execute(*id)) {
+            let node = &p.nodes[id];
+            let key = node.key;
+            match node.shape {
+                Shape::Let => {
+                    let end = p.find(key + 1, node.last, &["=", ":"]).unwrap_or(node.last);
+                    // A stated type with no `_` in it fixes the type.
+                    let typed = p.text(end) == ":"
+                        && !(end..node.init.map_or(node.last, |(from, _)| from))
+                            .any(|i| p.text(i) == "_");
+                    if !typed {
+                        bindings.push(((key + 1, end), node.init));
+                    }
+                }
+                Shape::Split => {
+                    let headers = &node.headers;
+                    if p.text(key) == "match" {
+                        for pattern in headers.iter().skip(1) {
+                            bindings.push((*pattern, headers.first().copied()));
+                        }
+                    } else if p.text(key) == "for"
+                        && let Some((from, to)) = headers.first().copied()
+                    {
+                        let at = p.find(from, to, &["in"]).unwrap_or(to);
+                        bindings.push(((from, at), Some((at + 1, to))));
+                    }
+                    for (from, to) in headers {
+                        for at in (*from..*to).filter(|i| p.text(*i) == "let") {
+                            let equals = p.find(at + 1, *to, &["="]).unwrap_or(*to);
+                            let end = p.find(equals + 1, *to, &["&&", "||"]).unwrap_or(*to);
+                            bindings.push(((at + 1, equals), Some((equals + 1, end))));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Start from every name as fixed, and take out each name that a binding gives an open
+        // value, until no name moves: a name bound twice is open when one binding is.
+        let mut known: HashSet<String> = named
+            .iter()
+            .filter_map(|id| p.nodes[*id].name.clone())
+            .chain(["ctx".to_owned()])
+            .chain(
+                bindings
+                    .iter()
+                    .flat_map(|((from, to), _)| p.bound(*from, *to)),
+            )
+            .chain(
+                all.iter()
+                    .filter(|id| in_execute(**id) && p.nodes[**id].shape == Shape::Let)
+                    .flat_map(|id| p.nodes[*id].names.iter().cloned()),
+            )
+            .collect();
+        let mut names: HashSet<String> = HashSet::new();
+        loop {
+            let before = names.len();
+            for ((from, to), value) in &bindings {
+                if value.is_none_or(|(start, end)| !fixed(start, end, &known)) {
+                    let bound = p.bound(*from, *to);
+                    for name in &bound {
+                        known.remove(name);
+                    }
+                    names.extend(bound);
+                }
+            }
+            if names.len() == before {
+                break;
+            }
+        }
+        // The groups: the names that one statement or one binding uses together.
+        let mut groups: HashMap<String, BTreeSet<String>> = names
+            .iter()
+            .map(|name| (name.clone(), BTreeSet::from([name.clone()])))
+            .collect();
+        let ranges: Vec<(usize, usize)> = all
+            .iter()
+            .copied()
+            .filter(|id| in_execute(*id) || *id == execute)
+            .flat_map(|id| match p.nodes[id].shape {
+                Shape::Split => p.nodes[id].headers.clone(),
+                _ if id == execute => vec![],
+                _ => vec![range(id)],
+            })
+            .collect();
+        loop {
+            let mut grew = false;
+            for (from, to) in &ranges {
+                let together: BTreeSet<String> = (*from..*to)
+                    .filter(|i| p.names(*i, &names))
+                    .filter_map(|i| groups.get(p.word(i)?).cloned())
+                    .flatten()
+                    .collect();
+                for name in &together {
+                    let group = groups.get_mut(name).expect("a name of a group");
+                    if group.len() < together.len() {
+                        *group = together.clone();
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break groups;
+            }
+        }
+    };
     let scope = Scope {
         body: &body,
         mutable: &mutable,
+        inferred: &inferred,
     };
+    let inferred_names: HashSet<String> = inferred.keys().cloned().collect();
 
     // The statements of `execute` in source order, with the statements of their blocks.
     fn walk(nodes: &[Node], ids: &[usize], out: &mut Vec<usize>) {
@@ -1177,8 +1897,6 @@ pub fn derive(source: &str) -> Result<Derived> {
     let mut order = vec![];
     walk(&p.nodes, &body, &mut order);
 
-    let mut cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
-    let mut tainted: HashSet<String> = HashSet::new();
     // The tokens that decide whether a statement leaves: all of a statement that is not split,
     // and the conditions of a split one.
     let own = |id: usize| match p.nodes[id].shape {
@@ -1231,6 +1949,13 @@ pub fn derive(source: &str) -> Result<Derived> {
             if p.names(i, scope.mutable) {
                 tainted.extend(p.word(i).map(str::to_owned));
             }
+            // A leaving statement can give the type of a number without one: then every name
+            // that shares that type can hold another value on chain.
+            if let Some(group) = p.word(i).and_then(|name| scope.inferred.get(name))
+                && p.names(i, &group.iter().cloned().collect())
+            {
+                tainted.extend(group.iter().cloned());
+            }
         }
         let returns = p.returns(from, to);
         if !returns && !p.breaks(from, to) {
@@ -1267,54 +1992,11 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
 
-    loop {
-        let before = cause.iter().flatten().count() + tainted.len();
-        for id in &order {
-            if cause[*id].is_some() {
-                continue;
-            }
-            // A `use` item is no step: it keeps the names that the kept code reads.
-            if p.nodes[*id].shape == Shape::Item && p.text(p.nodes[*id].key) == "use" {
-                continue;
-            }
-            let ranges = own(*id);
-            let calls = ranges
-                .iter()
-                .any(|(from, to)| p.server(*from, *to, &helpers));
-            // An item cannot read a local name: a function or constant that has the name of a
-            // server value is not that value.
-            let reads = p.nodes[*id].shape != Shape::Item
-                && ranges
-                    .iter()
-                    .any(|(from, to)| p.mentions(*from, *to, &tainted));
-            let why = match (calls, reads) {
-                (false, false) => continue,
-                _ if p.nodes[*id].braced => Cause::NotSplit,
-                (true, _) => Cause::ServerCall,
-                (false, true) => Cause::ServerValue,
-            };
-            leave(&p, &scope, &mut cause, &mut tainted, *id, why);
-        }
-        if cause.iter().flatten().count() + tainted.len() == before {
-            break;
-        }
-    }
-
-    // Items of the file that make a server call leave.
-    let mut gone: Vec<bool> = cause.iter().map(Option::is_some).collect();
-    for id in &named {
-        if helpers.contains(p.nodes[*id].name.as_deref().unwrap_or_default()) {
-            gone[*id] = true;
-        }
-    }
-    let changed = gone.iter().any(|left| *left);
-
-    // What only leaving code read leaves too: a `let` that only reads, a local function, a
-    // constant.
     let functions: HashSet<String> = named
         .iter()
         .filter(|id| p.nodes[**id].is_fn)
         .filter_map(|id| p.nodes[*id].name.clone())
+        .chain(local_fns.iter().map(|f| f.name.to_owned()))
         .collect();
     let covered = |gone: &[bool]| {
         let mut left = vec![false; count];
@@ -1326,43 +2008,151 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
         left
     };
-    loop {
-        let left = covered(&gone);
-        let mut more = vec![];
+
+    // A key whose write leaves is the server's, and then every statement that uses the key
+    // leaves. That can make another write leave, so the steps repeat until no key moves.
+    // The names whose type a removed statement could have given, beyond the leaving steps:
+    // a `let` that only leaving code read, for one. The steps run again with them.
+    let mut pinned: HashSet<String> = HashSet::new();
+    let (callers, readers, cause, gone, changed) = loop {
+        // Local functions and constants that make a server call or use state that the server
+        // keeps.
+        let helpers = closure(&|from, to, found| p.server(from, to, found));
+        // The helpers that make a server call. The others only use state that the server keeps.
+        let callers = closure(&|from, to, found| p.calls(from, to, found));
+        let readers: HashSet<String> = helpers.difference(&callers).cloned().collect();
+        let mut cause: Vec<Option<Cause>> = vec![None; p.nodes.len()];
+        let mut tainted: HashSet<String> = pinned.clone();
+        loop {
+            let before = cause.iter().flatten().count() + tainted.len();
+            for id in &order {
+                if cause[*id].is_some() {
+                    continue;
+                }
+                // A `use` item is no step: it keeps the names that the kept code reads.
+                if p.nodes[*id].shape == Shape::Item && p.text(p.nodes[*id].key) == "use" {
+                    continue;
+                }
+                let ranges = own(*id);
+                let calls = ranges
+                    .iter()
+                    .any(|(from, to)| p.server(*from, *to, &helpers));
+                // An item cannot read a local name: a function or constant that has the name of a
+                // server value is not that value.
+                let reads = p.nodes[*id].shape != Shape::Item
+                    && ranges
+                        .iter()
+                        .any(|(from, to)| p.mentions(*from, *to, &tainted));
+                let why = match (calls, reads) {
+                    (false, false) => continue,
+                    _ if p.nodes[*id].braced => Cause::NotSplit,
+                    (true, _) => Cause::ServerCall,
+                    (false, true) => Cause::ServerValue,
+                };
+                leave(&p, &scope, &mut cause, &mut tainted, *id, why);
+            }
+            if cause.iter().flatten().count() + tainted.len() == before {
+                break;
+            }
+        }
+
+        // Items of the file that make a server call leave. A `const _` has no name that
+        // another statement could read, so it leaves by its own tokens.
+        let mut gone: Vec<bool> = cause.iter().map(Option::is_some).collect();
+        for id in &named {
+            if helpers.contains(p.nodes[*id].name.as_deref().unwrap_or_default()) {
+                gone[*id] = true;
+            }
+        }
         for id in &all {
             let node = &p.nodes[*id];
-            if gone[*id] || *id == execute {
-                continue;
+            let anonymous = matches!(node.shape, Shape::Item | Shape::Whole)
+                && node.name.is_none()
+                && p.text(node.key) == "const";
+            if anonymous && !gone[*id] {
+                let (from, to) = range(*id);
+                gone[*id] = p.server(from, to, &helpers);
             }
-            let wanted: HashSet<String> = match node.shape {
-                Shape::Let if in_execute(*id) => match node.init {
-                    Some((from, to)) if p.reads_only(from, to, &functions) => {
-                        node.names.iter().cloned().collect()
-                    }
+        }
+        let changed = gone.iter().any(|left| *left);
+
+        // What only leaving code read leaves too: a `let` that only reads, a local function,
+        // a constant.
+        loop {
+            let left = covered(&gone);
+            let mut more = vec![];
+            for id in &all {
+                let node = &p.nodes[*id];
+                if gone[*id] || *id == execute {
+                    continue;
+                }
+                let wanted: HashSet<String> = match node.shape {
+                    Shape::Let if in_execute(*id) => match node.init {
+                        Some((from, to)) if p.reads_only(from, to, &functions) => {
+                            node.names.iter().cloned().collect()
+                        }
+                        _ => continue,
+                    },
+                    Shape::Item => node.name.iter().cloned().collect(),
                     _ => continue,
-                },
-                Shape::Item => node.name.iter().cloned().collect(),
-                _ => continue,
-            };
-            if wanted.is_empty() {
-                continue;
+                };
+                if wanted.is_empty() {
+                    continue;
+                }
+                let (from, to) = range(*id);
+                let outside = |i: &usize| *i < from || *i >= to;
+                let read = |i: &usize| match node.shape {
+                    Shape::Item => p.names_item(*i, &wanted),
+                    _ => p.names(*i, &wanted),
+                };
+                let kept = (0..count).filter(outside).any(|i| !left[i] && read(&i));
+                let dropped = (0..count).filter(outside).any(|i| left[i] && read(&i));
+                if !kept && dropped {
+                    more.push(*id);
+                }
             }
-            let (from, to) = range(*id);
-            let outside = |i: &usize| *i < from || *i >= to;
-            let read = |i: &usize| p.names(*i, &wanted);
-            let kept = (0..count).filter(outside).any(|i| !left[i] && read(&i));
-            let dropped = (0..count).filter(outside).any(|i| left[i] && read(&i));
-            if !kept && dropped {
-                more.push(*id);
+            if more.is_empty() {
+                break;
+            }
+            for id in more {
+                gone[id] = true;
             }
         }
-        if more.is_empty() {
-            break;
+
+        // The keys that a leaving step of `execute` writes, itself or through a local
+        // function that it calls. A function that leaves writes nothing by that: its calls
+        // write, and they are steps of `execute` or of a function that such a step calls.
+        let left = covered(&gone);
+        let step = |i: usize| left[i] && (open..last).contains(&i) && !in_local_fn(i);
+        let mut moved: BTreeSet<String> = uses
+            .iter()
+            .filter(|state| state.writes && step(state.at))
+            .map(|state| state.key.clone())
+            .collect();
+        for written in (0..count)
+            .filter(|i| step(*i))
+            .filter_map(called_at)
+            .filter_map(|name| writers.get(name))
+        {
+            moved.extend(written.iter().cloned());
         }
-        for id in more {
-            gone[id] = true;
+        moved.retain(|key| !p.server_keys.borrow().contains(key));
+        // Every statement that leaves can give the type of a name that it mentions, also one
+        // that left only because leaving code read it.
+        let typed_by_removed: BTreeSet<String> = (0..count)
+            .filter(|i| left[*i] && (open..last).contains(i))
+            .filter(|i| p.names(*i, &inferred_names))
+            .filter_map(|i| inferred.get(p.word(i)?))
+            .flatten()
+            .filter(|name| !tainted.contains(*name))
+            .cloned()
+            .collect();
+        if moved.is_empty() && typed_by_removed.is_empty() {
+            break (callers, readers, cause, gone, changed);
         }
-    }
+        pinned.extend(typed_by_removed);
+        p.server_keys.borrow_mut().extend(moved);
+    };
 
     // The derivation reads `return Err(...)` as a denial and ends a derived `execute` with
     // `Ok(())`. A local item with one of these names would change both.
@@ -1371,6 +2161,55 @@ pub fn derive(source: &str) -> Result<Derived> {
     });
     if changed && shadowed {
         return Err("A policy that depends on a server function cannot define a local `Ok` or `Err`. Rename that function or constant.".into());
+    }
+    // The parser ends each statement where Rust ends it. A statement that it still read with
+    // the next one, as after a missing `;`, shows a `let` or an item at its own level, where
+    // no expression holds one: only a condition holds a `let`, after `if`, `while`, `&&` or
+    // `||`. The name that such a declaration binds would stay seen by later statements while
+    // it left with the group, so the derivation refuses the source.
+    let grouped = all
+        .iter()
+        .filter(|id| matches!(p.nodes[**id].shape, Shape::Whole | Shape::Let | Shape::Item))
+        .find_map(|id| {
+            // From the statement's own first token, past its attributes.
+            let (from, to) = (p.nodes[*id].key, p.nodes[*id].last + 1);
+            let mut i = from;
+            while i < to {
+                if matches!(p.text(i), "(" | "[" | "{") {
+                    i = p.close(i)?;
+                } else if i > from {
+                    // Attributes can stand before the declaration.
+                    let mut at = i;
+                    while p.text(at) == "#" && p.text(at + 1) == "[" {
+                        at = p.close(at + 1)? + 1;
+                    }
+                    let declaration = match p.text(at) {
+                        "let" => !matches!(p.text(at - 1), "if" | "while" | "&&" | "||"),
+                        // `const fn` is one declaration.
+                        "fn" => p.text(at - 1) != "const",
+                        "use" => true,
+                        // A `const` parameter of a generic function is no item.
+                        "const" => {
+                            p.text(at + 1) != "{" && !matches!(p.before_attributes(at), "<" | ",")
+                        }
+                        _ => false,
+                    };
+                    if declaration && p.tokens[at].kind == Kind::Word {
+                        return Some(p.line(p.tokens[at].start));
+                    }
+                    if at > i {
+                        i = at;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            None
+        });
+    if let Some(line) = grouped.filter(|_| changed) {
+        return Err(format!(
+            "A policy for a contract wallet that depends on a server function must end the statement before line {line} with `;`: the derivation cannot tell where it ends."
+        ));
     }
     // A mutable reference lets a statement assign a name that it does not mention. The rule
     // follows names, not references, so it derives no part of such a policy.
@@ -1381,12 +2220,24 @@ pub fn derive(source: &str) -> Result<Derived> {
         return Err("A policy for a contract wallet that depends on a server function cannot take a mutable reference (`&mut` or `ref mut`). Assign the name itself.".into());
     }
     // Two local functions or constants with one name: the rule cannot tell which one a
-    // statement calls.
+    // statement calls. A function or a constant can also stand inside another function or a
+    // statement that is not split, where it is no statement of its own, so every `fn` and
+    // every `const` of the file counts.
     let mut seen: HashSet<&str> = HashSet::new();
+    let mut declared: HashSet<&str> = HashSet::new();
     if let Some(twice) = named
         .iter()
         .filter_map(|id| p.nodes[*id].name.as_deref())
         .find(|name| !seen.insert(name))
+        .or_else(|| {
+            (0..count)
+                .filter(|i| matches!(p.text(*i), "fn" | "const") && p.text(i + 1) != "fn")
+                // A `const` parameter of a generic function is no item.
+                .filter(|i| !matches!(p.before_attributes(*i), "<" | ","))
+                .filter_map(|i| p.word(i + 1))
+                .filter(|name| *name != "_")
+                .find(|name| !declared.insert(name))
+        })
         .filter(|_| changed)
     {
         return Err(format!(
@@ -1503,7 +2354,14 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     if edits.is_empty() && !changed {
-        return finish(source, source.to_owned(), vec![], vec![]);
+        return finish(
+            source,
+            source.to_owned(),
+            vec![],
+            vec![],
+            &uses,
+            &HashSet::new(),
+        );
     }
 
     edits.sort_by_key(|edit| edit.start);
@@ -1516,6 +2374,22 @@ pub fn derive(source: &str) -> Result<Derived> {
             _ => left.push((from, to)),
         }
     }
+    // The on-chain part leaves code out, so a lint that turns unused code into an error could
+    // stop it from compiling. It states `warn` where the source states `deny` or `forbid`: a
+    // lint level changes nothing that the policy does.
+    for i in 0..count {
+        let attribute = p.text(i.wrapping_sub(1)) == "["
+            && (p.text(i.wrapping_sub(2)) == "#"
+                || (p.text(i.wrapping_sub(2)) == "!" && p.text(i.wrapping_sub(3)) == "#"));
+        if attribute && matches!(p.word(i), Some("deny" | "forbid")) {
+            edits.push(Edit {
+                start: p.tokens[i].start,
+                end: p.tokens[i].end,
+                text: "warn".into(),
+            });
+        }
+    }
+    edits.sort_by_key(|edit| edit.start);
     let mut derived = String::with_capacity(source.len());
     let mut at = 0;
     for edit in &edits {
@@ -1567,8 +2441,9 @@ pub fn derive(source: &str) -> Result<Derived> {
                 Cause::ServerCall
             } else if !item && any(&|from, to| p.mentions(from, to, &served)) {
                 Cause::ServerValue
-            } else if any(&|from, to| (from..to).any(|i| p.state_at(i) || p.names(i, &readers)))
-                || (!item && any(&|from, to| p.mentions(from, to, &stored)))
+            } else if any(&|from, to| {
+                (from..to).any(|i| p.state_at(i) || p.names_item(i, &readers))
+            }) || (!item && any(&|from, to| p.mentions(from, to, &stored)))
             {
                 Cause::StoredState
             } else {
@@ -1651,7 +2526,7 @@ pub fn derive(source: &str) -> Result<Derived> {
                         Cause::ServerValue
                     } else if p.mentions(i, end, local) {
                         *local_cause
-                    } else if (i..end).any(|k| p.state_at(k) || p.names(k, &readers))
+                    } else if (i..end).any(|k| p.state_at(k) || p.names_item(k, &readers))
                         || p.mentions(i, end, &stored)
                     {
                         Cause::StoredState
@@ -1669,15 +2544,19 @@ pub fn derive(source: &str) -> Result<Derived> {
         }
     }
     server_only.sort_by_key(|check| check.line);
-    finish(source, derived, left, server_only)
+    let server_keys = p.server_keys.borrow().clone();
+    finish(source, derived, left, server_only, &uses, &server_keys)
 }
 
-/// Check the derived policy and list the checks that it keeps.
+/// Check the derived policy, list the checks that it keeps and name the keeper of each state
+/// key. `uses` are the state calls of the owner's source.
 fn finish(
     original: &str,
     source: String,
     left: Vec<(u32, u32)>,
     server_only: Vec<ServerOnly>,
+    uses: &[StateUse],
+    server_keys: &HashSet<String>,
 ) -> Result<Derived> {
     let defect = |what: &str| {
         format!(
@@ -1688,6 +2567,8 @@ fn finish(
         source: &source,
         tokens: lex(&source)?,
         nodes: vec![],
+        server_keys: RefCell::default(),
+        item_scopes: RefCell::default(),
     };
     let count = parsed.tokens.len();
     if source != original {
@@ -1702,11 +2583,42 @@ fn finish(
             kept.push(check);
         }
     }
+    // The state calls that stay: the contract keeps their keys, and the figures that they read.
+    let stays = parsed.state_uses().map_err(|error| defect(&error))?;
+    let read: BTreeSet<&str> = stays
+        .iter()
+        .map(|state| state.key.as_str())
+        .filter(|key| standard(key))
+        .collect();
+    let chain: BTreeSet<&str> = stays.iter().map(|state| state.key.as_str()).collect();
+    // A key that the server keeps is used by no statement that stays.
+    if let Some(key) = chain.iter().find(|key| server_keys.contains(**key)) {
+        return Err(defect(&format!(
+            "the derived part still uses the state key {key:?}, which the server keeps"
+        )));
+    }
+    let state = uses
+        .iter()
+        .map(|state| state.key.as_str())
+        .filter(|key| !standard(key))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|key| StateEntry {
+            key: key.to_owned(),
+            daily: key.starts_with(DAILY_PREFIX),
+            keeper: if chain.contains(key) {
+                Keeper::Chain
+            } else {
+                Keeper::Server
+            },
+        })
+        .collect();
     Ok(Derived {
         source,
         left,
         server_only,
-        figures: figures(&kept),
+        figures: figures(&kept, &read),
         kept,
+        state,
     })
 }
