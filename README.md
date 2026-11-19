@@ -42,11 +42,6 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   server keeps the difference per wallet: a confirmed operation adds `Fee::repaid_native_units` and
   subtracts `Fee::native_units`. It passes that carry as `Terms::gas_carry_units`, and the rail
   subtracts it from the next repayment, down to zero.
-- Gas due: a fee that the server paid for an operation outside its transaction, such as the
-  restoration of the wallet's lapsed code (`RuntimeProvider::prepare_code_within`), is part of that
-  operation's fee. The server passes it as `Terms::gas_due_units`; the rail adds it to the repayment,
-  up to the most gas that the wallet's owner lets one operation repay, and the server charges the
-  rest to the operation's request.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
@@ -110,9 +105,10 @@ A rail without the hook declares `Feature::PaidService` skipped.
 code that is built from the exact policy source. The owner's policy signature binds that source, and the
 wallet stores its hash. The owner's client builds the code from that source and hands it to the server,
 which uploads it from its own account and within its fee ceiling when the owner deploys; an upload gives no
-authority. Code that lapsed later is the server's to restore, so no wallet operation pays its rent. Both are
-the transaction of `RuntimeProvider::prepare_code_within`, which a sending account signs: the rail prepares
-it and sends nothing, and the SDK engine sends it and follows it to its receipt like any signed operation. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+authority. The upload is the transaction of `RuntimeProvider::prepare_code_within`, which a sending account
+signs: the rail prepares it and sends nothing, and the SDK engine sends it and follows it to its receipt like
+any signed operation. The server renews code that wallets share, such as the code of a fixed tier, before it
+lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. The owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 

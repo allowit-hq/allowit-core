@@ -172,14 +172,12 @@ pub trait RuntimeProvider {
         fee: u64,
         now: u64,
     ) -> Result<crate::vendor::runtime::OwnerPacket>;
-    /// Prepare the transaction that makes the installation's wallet code live, from one of the
-    /// server's sending accounts and signed by it, with the network fee bounded by `max_fee` in
-    /// the rail's native units: the upload of `wasm`, when the network does not have the code,
-    /// or the restoration of the installation's lapsed code by its hash, which needs no bytes.
-    /// A fee above `max_fee` is refused before anything is signed. `None` when the code is live:
-    /// nothing is needed. The server pays the transaction, and it gives no authority: the
-    /// owner's creation names the code by its hash, and a wallet operation that restored its
-    /// code would repay the code's rent for the network's minimum lifetime.
+    /// Prepare the upload of the wallet code `wasm` for the installation, from one of the server's
+    /// sending accounts and signed by it, with the network fee bounded by `max_fee` in the rail's
+    /// native units. A fee above `max_fee` is refused before anything is signed. `None` when the
+    /// network has the code live: nothing is needed. The server pays the upload, and it gives no
+    /// authority: the owner's creation names the code by its hash. Nothing restores code that
+    /// lapsed.
     ///
     /// The rail sends nothing. The caller submits the transaction as any signed operation, with
     /// `broadcast`, and follows it with `status` and `observe`. Its identity,
@@ -192,7 +190,7 @@ pub trait RuntimeProvider {
     fn prepare_code_within(
         &self,
         i: &crate::vendor::runtime::Installation,
-        wasm: Option<&[u8]>,
+        wasm: &[u8],
         max_fee: u64,
         now: u64,
     ) -> Result<Option<crate::vendor::runtime::Signed>> {
@@ -201,24 +199,35 @@ pub trait RuntimeProvider {
             "This rail does not prepare wallet code transactions",
         ))
     }
-    /// Whether the code transaction `p` from `prepare_code_within` is still needed: false once
-    /// the code that it uploads or restores is live. A caller sends again a code transaction
-    /// that the network did not accept only while it is needed, since another transaction can
-    /// make the code live while it waits. Only the rail can observe its code, so a rail that
-    /// prepares code transactions answers this; the default refuses.
+    /// Prepare the renewal of the live wallet code `code` on this provider's network, from one
+    /// of the server's sending accounts and signed by it, with the network fee bounded by
+    /// `max_fee` as for `prepare_code_within`: a transaction that extends the code's lifetime.
+    /// `None` while the code's lifetime is above the rail's renewal threshold. The server renews
+    /// the code that it uploaded and that wallets share, such as the code of a fixed tier; it pays
+    /// the renewal, charges it to no request, and the renewal gives no authority. Code that lapsed
+    /// is not renewed: nothing restores it. The packet takes the path of a code upload: the
+    /// caller sends it with `broadcast` and reads its receipt with `observe`. A rail without
+    /// code renewals refuses.
+    fn prepare_code_renewal(
+        &self,
+        code: &[u8; 32],
+        max_fee: u64,
+        now: u64,
+    ) -> Result<Option<crate::vendor::runtime::Signed>> {
+        let _ = (code, max_fee, now);
+        Err(Error::unsupported("This rail does not renew wallet code"))
+    }
+    /// Whether the code transaction `p` from `prepare_code_within` or `prepare_code_renewal` is
+    /// still needed: an upload until its code is live, a renewal while the code's lifetime is
+    /// below the renewal threshold. A caller sends again a code transaction that the network did
+    /// not accept only while it is needed, since another transaction can do its work while it
+    /// waits. Only the rail can observe its code, so a rail that prepares code transactions
+    /// answers this; the default refuses.
     fn code_needed(&self, p: &crate::vendor::runtime::Signed) -> Result<bool> {
         let _ = p;
         Err(Error::unsupported(
             "This rail does not say whether a code transaction is still needed",
         ))
-    }
-    /// Whether the code transaction `p` lapsed: the network never included it, and it can no
-    /// longer include it, since its time bound passed. A caller that keeps a code transaction
-    /// in a journal drops it without a receipt only on this proof: until then a send of it can
-    /// still apply and charge its source. `false` means not proven.
-    fn code_lapsed(&self, p: &crate::vendor::runtime::Signed) -> Result<bool> {
-        let _ = p;
-        Ok(false)
     }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
     /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
@@ -624,9 +633,9 @@ mod defaults {
         }
     }
     /// A rail that does not say whether a code transaction is still needed refuses: only the
-    /// rail can observe whether its code is live, and a caller that took a default answer could
-    /// send again a transaction that another one made needless. The other code defaults refuse
-    /// or prove nothing.
+    /// rail can observe its code, and a caller that took a default answer could send again a
+    /// transaction that another one made needless. A rail without code transactions prepares
+    /// none.
     #[test]
     fn a_rail_without_code_transactions_answers_nothing_about_them() {
         let packet = crate::vendor::runtime::Signed(
@@ -634,6 +643,6 @@ mod defaults {
                 .unwrap(),
         );
         assert!(Bare.code_needed(&packet).is_err());
-        assert!(!Bare.code_lapsed(&packet).unwrap());
+        assert!(Bare.prepare_code_renewal(&[1; 32], 100, 0).is_err());
     }
 }
