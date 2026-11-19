@@ -39,19 +39,23 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   volume limits.
 - Gas carry: a contract wallet repays the network fee of its operation to the server's sending account
   in the same transaction, and the signed repayment can exceed the fee that the ledger charges. The
-  server keeps the difference per wallet: a confirmed operation adds `Fee::repaid_native_units` and
-  subtracts `Fee::native_units`. It passes that carry as `Terms::gas_carry_units`, and the rail
-  subtracts it from the next repayment, down to zero.
+  server keeps the difference per wallet as the rail counts it: it gives the wallet's carry to
+  `settle_receipt` and stores the `Settlement::gas_carry` that the rail returns, which moves by what
+  the operation repaid less the operation's own share of the transaction's fee. It passes that
+  carry as `Terms::gas_carry_units`, and the rail subtracts it from the next repayment, down to
+  zero.
 - Time bounds and configuration changes that only a rail can decide, each refused by a rail that
   does not implement it: `prepare_code_until` and `prepare_code_renewal_until` sign a code
   transaction within the caller's time bound, and `configuration_change` gives the version of an
   owner's configuration change that the rail verified.
 - What a receipt means and what an operation may spend, each refused by a rail that does not
   implement it: `settle_receipt` reads a receipt into a `Settlement` for one operation (the
-  transaction's identity in the rail's own bytes, the `OperationOutcome`, the usage, the counted gas,
-  the next nonce and the gas carry; `Settlement::usage_for` is what a server counts), `expense`
-  bounds an operation's expense from the server's `FeeCeiling` into an `ExpenseBound`, and
-  `ServerHooks::price_fee` prices a native fee in the wallet's asset before its receipt.
+  transaction's identity in the rail's own bytes, the `OperationOutcome`, the usage, the
+  operation's own fee, the counted gas, the next nonce and the gas carry; `Settlement::usage_for` is
+  what a server counts), `expense` bounds an operation's expense from the server's `FeeCeiling` into
+  an `ExpenseBound`, and `ServerHooks::price_fee` prices a native fee in the wallet's asset: the fee
+  ceiling at admission, and the operation's `Settlement::fee_units` at settlement when
+  `Settlement::counted_gas` is `None`.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
