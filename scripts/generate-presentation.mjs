@@ -86,7 +86,8 @@ export declare const canonicalFunctions: readonly CanonicalFunctionDescriptor[];
 /*
  * The on-chain part of a Custom policy: the JSON form of what \`policy_source::derive\` gives for the owner's one
  * source, as a server reports it beside the policy. The wallet contract compiles \`source\`; the server evaluates the
- * whole policy before it co-signs. A source that has no on-chain part has only \`refused\`.
+ * whole policy before it co-signs. A source that has no on-chain part has only \`refused\`. A server reports no part
+ * (the policy has no \`onchain\` field) when the source is its own on-chain part and keeps no state of its own.
  */
 /** Why a check of the source runs only on the server. */
 export type OnchainCause = 'server_call' | 'server_value' | 'stored_state' | 'server_branch' | 'after_server_exit' | 'not_split';
@@ -97,7 +98,7 @@ export interface OnchainServerOnly {
   readonly cause: OnchainCause;
   readonly movable: boolean;
 }
-/** A cumulated figure that the kept checks read, such as day_spent. daily: it starts again each day. */
+/** A cumulated figure that the kept statements read, such as day_spent. daily: it starts again each day. */
 export interface OnchainFigure {
   readonly key: string;
   readonly daily: boolean;
@@ -112,21 +113,33 @@ export interface OnchainStateEntry {
   readonly keeper: 'chain' | 'server';
   readonly daily: boolean;
 }
-export interface OnchainPart {
+/** The on-chain part that the server derived from the source. */
+export interface OnchainDerived {
   /** The derived source that the wallet contract compiles. */
-  readonly source?: string;
-  /** Why the source has no on-chain part, so a Custom wallet cannot hold it. */
-  readonly refused?: string;
+  readonly source: string;
   /** The line ranges of the owner's source that left, each inclusive and from 1. */
-  readonly left?: readonly (readonly [number, number])[];
+  readonly left: readonly (readonly [number, number])[];
   /** The checks that the wallet contract enforces, in source order. */
-  readonly kept?: readonly string[];
-  readonly serverOnly?: readonly OnchainServerOnly[];
-  readonly figures?: readonly OnchainFigure[];
-  readonly state?: readonly OnchainStateEntry[];
+  readonly kept: readonly string[];
+  readonly serverOnly: readonly OnchainServerOnly[];
+  readonly figures: readonly OnchainFigure[];
+  readonly state: readonly OnchainStateEntry[];
   /** The server's notes in the owner's words: each check that can move on chain, and a part that checks nothing. */
-  readonly warnings?: readonly string[];
+  readonly warnings: readonly string[];
+  readonly refused?: never;
 }
+/** A source that has no on-chain part, so a Custom wallet cannot hold it: why. */
+export interface OnchainRefused {
+  readonly refused: string;
+  readonly source?: never;
+  readonly left?: never;
+  readonly kept?: never;
+  readonly serverOnly?: never;
+  readonly figures?: never;
+  readonly state?: never;
+  readonly warnings?: never;
+}
+export type OnchainPart = OnchainDerived | OnchainRefused;
 
 /*
  * Owner review: what a server answers about an agent request that waits for its policy owner, and about a
