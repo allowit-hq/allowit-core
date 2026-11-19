@@ -118,12 +118,18 @@ pub trait RuntimeProvider {
     /// that it handed the authorization over. `Prepared` when the network did not accept it
     /// yet: nothing is pending, and the caller can send the same bytes again.
     /// `SubmissionUnknown` when the outcome is uncertain: the caller looks the transaction up
-    /// with `status` before any replacement.
+    /// with `status` before any replacement. The send of a code transaction
+    /// (`prepare_code_within`) never returns a final status: only its receipt (`observe`) is
+    /// final.
     fn broadcast(
         &self,
         p: &crate::vendor::runtime::Signed,
         now: u64,
     ) -> Result<crate::vendor::runtime::Status>;
+    /// What the network holds of `p` now. `SubmissionUnknown` when the lookup cannot rule out that
+    /// the network accepted or included it, such as a lookup that finds no record of a transaction
+    /// that may still apply. `Prepared` only on evidence that the network did not accept it and
+    /// nothing is pending.
     fn status(&self, p: &crate::vendor::runtime::Signed) -> Result<crate::vendor::runtime::Status>;
     fn observe(
         &self,
