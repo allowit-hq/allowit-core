@@ -174,9 +174,20 @@ mod tests {
         assert!(!names_reader("The owner's young account"));
     }
 
-    /// The rule that a text of an entry breaks, as the generator (`scripts/error-catalogue.mjs`)
-    /// applies it: an entry states no outcome, which only the sender knows, and a step that sends a
-    /// new request ID reads the original request first.
+    /// The first place of `phrase` in `text` between word boundaries, where a word character is
+    /// an ASCII letter, a digit or an underscore: the boundary of the generator's `\b`.
+    fn find_word(text: &str, phrase: &str) -> Option<usize> {
+        let word = |b: Option<&u8>| b.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+        let bytes = text.as_bytes();
+        text.match_indices(phrase).map(|(at, _)| at).find(|&at| {
+            !word(at.checked_sub(1).and_then(|i| bytes.get(i)))
+                && !word(bytes.get(at + phrase.len()))
+        })
+    }
+
+    /// The rule that a text of an entry breaks, `outcome` or `original`, as the generator
+    /// (`scripts/error-catalogue.mjs`) applies it: an entry states no outcome, which only the
+    /// sender knows, and a step that sends a new request ID reads the original request before it.
     fn unsafe_text(text: &str) -> Option<&'static str> {
         let lower = text.to_ascii_lowercase();
         // An outcome of a step; "Nothing was lost", the owner's words for the text that stays in
@@ -196,32 +207,42 @@ mod tests {
             .iter()
             .any(|start| {
                 step.iter()
-                    .any(|outcome| lower.contains(&format!("{start}{outcome}")))
+                    .any(|outcome| find_word(&lower, &format!("{start}{outcome}")).is_some())
             });
-        if claims_outcome || lower.contains("no draft changed") || lower.contains("was not made") {
-            return Some("an outcome");
-        }
-        if text.contains("new request ID")
-            && !(text.contains("allowit status") || text.contains("original request"))
+        if claims_outcome
+            || find_word(&lower, "no draft changed").is_some()
+            || find_word(&lower, "was not made").is_some()
         {
-            return Some("a new request ID without the original");
+            return Some("outcome");
+        }
+        if let Some(id) = find_word(text, "new request ID") {
+            let check = [
+                find_word(text, "allowit status"),
+                find_word(text, "checks the original request"),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+            if check.is_none_or(|check| check > id) {
+                return Some("original");
+            }
         }
         None
     }
 
     #[test]
     fn no_entry_states_an_outcome_or_retries_without_the_original() {
-        assert_eq!(unsafe_text("Nothing was paid."), Some("an outcome"));
-        // The owner's words for the text that stays in the form are no outcome of a step.
-        assert_eq!(unsafe_text("Nothing was lost."), None);
-        assert_eq!(
-            unsafe_text("Send it with a new request ID."),
-            Some("a new request ID without the original")
-        );
-        assert_eq!(
-            unsafe_text("Read the original request first, then use a new request ID."),
-            None
-        );
+        // The generator's test reads the same cases, so both rule sets agree on each.
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/catalogue-text-vectors.json"
+        ))
+        .expect("the vectors are JSON");
+        let cases = vectors["cases"].as_array().expect("cases");
+        assert!(cases.len() > 10);
+        for case in cases {
+            let text = case["text"].as_str().expect("text");
+            assert_eq!(unsafe_text(text), case["rule"].as_str(), "{text}");
+        }
         for entry in catalogue() {
             for text in [&entry.title, &entry.cause, &entry.next]
                 .into_iter()

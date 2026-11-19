@@ -1,0 +1,77 @@
+{
+  "_comment": "Cases of the catalogue's text rules. scripts/error-catalogue.mjs and the tests of crates/allowit-core/src/errors.rs both read them: rule is outcome, original or null.",
+  "cases": [
+    {
+      "text": "Nothing was paid.",
+      "rule": "outcome"
+    },
+    {
+      "text": "The server refused it. nothing is changed.",
+      "rule": "outcome"
+    },
+    {
+      "text": "No draft changed.",
+      "rule": "outcome"
+    },
+    {
+      "text": "The call was not made.",
+      "rule": "outcome"
+    },
+    {
+      "text": "Nothing was lost.",
+      "rule": null
+    },
+    {
+      "text": "Nothing isomorphic was found.",
+      "rule": null
+    },
+    {
+      "text": "Nothing was sentient.",
+      "rule": null
+    },
+    {
+      "text": "Nothing was paid_out.",
+      "rule": null
+    },
+    {
+      "text": "Send it with a new request ID.",
+      "rule": "original"
+    },
+    {
+      "text": "Send it with a new request ID, then read the original request.",
+      "rule": "original"
+    },
+    {
+      "text": "Check the unoriginal request, then send a new request ID.",
+      "rule": "original"
+    },
+    {
+      "text": "Run allowit statuses, then send a new request ID.",
+      "rule": "original"
+    },
+    {
+      "text": "Read it with allowit status ID, then send a new request ID.",
+      "rule": null
+    },
+    {
+      "text": "Two new request IDs are listed.",
+      "rule": null
+    },
+    {
+      "text": "Read the original request with allowit status ID first, then use a new request ID.",
+      "rule": null
+    },
+    {
+      "text": "The agent checks the original request first, and sends a changed one with a new request ID.",
+      "rule": null
+    },
+    {
+      "text": "Read the original request first, then use a new request ID.",
+      "rule": "original"
+    },
+    {
+      "text": "Send the original request unchanged, or use a new request ID for the new one.",
+      "rule": "original"
+    }
+  ]
+}

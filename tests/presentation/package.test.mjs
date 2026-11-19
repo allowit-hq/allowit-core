@@ -106,6 +106,11 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
     assert.throws(() => checkErrorCatalogue(one(change)), Error, JSON.stringify(change));
   }
   assert.throws(() => checkErrorCatalogue({ schemaVersion: 1, helpPath: '/help/', entries: [entry, entry] }), /two entries/);
+  // The Rust test reads the same cases of the text rules, so the two rule sets agree on each.
+  const { unsafe } = await import('../../scripts/error-catalogue.mjs');
+  const vectors = JSON.parse(await readFile(join(root, 'crates/allowit-core/tests/fixtures/catalogue-text-vectors.json'), 'utf8'));
+  assert.ok(vectors.cases.length > 10);
+  for (const { text, rule } of vectors.cases) assert.equal(unsafe(text), rule, text);
   // An underscore ends a word, as in the Rust test.
   assert.throws(() => checkErrorCatalogue(one({ cause: 'The key that _you_ supplied did not match.' })), /name no reader/);
 });

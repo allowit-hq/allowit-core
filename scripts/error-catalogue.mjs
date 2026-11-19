@@ -17,13 +17,24 @@ export const namesReader = text => text.split(/[^A-Za-z0-9]+/).some(word => READ
 // and only the sender knows what happened. Its own text says so beside the entry. ("Nothing was lost", the owner's
 // words for the text that stays in the form, is no outcome of a step.)
 const OUTCOME = /\bnothing (was|is|were) (paid|sent|signed|saved|changed|charged|prepared|imported|evaluated)\b|\bno draft changed\b|\bwas not made\b/i;
-// A step that sends a request with a new request ID first reads the original one, which can still pay.
+// A step that sends a request with a new request ID reads the original one before it: the original can still pay. The
+// agent reads it with allowit status; the owner's text says that the agent checks it.
 const NEW_ID = /\bnew request ID\b/;
-const CHECKS_ORIGINAL = /\ballowit status\b|\boriginal request\b/;
-/** The rule that a text of an entry breaks, or null. */
+const CHECKS_ORIGINAL = /\ballowit status\b|\bchecks the original request\b/;
+// A phrase matches between word boundaries, where a word character is an ASCII letter, a digit or an underscore. The
+// Rust test applies the same rules, and both read the cases of crates/allowit-core/tests/fixtures/catalogue-text-vectors.json.
+export const RULES = {
+  outcome: 'it states an outcome, which only the sender knows',
+  original: 'it sends a new request ID before it reads the original request',
+};
+/** The rule that a text of an entry breaks, `outcome` or `original`, or null. */
 export function unsafe(text) {
-  if (OUTCOME.test(text)) return 'it states an outcome, which only the sender knows';
-  if (NEW_ID.test(text) && !CHECKS_ORIGINAL.test(text)) return 'it sends a new request ID without reading the original request first';
+  if (OUTCOME.test(text)) return 'outcome';
+  const id = text.search(NEW_ID);
+  if (id !== -1) {
+    const check = text.search(CHECKS_ORIGINAL);
+    if (check === -1 || check > id) return 'original';
+  }
   return null;
 }
 
@@ -51,7 +62,7 @@ export function checkErrorCatalogue(errors) {
     if (entry.for === 'agent' && entry.agent === undefined) throw new Error(`${name}: an entry for the agent states the agent's step in "agent" and the owner's in "next"`);
     for (const field of ['title', 'cause', 'next', 'agent']) {
       const rule = entry[field] === undefined ? null : unsafe(entry[field]);
-      if (rule) throw new Error(`${name}: the ${field} breaks a rule: ${rule}`);
+      if (rule) throw new Error(`${name}: the ${field} breaks a rule: ${RULES[rule]}`);
     }
     if (namesReader(entry.title) || namesReader(entry.cause)) throw new Error(`${name}: the title and the cause name no reader ("you")`);
     const unknown = Object.keys(entry).filter(key => !FIELDS.includes(key));
