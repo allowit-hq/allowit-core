@@ -20,7 +20,7 @@ const PRINTABLE = /^[\x20-\x7e]*$/;
 /** The words of a text: runs of ASCII letters and digits, in lowercase. The Rust test splits text the same way. */
 export const words = text => text.split(/[^A-Za-z0-9]+/).filter(Boolean).map(word => word.toLowerCase());
 // A title and a cause name no reader: an owner and an agent read the same entry.
-const READER_WORDS = new Set(['you', 'your', 'yours', 'yourself']);
+const READER_WORDS = new Set(['you', 'your', 'yours', 'yourself', 'yourselves']);
 export const namesReader = text => words(text).some(word => READER_WORDS.has(word));
 
 /** Plain text: printable ASCII, trimmed, of 1 to `limit` characters. */
@@ -101,8 +101,12 @@ export function checkErrorCatalogueSource(bytes) {
   if (outside !== -1) throw new Error(`The error catalogue is printable ASCII and line feeds; byte ${outside} is 0x${raw[outside].toString(16)}`);
   const source = raw.toString('latin1');
   const errors = JSON.parse(source);
-  const canonical = catalogueText(errors).split('\n').filter(text => text !== '');
-  const lines = source.split('\n').filter(text => text !== '');
+  const canonical = catalogueText(errors).split('\n');
+  // One blank line may separate two entries, and none stands anywhere else; the file ends with one line feed.
+  const entryLine = text => text?.startsWith('    {"code": ');
+  const all = source.split('\n');
+  const nextLine = i => all.slice(i + 1).find(text => text !== '');
+  const lines = all.filter((text, i) => !(text === '' && entryLine(all[i - 1]) && entryLine(nextLine(i))));
   const differs = lines.findIndex((text, i) => text !== canonical[i]);
   if (lines.length !== canonical.length || differs !== -1) {
     throw new Error(`The error catalogue is not in its canonical form near ${JSON.stringify((lines[differs] ?? '').slice(0, 60))}: one code and one entry per line, its fields once each and in order, and no escapes other than JSON.stringify writes`);

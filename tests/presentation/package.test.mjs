@@ -91,6 +91,7 @@ test('the generator refuses catalogue text that a Rust host or a terminal cannot
     { next: 'A byte order mark ﻿ here.' },
     { cause: 'Two\nlines.' },
     { title: 'Your wallet did not sign' },
+    { title: 'Approval by yourselves required' },
     { cause: 'The signature that you sent is invalid.' },
     { title: 'A title.' },
     { title: 'x'.repeat(71) },
@@ -147,6 +148,11 @@ test('the catalogue file is the canonical text of what it parses to', async () =
   for (const variant of variants) {
     assert.notEqual(variant, entry);
     assert.throws(() => checkErrorCatalogueSource(source.slice(0, first) + variant + source.slice(end)), /canonical form/, variant);
+  }
+  // A blank line separates groups of entries and stands nowhere else, and the file ends with one line feed.
+  assert.doesNotThrow(() => checkErrorCatalogueSource(source.slice(0, end + 2) + '\n' + source.slice(end + 2)));
+  for (const variant of [source.replace('{\n', '{\n\n'), source.replace(/\n$/, ''), source + '\n', '\n' + source]) {
+    assert.throws(() => checkErrorCatalogueSource(variant), /canonical form/);
   }
 });
 

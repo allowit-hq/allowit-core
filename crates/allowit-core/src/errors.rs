@@ -156,7 +156,8 @@ mod tests {
     fn names_reader(text: &str) -> bool {
         text.split(|c: char| !c.is_ascii_alphanumeric())
             .any(|word| {
-                ["you", "your", "yours", "yourself"].contains(&word.to_ascii_lowercase().as_str())
+                ["you", "your", "yours", "yourself", "yourselves"]
+                    .contains(&word.to_ascii_lowercase().as_str())
             })
     }
 
@@ -178,6 +179,7 @@ mod tests {
         assert!(plain("The wallet did not sign", 70));
         assert!(names_reader("Your session ended"));
         assert!(names_reader("A later answer of yours stands"));
+        assert!(names_reader("Approval by yourselves required"));
         // An underscore ends a word, as in the generator's rule.
         assert!(names_reader("The key that _you_ supplied did not match"));
         assert!(!names_reader("The owner's young account"));
@@ -452,6 +454,20 @@ mod tests {
         Some((value, after))
     }
 
+    /// `text` without the white space and the comments at its start.
+    fn skip_comments(mut text: &str) -> &str {
+        loop {
+            text = text.trim_start();
+            if let Some(rest) = text.strip_prefix("/*") {
+                text = rest.split_once("*/").map_or("", |(_, after)| after);
+            } else if let Some(rest) = text.strip_prefix("//") {
+                text = rest.split_once('\n').map_or("", |(_, after)| after);
+            } else {
+                return text;
+            }
+        }
+    }
+
     /// Each string constant of code form in `text`, as (name, value): a declaration such as
     /// `pub const NAME: &str = "value";`, read across line breaks, so a literal on the next line
     /// or a comment after the declaration does not hide it.
@@ -481,7 +497,7 @@ mod tests {
                 .iter()
                 .find_map(|ty| tail.strip_prefix(ty))
                 .and_then(|tail| tail.trim_start().strip_prefix('='))
-                .and_then(|tail| string_literal(tail.trim_start()))
+                .and_then(|tail| string_literal(skip_comments(tail)))
                 .filter(|(_, after)| after.trim_start().starts_with(';'))
                 .map(|(value, _)| value);
             if let Some(value) = value.filter(|value| word && upper && is_code(value)) {
@@ -543,7 +559,9 @@ mod tests {
                  // pub const H: &str = \"in_a_comment\";\n\
                  /// `pub const I: &str = \"in_a_doc\";`\n\
                  pub const J: &str = r\"raw_string\";\n\
-                 pub const K: &str = r#\"raw_with_hashes\"#;"
+                 pub const K: &str = r#\"raw_with_hashes\"#;\n\
+                 pub const L: &str = /* wire code */ \"after_a_comment\";\n\
+                 pub const M: &str = // wire code\n    \"after_a_line_comment\";"
             ),
             [
                 ("A", "abc_def"),
@@ -552,7 +570,9 @@ mod tests {
                 ("E", "with_a_comment"),
                 ("F", "split_type"),
                 ("J", "raw_string"),
-                ("K", "raw_with_hashes")
+                ("K", "raw_with_hashes"),
+                ("L", "after_a_comment"),
+                ("M", "after_a_line_comment")
             ]
         );
         assert!(entry("no_such_code").is_none());
