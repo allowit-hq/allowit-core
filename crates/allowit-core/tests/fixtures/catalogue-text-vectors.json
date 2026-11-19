@@ -1,0 +1,175 @@
+{
+  "_comment": "Cases of the catalogue's word rules. scripts/error-catalogue.mjs and the tests of crates/allowit-core/src/errors.rs both read them: field is the field of the entry's own words, and rule request, payment, retry or null.",
+  "cases": [
+    {
+      "field": "cause",
+      "text": "The server refused it. Nothing was paid.",
+      "rule": "payment"
+    },
+    {
+      "field": "cause",
+      "text": "Nothing was lost.",
+      "rule": null
+    },
+    {
+      "field": "cause",
+      "text": "Nothing isomorphic was found.",
+      "rule": null
+    },
+    {
+      "field": "agent",
+      "text": "Send it with a new request ID.",
+      "rule": "request"
+    },
+    {
+      "field": "agent",
+      "text": "Read the original request first, then use a new request ID.",
+      "rule": "request"
+    },
+    {
+      "field": "next",
+      "text": "The agent checks the original request first, and sends a changed one with a new request ID.",
+      "rule": "request"
+    },
+    {
+      "field": "cause",
+      "text": "The payment did not settle.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Send the payment again under a fresh one.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Run allowit POLICY_ID help.",
+      "rule": "request"
+    },
+    {
+      "field": "agent",
+      "text": "Use the ids from the results.",
+      "rule": "request"
+    },
+    {
+      "field": "agent",
+      "text": "Do not pay twice.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Pay_out the seller.",
+      "rule": "payment"
+    },
+    {
+      "field": "next",
+      "text": "A payment that settled is not repeated.",
+      "rule": "payment"
+    },
+    {
+      "field": "next",
+      "text": "The settlement ends soon.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Send the request again in a moment.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Resend the call.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Retry the call.",
+      "rule": "retry"
+    },
+    {
+      "field": "next",
+      "text": "Sign in again.",
+      "rule": null
+    },
+    {
+      "field": "next",
+      "text": "Retry the step.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Ask the owner to answer the request.",
+      "rule": null
+    },
+    {
+      "field": "cause",
+      "text": "The agent cannot pay from it.",
+      "rule": null
+    },
+    {
+      "field": "title",
+      "text": "This request ID already has a decision",
+      "rule": null
+    },
+    {
+      "field": "cause",
+      "text": "The facilitator settled this authorization.",
+      "rule": "payment"
+    },
+    {
+      "field": "title",
+      "text": "This payment is already settled",
+      "rule": "payment"
+    },
+    {
+      "field": "cause",
+      "text": "The credits were charged twice.",
+      "rule": "payment"
+    },
+    {
+      "field": "next",
+      "text": "Make a second payment.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Keep retrying.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Resending is safe.",
+      "rule": "retry"
+    },
+    {
+      "field": "cause",
+      "text": "The refunding failed.",
+      "rule": "payment"
+    },
+    {
+      "field": "cause",
+      "text": "The payment network did not answer.",
+      "rule": null
+    },
+    {
+      "field": "agent",
+      "text": "Send it again under a fresh one.",
+      "rule": "retry"
+    },
+    {
+      "field": "cause",
+      "text": "The server retried it.",
+      "rule": "retry"
+    },
+    {
+      "field": "title",
+      "text": "The call is resent now",
+      "rule": "retry"
+    },
+    {
+      "field": "title",
+      "text": "The evidence cannot be fetched again",
+      "rule": null
+    }
+  ]
+}
