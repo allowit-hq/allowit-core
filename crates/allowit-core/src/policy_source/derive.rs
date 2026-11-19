@@ -183,9 +183,11 @@ pub struct Derived {
     /// The cumulated figures that the kept statements read, in a fixed order and without
     /// repetition: those of the kept canonical rules, and those that a kept statement reads
     /// with `allowit::get_state`. A contract wallet keeps these figures, and the server
-    /// evaluates the whole source on the wallet's values of them. The wallet gives a daily
-    /// figure of its current window and leaves an ended one out: `get_state` reads the state
-    /// map as it gets it.
+    /// evaluates the whole source on the wallet's values of them. The state map holds every
+    /// standard figure, as [`AllowitStandardState::write`](crate::AllowitStandardState::write)
+    /// writes it: a daily figure of the wallet's current window, and zero (false for the flag)
+    /// when that window has ended. A key of the policy's own state reads as absent instead
+    /// ([`StateEntry::daily`]).
     pub figures: Vec<Figure>,
     /// The policy's own state keys, sorted by key and without repetition, each with its
     /// keeper. An empty list means that the policy keeps no state of its own.

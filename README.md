@@ -230,9 +230,10 @@ kept canonical rules, and each standard figure that a kept statement reads with 
 those figures and the keys whose keeper is `chain`. No policy reads the stored day (`get_state(ctx, "day")`): a
 contract wallet stores no day, and it keeps its daily figures in a window of its own, so the day has no value that the
 chain and the server share. The server evaluates the whole source on the wallet's values of those figures, as it does
-for a key that the chain keeps. The wallet gives a daily figure of its current window and
-leaves an ended one out, so a direct read of `day_spent`, `day_total` or `day_unpriced` gets the same value on
-the chain and on the server.
+for a key that the chain keeps. The state map holds every standard figure, as `AllowitStandardState::write` writes
+it: a daily figure of the wallet's current window, and zero (false for the flag) when that window has ended. So a
+direct read of `day_spent`, `day_total` or `day_unpriced` gets the same value on the chain and on the server. A key of
+the policy's own state reads as absent once its window has ended.
 
 Write a policy so that it stores little. Prefer, in this order: no state; a figure that a canonical rule keeps
 or that the request gives; then one small value under a short key. A daily count belongs under a `day_` key.
