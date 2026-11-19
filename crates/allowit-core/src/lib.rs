@@ -12,6 +12,8 @@ mod portable;
 #[cfg(feature = "std")]
 pub use portable::*;
 
+#[cfg(feature = "std")]
+pub mod accounting;
 pub mod admin;
 #[cfg(feature = "client")]
 pub mod client;
