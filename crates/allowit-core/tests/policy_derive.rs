@@ -1175,27 +1175,26 @@ fn an_arm_without_a_comma_leaves_alone() {
     assert_ne!(continued, source);
     assert!(derive(&continued).unwrap().source.contains("400 => {},"));
     // A `const` block needs no comma either.
-    for body in ["const {}"] {
-        let other = source
-            .replace(
-                "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
-                &format!("1 => {body}\n"),
-            )
-            .replace(
-                "400 => {},",
-                "400 => {\n            allowit::new_decision_context(ctx, None)?;\n        },",
-            );
-        assert_ne!(other, source);
-        source_shape_with_host_calls(&other, REGISTRY).unwrap();
-        let derived = derive(&other).unwrap();
-        assert!(derived.source.contains(&format!("1 => {body}\n")), "{body}");
-        assert!(
-            derived.source.contains("400 => {"),
-            "{body}: {}",
-            derived.source
+    let constant = source
+        .replace(
+            "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
+            "1 => const {}\n",
+        )
+        .replace(
+            "400 => {},",
+            "400 => {\n            allowit::new_decision_context(ctx, None)?;\n        },",
         );
-        assert!(!derived.source.contains("new_decision_context"), "{body}");
-    }
+    assert_ne!(constant, source);
+    source_shape_with_host_calls(&constant, REGISTRY).unwrap();
+    let derived = derive(&constant).unwrap();
+    assert!(
+        derived.source.contains("1 => const {}\n"),
+        "{}",
+        derived.source
+    );
+    assert!(
+        derived.source.contains("400 => {") && !derived.source.contains("new_decision_context")
+    );
 }
 
 /// The on-chain part leaves code out, so it states `warn` where the source states `deny` or
