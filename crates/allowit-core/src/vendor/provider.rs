@@ -142,12 +142,12 @@ pub trait RuntimeProvider {
     /// Whether the prepared operation `p` lapsed: it did not execute, and no envelope that carries
     /// its authorization can execute it any more. The ledger passed the time bound that the
     /// operation signs, and the network's history of the operation's executions, in any envelope,
-    /// read after that, holds none. Once that history no longer holds the operation's
-    /// preparation, the time bound alone decides, so an operation that was never sent always
-    /// ends. A caller releases an open operation on its receipt or on this lapse. `false` means
-    /// that the operation can still execute, that it executed, or that the rail cannot tell, and
-    /// it stays open; a read that fails is an error. A rail without such a bound keeps this
-    /// default.
+    /// read after that and from the operation's preparation on, holds none. The time bound alone
+    /// proves no lapse: once that history no longer holds the preparation, the rail cannot tell,
+    /// and the operation stays open until its owner releases it. A caller releases an open
+    /// operation on its receipt or on this lapse. `false` means that the operation can still
+    /// execute, that it executed, or that the rail cannot tell, and it stays open; a read that
+    /// fails is an error. A rail without such a bound keeps this default.
     fn lapsed(&self, p: &crate::vendor::runtime::Prepared) -> Result<bool> {
         let _ = p;
         Ok(false)
