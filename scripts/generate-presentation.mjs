@@ -711,7 +711,15 @@ export interface PreparedKeypairSetup {
   /** Checks the owner's signed bytes and adds the new account's own signature; returns the bytes to send. */
   complete(ownerSigned: string): string;
 }
-/** What signed setup bytes are: their hash, roles and own time bound in unix seconds. */
+/**
+ * The asset that a keypair wallet holds, as its policy names it: the asset's code and its issuer. An asset of the
+ * network itself has no issuer. The rail reads these values; shared code only carries them.
+ */
+export interface WalletAsset {
+  readonly symbol: string;
+  readonly issuer: string | null;
+}
+/** What signed setup bytes are: their hash, roles and own time bound in unix seconds, and the asset of their wallet when the rail reads it. */
 export interface SignedKeypairSetup {
   readonly hash: string;
   readonly owner: string;
@@ -719,6 +727,7 @@ export interface SignedKeypairSetup {
   readonly agent: string;
   readonly server: string;
   readonly validUntil: number;
+  readonly asset?: WalletAsset;
 }
 /** The fields of a keypair wallet's policy approval that the workflow checks. */
 export interface ApprovalFields {
@@ -726,12 +735,16 @@ export interface ApprovalFields {
   readonly revision: number;
   readonly wallet: string;
 }
-/** The policy that the owner reviewed: its exact source and values, and its rules and tier when the host shows them. */
+/**
+ * The policy that the owner reviewed: its exact source and values, and its rules and tier when the host shows them.
+ * \`asset\` is the asset that the policy pays in; without one it is the asset of the network itself.
+ */
 export interface ReviewedPolicy {
   readonly source: string;
   readonly params: PolicyValues;
   readonly rules?: unknown;
   readonly tier?: unknown;
+  readonly asset?: WalletAsset | null;
 }
 export interface OwnerChain {
   transaction(network: string, hash: string): Promise<TransactionRecord>;
@@ -742,12 +755,13 @@ export interface OwnerChain {
   expiredRecord(network: string, hash: string, signedPayload: string): Promise<{ readonly ledger: number } | null>;
   /** The steps of a keypair wallet's account, which one owner signature creates and funds. A rail without one omits it. */
   readonly keypairSetup?: {
-    prepare(input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string }): Promise<PreparedKeypairSetup>;
+    /** \`amount\` is in the wallet's asset: \`asset\`, or the asset of the network itself without one. */
+    prepare(input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string; readonly asset?: WalletAsset | null }): Promise<PreparedKeypairSetup>;
     read(signedPayload: string, network: string): SignedKeypairSetup | null;
     /** Sends signed setup bytes: the ledger of the successful transaction, or null without a certain answer. */
     send(network: string, signedPayload: string, hash: string): Promise<number | null>;
-    /** The installation document that the server registers for the account. */
-    configuration(network: string, wallet: string, owner: string, agent: string, server: string): Record<string, unknown>;
+    /** The installation document that the server registers for the account, with the asset that the wallet holds. */
+    configuration(network: string, wallet: string, owner: string, agent: string, server: string, asset?: WalletAsset | null): Record<string, unknown>;
   };
   /** The owner's approval of a keypair wallet's policy: one message signature. A rail without one omits it. */
   readonly approval?: {

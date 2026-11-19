@@ -1,4 +1,4 @@
-import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord } from '@allowit/core';
+import type { PolicyValue, PolicyValues, CanonicalFunctionName, OwnerReviewCause, PastDecision, OwnerChain, TransactionRecord, WalletAsset, ReviewedPolicy, SignedKeypairSetup } from '@allowit/core';
 import type { Quantity, Settlement, LimitReport, PaidService, PaymentChallenge, PaymentProof, WalletKindInfo } from '@allowit/core';
 import type { PaymentLimit, WalletLimits, OperationReports } from '@allowit/core';
 import type { CreditBalance, CreditCallPrice, CreditCharge, CreditEntries, CreditFee, CreditPrices, PolicyCredits } from '@allowit/core';
@@ -34,6 +34,32 @@ const chain: OwnerChain = {
   transaction: async (_network, hash) => ({ hash, ledger: 7, successful: true }),
   expiredRecord: async () => null,
 };
+// A keypair wallet's asset travels from the reviewed policy to the setup and back from the signed bytes. It is
+// optional at every point: a rail and a host of the network's own asset state none.
+const walletAsset: WalletAsset = { symbol: 'TKN', issuer: 'issuer-account-0001' };
+const ownAsset: WalletAsset = { symbol: 'XYZ', issuer: null };
+const reviewed: ReviewedPolicy = { source: 's', params: {}, asset: walletAsset };
+const reviewedOwnAsset: ReviewedPolicy = { source: 's', params: {}, asset: null };
+const reviewedWithoutAsset: ReviewedPolicy = { source: 's', params: {} };
+const signedSetup: SignedKeypairSetup = { hash: 'h', owner: 'o', wallet: 'w', agent: 'a', server: 's', validUntil: 1, asset: ownAsset };
+const keypairChain: OwnerChain = {
+  ...chain,
+  keypairSetup: {
+    prepare: async ({ asset }) => ({ wallet: asset?.symbol ?? 'w', step: { action: 'a', payload: 'p', hash: 'h', expiresAt: 1 }, complete: signed => signed }),
+    read: () => signedSetup,
+    send: async () => 7,
+    configuration: (network, wallet, owner, agent, server, asset) => ({ network, wallet, owner, agent, server, asset: asset ?? null }),
+  },
+};
+void keypairChain.keypairSetup?.prepare({ network: 'example:testnet', owner: 'o', agent: 'a', server: 's', amount: '1', asset: reviewed.asset });
+void keypairChain.keypairSetup?.prepare({ network: 'example:testnet', owner: 'o', agent: 'a', server: 's', amount: '1' });
+void keypairChain.keypairSetup?.configuration('example:testnet', 'w', 'o', 'a', 's', reviewedOwnAsset.asset);
+void keypairChain.keypairSetup?.configuration('example:testnet', 'w', 'o', 'a', 's');
+void reviewedWithoutAsset;
+// @ts-expect-error A wallet asset states its issuer, or null for the asset of the network itself.
+const noIssuer: WalletAsset = { symbol: 'TKN' };
+// @ts-expect-error A wallet asset is its code and its issuer, not a code alone.
+const codeOnly: ReviewedPolicy = { source: 's', params: {}, asset: 'TKN' };
 const missing: TransactionRecord = 'missing';
 // @ts-expect-error A transaction record states whether it succeeded.
 const unclear: TransactionRecord = { hash: 'h', ledger: 7 };
