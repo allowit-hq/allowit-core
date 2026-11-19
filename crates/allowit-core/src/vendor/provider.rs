@@ -113,8 +113,10 @@ pub trait RuntimeProvider {
         now: u64,
     ) -> Result<crate::vendor::runtime::Signed>;
     fn validate_signed(&self, p: &crate::vendor::runtime::Signed, now: u64) -> Result<()>;
-    /// Send `p` once. `Submitted` once the network accepted it. `Prepared` when the network did
-    /// not accept it yet: nothing is pending, and the caller can send the same bytes again.
+    /// Send `p` once. `Submitted` once the network accepted it; for a payment authorization that
+    /// another party submits, such as a seller, the runtime sends nothing, and `Submitted` means
+    /// that it handed the authorization over. `Prepared` when the network did not accept it
+    /// yet: nothing is pending, and the caller can send the same bytes again.
     /// `SubmissionUnknown` when the outcome is uncertain: the caller looks the transaction up
     /// with `status` before any replacement.
     fn broadcast(
@@ -174,9 +176,13 @@ pub trait RuntimeProvider {
     /// code would repay the code's rent for the network's minimum lifetime.
     ///
     /// The rail sends nothing. The caller submits the transaction as any signed operation, with
-    /// `broadcast`, and follows it with `status` and `observe`; its receipt's fee is what the
-    /// sending account paid, also for a transaction that the ledger included and failed. A rail
-    /// without code transactions refuses.
+    /// `broadcast`, and follows it with `status` and `observe`. Its identity,
+    /// `Signed::info().operation_id`, is its transaction hash: the same after `RailPlugin::restore`
+    /// of its retained bytes, and another for every later transaction. `validate_signed` refuses
+    /// it after its time bound, `Signed::info().expires_at`. Its receipt (`observe`) is the
+    /// receipt of that transaction: `Receipt::info` reports `Confirmed` or `Failed` and the fee
+    /// that the sending account paid, also for a transaction that the ledger included and
+    /// failed. A rail without code transactions refuses.
     fn prepare_code_within(
         &self,
         i: &crate::vendor::runtime::Installation,
@@ -196,6 +202,14 @@ pub trait RuntimeProvider {
     fn code_needed(&self, p: &crate::vendor::runtime::Signed) -> Result<bool> {
         let _ = p;
         Ok(true)
+    }
+    /// Whether the code transaction `p` lapsed: the network never included it, and it can no
+    /// longer include it, since its time bound passed. A caller that keeps a code transaction
+    /// in a journal drops it without a receipt only on this proof: until then a send of it can
+    /// still apply and charge its source. `false` means not proven.
+    fn code_lapsed(&self, p: &crate::vendor::runtime::Signed) -> Result<bool> {
+        let _ = p;
+        Ok(false)
     }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
     /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
