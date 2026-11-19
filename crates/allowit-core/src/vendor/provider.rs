@@ -198,10 +198,13 @@ pub trait RuntimeProvider {
     /// Whether the code transaction `p` from `prepare_code_within` is still needed: false once
     /// the code that it uploads or restores is live. A caller sends again a code transaction
     /// that the network did not accept only while it is needed, since another transaction can
-    /// make the code live while it waits.
+    /// make the code live while it waits. Only the rail can observe its code, so a rail that
+    /// prepares code transactions answers this; the default refuses.
     fn code_needed(&self, p: &crate::vendor::runtime::Signed) -> Result<bool> {
         let _ = p;
-        Ok(true)
+        Err(Error::unsupported(
+            "This rail does not say whether a code transaction is still needed",
+        ))
     }
     /// Whether the code transaction `p` lapsed: the network never included it, and it can no
     /// longer include it, since its time bound passed. A caller that keeps a code transaction
@@ -338,5 +341,293 @@ pub trait OwnerProvider {
         Err(Error::unsupported(
             "This rail does not export the placements of a policy",
         ))
+    }
+}
+
+#[cfg(test)]
+mod defaults {
+    use super::*;
+    /// A rail that implements only what it must, so every default answers.
+    struct Bare;
+    #[allow(unused_variables)]
+    impl RuntimeProvider for Bare {
+        fn discover_snapshot(
+            &self,
+            configuration: &crate::vendor::runtime::owner::Configuration,
+            accounting: Option<&crate::vendor::runtime::Accounting>,
+        ) -> Result<crate::vendor::runtime::Snapshot> {
+            unimplemented!()
+        }
+        fn current_height(&self) -> Result<u64> {
+            unimplemented!()
+        }
+        fn observe_hash(&self, hash: &[u8; 32]) -> Result<Option<crate::vendor::runtime::Receipt>> {
+            unimplemented!()
+        }
+        fn import(
+            &self,
+            a: &crate::vendor::config::ServerAuthority,
+            b: &[u8],
+        ) -> Result<crate::vendor::runtime::Installation> {
+            unimplemented!()
+        }
+        fn request(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            id: [u8; 32],
+            a: crate::vendor::runtime::Action,
+            accounting: Option<&crate::vendor::runtime::Accounting>,
+        ) -> Result<crate::vendor::runtime::RequestPacket> {
+            unimplemented!()
+        }
+        fn read_request(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            b: &[u8],
+        ) -> Result<crate::vendor::runtime::RequestPacket> {
+            unimplemented!()
+        }
+        fn snapshot(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            a: Option<&crate::vendor::runtime::Accounting>,
+        ) -> Result<crate::vendor::runtime::Snapshot> {
+            unimplemented!()
+        }
+        fn action(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            r: &crate::vendor::runtime::RequestPacket,
+        ) -> Result<crate::vendor::runtime::Action> {
+            unimplemented!()
+        }
+        fn resources(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+        ) -> Result<crate::vendor::runtime::Resources> {
+            unimplemented!()
+        }
+        fn redeemable(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            v: &str,
+            shares: i128,
+        ) -> Result<i128> {
+            unimplemented!()
+        }
+        fn finish<'a>(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            p: &crate::vendor::runtime::Prepared,
+            retain: super::Retain<'a, crate::vendor::runtime::Prepared>,
+        ) -> Result<crate::vendor::runtime::Prepared> {
+            unimplemented!()
+        }
+        fn prepare(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            r: &crate::vendor::runtime::RequestPacket,
+            t: &crate::vendor::runtime::Terms,
+            a: Option<&crate::vendor::runtime::Accounting>,
+            v: crate::vendor::runtime::Validity,
+        ) -> Result<crate::vendor::runtime::Prepared> {
+            unimplemented!()
+        }
+        fn authorize_preparation(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            p: &crate::vendor::runtime::Prepared,
+            signer: &dyn crate::vendor::runtime::Signer,
+            evaluator: Option<crate::vendor::runtime::Evaluator<'_>>,
+            now: u64,
+        ) -> Result<crate::vendor::runtime::Prepared> {
+            unimplemented!()
+        }
+        fn finalize<'a>(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            p: &crate::vendor::runtime::Prepared,
+            s: &dyn crate::vendor::runtime::Signer,
+            e: Option<crate::vendor::runtime::Evaluator<'_>>,
+            now: u64,
+            retain: super::Retain<'a, crate::vendor::runtime::Prepared>,
+        ) -> Result<crate::vendor::runtime::Prepared> {
+            unimplemented!()
+        }
+        fn revalidate(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            p: &crate::vendor::runtime::Prepared,
+            now: u64,
+        ) -> Result<crate::vendor::runtime::Prepared> {
+            unimplemented!()
+        }
+        fn sign(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            p: &crate::vendor::runtime::Prepared,
+            s: &dyn crate::vendor::runtime::Signer,
+            now: u64,
+        ) -> Result<crate::vendor::runtime::Signature> {
+            unimplemented!()
+        }
+        fn authorize(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            p: &crate::vendor::runtime::Prepared,
+            s: &[crate::vendor::runtime::Signature],
+            now: u64,
+        ) -> Result<crate::vendor::runtime::Signed> {
+            unimplemented!()
+        }
+        fn validate_signed(&self, p: &crate::vendor::runtime::Signed, now: u64) -> Result<()> {
+            unimplemented!()
+        }
+        fn broadcast(
+            &self,
+            p: &crate::vendor::runtime::Signed,
+            now: u64,
+        ) -> Result<crate::vendor::runtime::Status> {
+            unimplemented!()
+        }
+        fn status(
+            &self,
+            p: &crate::vendor::runtime::Signed,
+        ) -> Result<crate::vendor::runtime::Status> {
+            unimplemented!()
+        }
+        fn observe(
+            &self,
+            p: &crate::vendor::runtime::Signed,
+        ) -> Result<Option<crate::vendor::runtime::Receipt>> {
+            unimplemented!()
+        }
+        fn observe_authorizations(
+            &self,
+            p: &[crate::vendor::runtime::Prepared],
+        ) -> Result<Vec<crate::vendor::runtime::ObservedAuthorization>> {
+            unimplemented!()
+        }
+        fn prepare_owner(
+            &self,
+            i: &crate::vendor::runtime::Installation,
+            a: crate::vendor::runtime::OwnerAction,
+            fee: u64,
+            now: u64,
+        ) -> Result<crate::vendor::runtime::OwnerPacket> {
+            unimplemented!()
+        }
+        fn read_owner_signed(
+            &self,
+            p: &crate::vendor::runtime::OwnerPacket,
+            signed_payload: &[u8],
+        ) -> Result<crate::vendor::runtime::OwnerSigned> {
+            unimplemented!()
+        }
+        fn submit_owner<'a>(
+            &self,
+            p: &crate::vendor::runtime::OwnerSigned,
+            retain: super::Retain<'a, crate::vendor::runtime::OwnerSigned>,
+            poll: crate::vendor::runtime::Poll,
+            now: u64,
+        ) -> Result<crate::vendor::runtime::Receipt> {
+            unimplemented!()
+        }
+        fn observe_owner(
+            &self,
+            p: &crate::vendor::runtime::OwnerSigned,
+        ) -> Result<Option<crate::vendor::runtime::Receipt>> {
+            unimplemented!()
+        }
+    }
+    struct Packets;
+    static PACKETS: Packets = Packets;
+    #[allow(unused_variables)]
+    impl crate::vendor::runtime::PacketProvider for Packets {
+        fn request_id(&self, p: &crate::vendor::runtime::Packet) -> Result<[u8; 32]> {
+            unimplemented!()
+        }
+        fn owner_info(
+            &self,
+            p: &crate::vendor::runtime::Packet,
+        ) -> Result<crate::vendor::runtime::OwnerInfo> {
+            unimplemented!()
+        }
+        fn prepared_metadata(
+            &self,
+            p: &crate::vendor::runtime::Packet,
+        ) -> Result<crate::vendor::runtime::PreparedMetadata> {
+            unimplemented!()
+        }
+        fn info(
+            &self,
+            p: &crate::vendor::runtime::Packet,
+            k: crate::vendor::runtime::Kind,
+        ) -> Result<crate::vendor::runtime::PacketInfo> {
+            unimplemented!()
+        }
+        fn validate_signed(&self, p: &crate::vendor::runtime::Packet) -> Result<()> {
+            unimplemented!()
+        }
+        fn signed_preparation(
+            &self,
+            p: &crate::vendor::runtime::Packet,
+        ) -> Result<crate::vendor::runtime::Prepared> {
+            unimplemented!()
+        }
+        fn verify_consent(
+            &self,
+            s: &crate::vendor::runtime::Snapshot,
+            message: &str,
+            signatures: &[crate::vendor::runtime::Signature],
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        fn signer_weight(
+            &self,
+            s: &crate::vendor::runtime::Snapshot,
+            identity: &str,
+        ) -> Result<u32> {
+            unimplemented!()
+        }
+        fn authority_document(
+            &self,
+            s: &crate::vendor::runtime::Snapshot,
+        ) -> Result<serde_json::Value> {
+            unimplemented!()
+        }
+        fn same_snapshot(
+            &self,
+            a: &crate::vendor::runtime::Snapshot,
+            b: &crate::vendor::runtime::Snapshot,
+        ) -> Result<bool> {
+            unimplemented!()
+        }
+        fn verify_receipt(
+            &self,
+            r: &crate::vendor::runtime::Packet,
+            p: &crate::vendor::runtime::Packet,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        fn receipt_info(
+            &self,
+            p: &crate::vendor::runtime::Packet,
+        ) -> Result<crate::vendor::runtime::ReceiptInfo> {
+            unimplemented!()
+        }
+    }
+    /// A rail that does not say whether a code transaction is still needed refuses: only the
+    /// rail can observe whether its code is live, and a caller that took a default answer could
+    /// send again a transaction that another one made needless. The other code defaults refuse
+    /// or prove nothing.
+    #[test]
+    fn a_rail_without_code_transactions_answers_nothing_about_them() {
+        let packet = crate::vendor::runtime::Signed(
+            crate::vendor::runtime::Packet::new("test:network", &serde_json::json!({}), &PACKETS)
+                .unwrap(),
+        );
+        assert!(Bare.code_needed(&packet).is_err());
+        assert!(!Bare.code_lapsed(&packet).unwrap());
     }
 }
