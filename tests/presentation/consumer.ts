@@ -65,20 +65,15 @@ const earlierRail: OwnerChain = {
   },
 };
 void earlierRail;
-// A caller of the earlier contract states no asset, so a rail whose hooks require one does not have the type.
-const requiresAsset: OwnerChain = {
-  ...chain,
-  keypairSetup: {
-    read: () => signedSetupWithoutAsset,
-    send: async () => 7,
-    // @ts-expect-error The setup hook takes a request without an asset.
-    prepare: async (input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string; readonly asset: WalletAsset }) =>
-      ({ wallet: input.asset.symbol, step: { action: 'a', payload: 'p', hash: 'h', expiresAt: 1 }, complete: signed => signed }),
-    // @ts-expect-error The installation document is asked for without an asset too.
-    configuration: (network: string, wallet: string, owner: string, agent: string, server: string, asset: WalletAsset) => ({ network, wallet, owner, agent, server, asset: asset.symbol }),
-  },
-};
-void requiresAsset;
+// A host that replaces a hook of a rail, as a wrapper does, still has the contract's type.
+const wrapped: NonNullable<OwnerChain['keypairSetup']> = { ...earlierRail.keypairSetup! };
+wrapped.prepare = wrapped.prepare.bind(wrapped);
+wrapped.configuration = (...args) => earlierRail.keypairSetup!.configuration(...args);
+// An omitted asset of a reviewed policy reads as undefined, and every place of the asset takes that value as written.
+const explicitlyNone: ReviewedPolicy = { source: 's', params: {}, asset: undefined };
+void wrapped.prepare({ network: 'example:testnet', owner: 'o', agent: 'a', server: 's', amount: '1', asset: explicitlyNone.asset });
+const readWithoutValues: SignedKeypairSetup = { ...signedSetupWithoutAsset, asset: undefined, amount: undefined };
+void readWithoutValues;
 const keypairChain: OwnerChain = {
   ...chain,
   keypairSetup: {

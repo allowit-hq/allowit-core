@@ -434,8 +434,9 @@ A keypair wallet holds one asset. `WalletAsset` names it by its code and its iss
 of the network itself has `issuer: null`. Every place of the asset is optional: the host can state it in
 `ReviewedPolicy.asset`, the workflow hands it to `prepare` and `configuration`, and a rail can read it back from
 signed setup bytes in `SignedKeypairSetup.asset`. A host or a rail that states none means the asset of the network
-itself. A rail can also read the funded amount back from the bytes, as decimal text in `SignedKeypairSetup.amount`,
-so a workflow checks a saved setup against its signed bytes and not against saved metadata.
+itself. A rail can also read the funded amount back from the bytes, as decimal text in `SignedKeypairSetup.amount`.
+A workflow then checks a saved setup against its signed bytes. For a rail that states no amount, the workflow has
+only the amount that it saved beside the bytes.
 
 The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, `PastDecision`, `OwnerAnswer` and the
 types that they use) describe what a server answers about a request that waits for its policy owner and about a
