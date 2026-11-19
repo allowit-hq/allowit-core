@@ -431,12 +431,13 @@ params-update workflows with their journal and recovery rules. A rail supplies `
 `TransactionRecord` of a transaction, the record of an expired signed step, and, for a keypair wallet, the steps of
 its account setup (`prepare`, `read`, `send`, `configuration`) and the check of the owner's policy approval.
 A keypair wallet holds one asset. `WalletAsset` names it by its code and its issuer, as the policy does; the asset
-of the network itself has `issuer: null`. Every place of the asset is optional: the host can state it in
-`ReviewedPolicy.asset`, the workflow hands it to `prepare` and `configuration`, and a rail can read it back from
-signed setup bytes in `SignedKeypairSetup.asset`. A host or a rail that states none means the asset of the network
-itself. A rail can also read the funded amount back from the bytes, as decimal text in `SignedKeypairSetup.amount`.
-A workflow then checks a saved setup against its signed bytes. For a rail that states no amount, the workflow has
-only the amount that it saved beside the bytes.
+of the network itself has `issuer: null`. Every place of the asset is optional. The host can state it in
+`ReviewedPolicy.asset`, and the workflow hands it to `prepare` and `configuration`: in these three inputs, no asset
+means the asset of the network itself. A rail can read the asset back from signed setup bytes in
+`SignedKeypairSetup.asset`, and the funded amount as decimal text in `SignedKeypairSetup.amount`; a workflow then
+checks a saved setup against its signed bytes. Each of these two fields is absent when the rail did not report it.
+An absent asset there does not mean the asset of the network, and for an absent amount the workflow has only the
+amount that it saved beside the bytes.
 
 The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, `PastDecision`, `OwnerAnswer` and the
 types that they use) describe what a server answers about a request that waits for its policy owner and about a
