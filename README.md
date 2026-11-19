@@ -139,7 +139,9 @@ hash, so it covers the build. A client that builds compares its own build with t
 reproducible, so anyone can compare the code on the network with the source.
 
 A rail implements `CustomWalletBuild`: `build` compiles the wallet code from the source, and `code_hash`
-gives the identity of code as the network records it. `check_code_hash` refuses code whose hash differs
+gives the identity of code as the network records it. `check` refuses a source that the rail's Custom wallet
+cannot hold beyond Core's derivation, such as one with more state keys than its storage takes; a client calls it
+before it reports a source as fit for a Custom wallet. `check_code_hash` refuses code whose hash differs
 from the client's own build. The `code` module lists the typed refusal codes: `custom_policy_unknown`,
 `custom_code_hash_mismatch`, `custom_toolchain_missing`, `custom_build_failed` and `custom_build_missing`.
 

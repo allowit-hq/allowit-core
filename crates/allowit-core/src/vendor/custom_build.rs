@@ -59,6 +59,15 @@ pub trait CustomWalletBuild: Sync {
     /// The identity of wallet code as the network records it. Code that the network cannot
     /// install is an error.
     fn code_hash(&self, network: &str, code: &[u8]) -> Result<[u8; 32]>;
+    /// Check that the rail's Custom wallet can hold `source`, beyond Core's derivation of its
+    /// on-chain part: what the rail's own storage needs, such as its limits on the state keys
+    /// that the contract keeps. A refusal says what the owner changes. A client calls it before
+    /// it reports a source as fit for a Custom wallet; the build refuses the same source. The
+    /// default admits every source.
+    fn check(&self, network: &str, source: &str) -> Result<()> {
+        let _ = (network, source);
+        Ok(())
+    }
 }
 
 /// Refuse code whose hash differs from the hash of the client's own build of the source.
@@ -122,6 +131,30 @@ mod tests {
         let error = check_code_hash(&built.code_hash, &other).unwrap_err();
         assert_eq!(error.api_code.as_deref(), Some(code::CODE_HASH_MISMATCH));
         assert!(error.to_string().contains(&hex(&other)));
+    }
+
+    /// A rail without limits of its own admits every source; a rail with them refuses a source
+    /// that its Custom wallet cannot hold.
+    #[test]
+    fn a_rail_checks_what_its_custom_wallet_can_hold() {
+        assert!(Hook.check(NETWORK, SOURCE).is_ok());
+        struct Limited;
+        impl CustomWalletBuild for Limited {
+            fn build(&self, network: &str, source: &str, work: &Path) -> Result<WalletCode> {
+                Hook.build(network, source, work)
+            }
+            fn code_hash(&self, network: &str, code: &[u8]) -> Result<[u8; 32]> {
+                Hook.code_hash(network, code)
+            }
+            fn check(&self, _: &str, source: &str) -> Result<()> {
+                if source.len() > 8 {
+                    return Err(refusal(code::BUILD_FAILED, "too long for this wallet"));
+                }
+                Ok(())
+            }
+        }
+        assert!(Limited.check(NETWORK, "ok").is_ok());
+        assert!(Limited.check(NETWORK, SOURCE).is_err());
     }
 
     #[test]
