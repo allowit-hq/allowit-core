@@ -134,9 +134,9 @@ pub trait Signer {
     fn identity(&self) -> &str;
     fn sign_hash(&self, digest: &[u8; 32]) -> Result<Vec<u8>>;
     /// The signature of the exact `bytes`, for a rail whose transaction signature covers the
-    /// whole serialized message, not a 32-byte hash of it (Solana). The signer signs the bytes
-    /// as they are: it adds no prefix and hashes nothing. A signer that signs only hashes keeps
-    /// the default, which refuses.
+    /// whole serialized message, not a 32-byte hash of it. The signer signs the bytes as they
+    /// are: it adds no prefix and hashes nothing. A signer that signs only hashes keeps the
+    /// default, which refuses.
     fn sign_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>> {
         let _ = bytes;
         Err(crate::client::error::Error::unsupported(
@@ -154,8 +154,8 @@ pub trait SendingAccounts: Send + Sync {
     /// The signature of `hash` by the key of `account`, as the rail's transaction signature.
     fn sign(&self, account: &str, hash: &[u8; 32]) -> Result<Vec<u8>>;
     /// The signature of the exact `bytes` by the key of `account`, for a rail whose transaction
-    /// signature covers the whole serialized message (Solana). Same rules as
-    /// [`Signer::sign_bytes`]; the default refuses.
+    /// signature covers the whole serialized message. Same rules as [`Signer::sign_bytes`]; the
+    /// default refuses.
     fn sign_bytes(&self, account: &str, bytes: &[u8]) -> Result<Vec<u8>> {
         let _ = (account, bytes);
         Err(crate::client::error::Error::unsupported(
