@@ -96,6 +96,9 @@ pub fn check_host_call_registry(host_calls: &[(&str, &str)]) -> Result<()> {
 }
 
 mod derive;
+/// The keepers' rule for the window of a daily value: Core's portable rule, which a rail's
+/// contract includes with its native value bindings, so the contract and the server apply one rule.
+pub use crate::{daily_window_end, daily_window_open};
 pub use derive::{
     Cause, DAILY_PREFIX, Derived, Figure, Keeper, MAX_STATE_KEY_BYTES, ServerOnly, SourceCalls,
     StateEntry, derive, source_calls,
