@@ -236,6 +236,11 @@ the chain and on the server.
 Write a policy so that it stores little. Prefer, in this order: no state; a figure that a canonical rule keeps
 or that the request gives; then one small value under a short key. A daily count belongs under a `day_` key.
 
+A server reports the derived part beside a Custom policy in its JSON form, which the TypeScript declarations of
+`@allowit/core` name: `OnchainPart`, either `OnchainDerived` with `OnchainServerOnly`, `OnchainFigure` and
+`OnchainStateEntry`, or `OnchainRefused` for a source that has no on-chain part. A server reports no part when the
+source is its own on-chain part and keeps no state of its own.
+
 ## Wallet kinds
 
 [`vendor::kinds`](crates/allowit-core/src/vendor/kinds.rs) describes the four wallet kinds that every host offers.
@@ -444,7 +449,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.0", version = "0.14", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.1", version = "0.14", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

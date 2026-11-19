@@ -84,6 +84,64 @@ export declare const canonicalFunctionRegistry: CanonicalFunctionRegistry;
 export declare const canonicalFunctions: readonly CanonicalFunctionDescriptor[];
 
 /*
+ * The on-chain part of a Custom policy: the JSON form of what \`policy_source::derive\` gives for the owner's one
+ * source, as a server reports it beside the policy. The wallet contract compiles \`source\`; the server evaluates the
+ * whole policy before it co-signs. A source that has no on-chain part has only \`refused\`. A server reports no part
+ * (the policy has no \`onchain\` field) when the source is its own on-chain part and keeps no state of its own.
+ */
+/** Why a check of the source runs only on the server. */
+export type OnchainCause = 'server_call' | 'server_value' | 'stored_state' | 'server_branch' | 'after_server_exit' | 'not_split';
+/** A check of the source that only the server enforces. movable: the owner can move it so that the contract enforces it too. */
+export interface OnchainServerOnly {
+  readonly line: number;
+  readonly check: string;
+  readonly cause: OnchainCause;
+  readonly movable: boolean;
+}
+/** A cumulated figure that the kept statements read, such as day_spent. daily: it starts again each day. */
+export interface OnchainFigure {
+  readonly key: string;
+  readonly daily: boolean;
+}
+/**
+ * A state key of the policy with its keeper. chain: the wallet contract keeps it, because a statement that uses it
+ * stays in the on-chain part and no statement that writes it leaves. server: the server keeps it, and every
+ * statement that uses it runs only on the server. daily: a key that starts with day_ lives one daily window.
+ */
+export interface OnchainStateEntry {
+  readonly key: string;
+  readonly keeper: 'chain' | 'server';
+  readonly daily: boolean;
+}
+/** The on-chain part that the server derived from the source. */
+export interface OnchainDerived {
+  /** The derived source that the wallet contract compiles. */
+  readonly source: string;
+  /** The line ranges of the owner's source that left, each inclusive and from 1. */
+  readonly left: readonly (readonly [number, number])[];
+  /** The checks that the wallet contract enforces, in source order. */
+  readonly kept: readonly string[];
+  readonly serverOnly: readonly OnchainServerOnly[];
+  readonly figures: readonly OnchainFigure[];
+  readonly state: readonly OnchainStateEntry[];
+  /** The server's notes in the owner's words: each check that can move on chain, and a part that checks nothing. */
+  readonly warnings: readonly string[];
+  readonly refused?: never;
+}
+/** A source that has no on-chain part, so a Custom wallet cannot hold it: why. */
+export interface OnchainRefused {
+  readonly refused: string;
+  readonly source?: never;
+  readonly left?: never;
+  readonly kept?: never;
+  readonly serverOnly?: never;
+  readonly figures?: never;
+  readonly state?: never;
+  readonly warnings?: never;
+}
+export type OnchainPart = OnchainDerived | OnchainRefused;
+
+/*
  * Owner review: what a server answers about an agent request that waits for its policy owner, and about a
  * policy's past decisions. Scores and thresholds are basis points from 0 to 10000. Times are Unix seconds.
  * Amounts are base units as decimal text, with the symbol and decimals that the network supplies.
