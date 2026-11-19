@@ -40,6 +40,13 @@ impl Error {
         e.api_code = Some(code.into());
         e
     }
+    /// A typed refusal of a local check: the stable `code` of the error catalogue and its
+    /// `message`, with no HTTP status. A server that answers it maps the code to its own status.
+    pub fn coded(code: impl Into<String>, message: impl Into<String>) -> Self {
+        let mut e = Self::new(4, message);
+        e.api_code = Some(code.into());
+        e
+    }
     /// Attach the `details` object of a typed server refusal.
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);

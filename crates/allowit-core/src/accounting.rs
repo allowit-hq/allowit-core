@@ -27,14 +27,28 @@ pub fn day_end(now: u64) -> u64 {
 /// zero. The figures of the operation's day then take `delta` in the day's spending and in the
 /// day's volume, which counts gas. A fee of a day that is over counts in the lifetime spending
 /// only, and a release never starts a day. A release takes no figure below zero. The calls and
-/// the unpriced marks do not change otherwise. A sum that overflows is `Overflow`, and figures
-/// that leave no room for one more unit, which `post_flight` would refuse at the next operation,
-/// are `InvalidState`.
+/// the unpriced marks do not change otherwise. A sum that overflows is `Overflow`. `InvalidState`
+/// refuses what Core's decoder and `post_flight` refuse: a negative figure, a day that no time
+/// reaches, in the figures or as `day`, and figures, before or after the change, that leave no
+/// room for one more call or unit.
 pub fn charge_fee(
     state: &AllowitStandardState,
     day: u64,
     delta: i128,
 ) -> Result<AllowitStandardState> {
+    let last_day = u64::MAX / DAY;
+    let full = |s: &AllowitStandardState| {
+        s.calls == u64::MAX || [s.spent, s.day_spent, s.day_total].contains(&i128::MAX)
+    };
+    if day > last_day
+        || state.day > last_day
+        || state.spent < 0
+        || state.day_spent < 0
+        || state.day_total < 0
+        || full(state)
+    {
+        return Err(AllowitError::InvalidState);
+    }
     let mut s = state.clone();
     if delta == 0 {
         return Ok(s);
@@ -56,7 +70,7 @@ pub fn charge_fee(
         s.day_spent = add(s.day_spent)?;
         s.day_total = add(s.day_total)?;
     }
-    if [s.spent, s.day_spent, s.day_total].contains(&i128::MAX) {
+    if full(&s) {
         return Err(AllowitError::InvalidState);
     }
     Ok(s)
@@ -141,13 +155,40 @@ mod tests {
     /// next operation, which `post_flight` would refuse.
     #[test]
     fn an_overflow_and_a_full_figure_are_refused() {
-        let s = figures(9, i128::MAX, 0, 0);
-        assert_eq!(charge_fee(&s, 9, 1), Err(AllowitError::Overflow));
+        let s = figures(9, i128::MAX - 1, 0, 0);
+        assert_eq!(charge_fee(&s, 9, 2), Err(AllowitError::Overflow));
         let s = figures(9, i128::MAX - 1, 0, 0);
         assert_eq!(charge_fee(&s, 9, 1), Err(AllowitError::InvalidState));
         assert_eq!(charge_fee(&s, 8, 1), Err(AllowitError::InvalidState));
         let s = figures(9, 0, i128::MAX - 1, 0);
         assert_eq!(charge_fee(&s, 9, 1), Err(AllowitError::InvalidState));
         assert!(charge_fee(&figures(9, i128::MAX - 2, 0, 0), 9, 1).is_ok());
+    }
+
+    /// Figures that Core's decoder refuses are refused before any change, also with no change:
+    /// a negative figure, a call counter with no room for the next call, and a day that no time
+    /// reaches, in the figures or in the charge.
+    #[test]
+    fn malformed_figures_and_an_unreachable_day_are_refused() {
+        let refused = |s: &AllowitStandardState, day: u64, delta: i128| {
+            assert_eq!(charge_fee(s, day, delta), Err(AllowitError::InvalidState));
+        };
+        for delta in [1, 0, -1] {
+            refused(&figures(0, -5, 0, 0), 0, delta);
+            refused(&figures(0, 0, -1, 0), 0, delta);
+            refused(&figures(0, 0, 0, -1), 0, delta);
+            refused(
+                &AllowitStandardState {
+                    calls: u64::MAX,
+                    ..AllowitStandardState::default()
+                },
+                0,
+                delta,
+            );
+            refused(&figures(0, 0, 0, 0), day(u64::MAX) + 1, delta);
+            refused(&figures(day(u64::MAX) + 1, 0, 0, 0), 0, delta);
+        }
+        // The last day that a time reaches is a day like any other.
+        assert!(charge_fee(&figures(0, 0, 0, 0), day(u64::MAX), 1).is_ok());
     }
 }

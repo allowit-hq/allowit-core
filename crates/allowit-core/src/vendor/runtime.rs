@@ -394,15 +394,16 @@ pub struct Resources {
 impl Resources {
     /// Refuse a contract wallet that is not live: a wallet is live while the network holds both
     /// its instance and its code. Without either, it takes no operation or owner step, and the
-    /// refusal is [`CONTRACT_EXPIRED`] (409). A keypair wallet has no code; its host does not ask.
+    /// refusal is the typed condition [`CONTRACT_EXPIRED`], with no HTTP status
+    /// (`Error::coded`): a server maps it to its own status, and the caller's workflow says what
+    /// it signed or sent. A keypair wallet has no code; its host does not ask.
     pub fn require_live(&self) -> Result<()> {
         if self.wallet_present && self.code_present {
             return Ok(());
         }
-        Err(crate::client::error::Error::refused(
-            409,
+        Err(crate::client::error::Error::coded(
             CONTRACT_EXPIRED,
-            "The wallet's instance or its code lapsed on its network. Nothing was signed or sent.",
+            "The wallet's instance or its code lapsed on its network.",
         ))
     }
 }
@@ -898,7 +899,9 @@ mod tests {
         for (wallet, code) in [(true, false), (false, true), (false, false)] {
             let refused = resources(wallet, code).require_live().unwrap_err();
             assert_eq!(refused.api_code.as_deref(), Some(CONTRACT_EXPIRED));
-            assert_eq!(refused.status, Some(409));
+            // A local check: no HTTP status and no HTTP wording.
+            assert_eq!(refused.status, None);
+            assert!(!refused.message.contains("HTTP"));
         }
     }
     #[test]
