@@ -64,13 +64,6 @@ pub struct Terms {
     /// from the gas that this operation repays, down to zero; the wallet counts what it repays.
     /// Zero for a wallet that repays no gas.
     pub gas_carry_units: u128,
-    /// Native units that the server paid for this operation outside its transaction, before it:
-    /// the fee of a restoration of the wallet's lapsed code that this operation needed. They are
-    /// part of this operation's fee. A rail whose wallet repays the network fee adds them to the
-    /// gas that this operation repays, up to the most gas that the wallet's owner lets one
-    /// operation repay; the server charges what the wallet does not repay to the operation's
-    /// request. Zero when the server paid nothing.
-    pub gas_due_units: u128,
 }
 #[derive(Clone, Debug)]
 pub struct Expense {
@@ -439,8 +432,8 @@ pub enum OwnerAction {
     /// Create the wallet with the code `wasm` and fund it in the same transaction: `units` of
     /// the installed asset, and `fee_asset_units` of the network's fee asset, from which the
     /// wallet repays the network fee of its operations, when the installed asset is another
-    /// asset. The network holds the code already: the server uploads it with
-    /// `RuntimeProvider::upload_code`, and an upload gives no authority.
+    /// asset. The network holds the code already: the server uploads it with the transaction
+    /// of `RuntimeProvider::prepare_code_within`, and an upload gives no authority.
     Create {
         wasm: Vec<u8>,
         units: i128,
@@ -555,6 +548,11 @@ impl Default for Poll {
 pub trait Transport: Send + Sync {
     fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value>;
 }
+
+/// The problem code of an operation or owner step on a wallet whose instance or code lapsed on
+/// its network: the rail refuses it before anything is signed or sent, and nothing restores the
+/// wallet. Its owner keeps it live, or renews or restores it outside Allowit.
+pub const CONTRACT_EXPIRED: &str = "contract_expired";
 
 /// Public failure information.
 #[derive(Clone, Debug)]

@@ -42,11 +42,6 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   server keeps the difference per wallet: a confirmed operation adds `Fee::repaid_native_units` and
   subtracts `Fee::native_units`. It passes that carry as `Terms::gas_carry_units`, and the rail
   subtracts it from the next repayment, down to zero.
-- Gas due: a fee that the server paid for an operation outside its transaction, such as the
-  restoration of the wallet's lapsed code (`RuntimeProvider::restore_code_within`), is part of that
-  operation's fee. The server passes it as `Terms::gas_due_units`; the rail adds it to the repayment,
-  up to the most gas that the wallet's owner lets one operation repay, and the server charges the
-  rest to the operation's request.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
@@ -109,9 +104,14 @@ A rail without the hook declares `Feature::PaidService` skipped.
 `allowit_core::vendor::custom_build` (feature `vendor`) defines the build of a Custom wallet. The wallet runs
 code that is built from the exact policy source. The owner's policy signature binds that source, and the
 wallet stores its hash. The owner's client builds the code from that source and hands it to the server,
-which uploads it with `RuntimeProvider::upload_code_within`, from its own account and within its fee ceiling, when the
-owner deploys; an upload gives no authority. Code that lapsed later is the server's to restore, with
-`RuntimeProvider::restore_code_within`, so no wallet operation pays its rent. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+which uploads it from its own account and within its fee ceiling when the owner deploys; an upload gives no
+authority. The upload is the transaction of `RuntimeProvider::prepare_code_within`, which a sending account
+signs: the rail prepares it and sends nothing, and the SDK engine sends it and follows it to its receipt like
+any signed operation. The server renews code that wallets share, such as the code of a fixed tier, before it
+lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. A wallet keeps
+its own instance live on each call, and a Custom wallet its own code too. An operation or owner step on a
+wallet whose instance or code lapsed is refused with the problem code `CONTRACT_EXPIRED` (`contract_expired`)
+before anything is signed or sent. The owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
@@ -141,8 +141,10 @@ wallets need no sending account returns its plain `runtime`.
 
 An agent's authorization of a contract-wallet operation can run in any envelope until it expires, not only in the one
 that the server sent. So the server releases an open operation only on its terminal receipt or on
-`RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run. `false` means not
-proven, and the operation stays open. The method has a default that proves nothing. `RuntimeProvider::owner_lapsed`
+`RuntimeProvider::lapsed`: the rail's proof that the operation did not run and can no longer run, from the ledger past
+its signed time bound and the network's history of its executions in any envelope. The time bound alone proves no
+lapse: once that history no longer holds the preparation, the operation stays open until its owner releases it.
+`false` means not proven, and the operation stays open. The method has a default that proves nothing. `RuntimeProvider::owner_lapsed`
 gives the same proof for a sent owner transaction, by its hash, the height at which the server prepared it and its
 expiry: the server drops the owner's pending step only on this proof or on its receipt.
 
@@ -420,7 +422,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.12.5", version = "0.12", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.13.0", version = "0.13", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
