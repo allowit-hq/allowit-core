@@ -241,11 +241,12 @@ pub trait RuntimeProvider {
         let _ = (code, max_fee, now);
         Err(Error::unsupported("This rail does not renew wallet code"))
     }
-    /// [`Self::prepare_code_within`] of the wallet code `code`, in this rail's code format, with the
-    /// time bound that the caller fixed: the transaction can apply from `validity.now` until
-    /// `validity.expires_at`, and its own bound (`Signed::info().expires_at`) is at most
-    /// `validity.expires_at`. A bound that the rail cannot sign within is refused before anything
-    /// is signed. The default refuses.
+    /// [`Self::prepare_code_within`] of the wallet code `code`, in this rail's code format, within
+    /// the time bound that the caller fixed. `validity` is an outer bound: the transaction applies
+    /// no earlier than `validity.now`, and its own bound (`Signed::info().expires_at`) is at most
+    /// `validity.expires_at` and can be earlier. The caller follows that own bound for every later
+    /// send and lookup of the transaction. A bound that the rail cannot sign within is refused
+    /// before anything is signed. The default refuses.
     fn prepare_code_until(
         &self,
         i: &crate::vendor::runtime::Installation,
@@ -687,10 +688,6 @@ mod defaults {
             unimplemented!()
         }
     }
-    /// A rail that does not say whether a code transaction is still needed refuses: only the
-    /// rail can observe its code, and a caller that took a default answer could send again a
-    /// transaction that another one made needless. A rail without code transactions prepares
-    /// none.
     pub(super) fn installation() -> crate::vendor::runtime::Installation {
         crate::vendor::runtime::Installation {
             description: crate::vendor::profiles::Description {
@@ -750,6 +747,10 @@ mod defaults {
             3
         );
     }
+    /// A rail that does not say whether a code transaction is still needed refuses: only the
+    /// rail can observe its code, and a caller that took a default answer could send again a
+    /// transaction that another one made needless. A rail without code transactions prepares
+    /// none.
     #[test]
     fn a_rail_without_code_transactions_answers_nothing_about_them() {
         let packet = crate::vendor::runtime::Signed(
