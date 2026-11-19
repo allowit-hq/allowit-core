@@ -549,6 +549,11 @@ pub trait Transport: Send + Sync {
     fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value>;
 }
 
+/// The problem code of an operation or owner step on a wallet whose instance or code lapsed on
+/// its network: the rail refuses it before anything is signed or sent, and nothing restores the
+/// wallet. Its owner keeps it live, or renews or restores it outside Allowit.
+pub const CONTRACT_EXPIRED: &str = "contract_expired";
+
 /// Public failure information.
 #[derive(Clone, Debug)]
 pub struct Problem {

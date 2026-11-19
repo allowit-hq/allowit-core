@@ -108,7 +108,10 @@ which uploads it from its own account and within its fee ceiling when the owner 
 authority. The upload is the transaction of `RuntimeProvider::prepare_code_within`, which a sending account
 signs: the rail prepares it and sends nothing, and the SDK engine sends it and follows it to its receipt like
 any signed operation. The server renews code that wallets share, such as the code of a fixed tier, before it
-lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. A wallet keeps
+its own instance live on each call, and a Custom wallet its own code too. An operation or owner step on a
+wallet whose instance or code lapsed is refused with the problem code `CONTRACT_EXPIRED` (`contract_expired`)
+before anything is signed or sent. The owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
