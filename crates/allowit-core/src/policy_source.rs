@@ -97,8 +97,8 @@ pub fn check_host_call_registry(host_calls: &[(&str, &str)]) -> Result<()> {
 
 mod derive;
 pub use derive::{
-    Cause, DAILY_PREFIX, Derived, Figure, Keeper, MAX_STATE_KEY_BYTES, ServerOnly, StateEntry,
-    derive,
+    Cause, DAILY_PREFIX, Derived, Figure, Keeper, MAX_STATE_KEY_BYTES, ServerOnly, SourceCalls,
+    StateEntry, derive, source_calls,
 };
 
 fn source_shape_for(source: &str, host_calls: Option<&[(&str, &str)]>) -> Result<SourceShape> {

@@ -225,6 +225,10 @@ contract and the server each leave an ended value out of it. `derive` refuses a 
 literal of 1 to 32 ASCII letters, digits or `_`, a write of a standard figure and a use of the stored day. The literal
 spells the key itself: a key with an escape, such as `"\x61"`, is refused.
 
+`source_calls` lists the canonical rules and the host calls of a source in source order, as `derive` reads them: a
+host takes the rules of the placements that it reports from there, the whole source's from `source_calls` and the
+on-chain part's from `Derived::kept`, so that no reader of a source finds other calls than the derivation.
+
 `Derived::figures` names the cumulated figures that the kept statements read, each daily or total: those of the
 kept canonical rules, and each standard figure that a kept statement reads with `get_state`. The wallet keeps
 those figures and the keys whose keeper is `chain`. No policy reads the stored day (`get_state(ctx, "day")`): a
@@ -499,7 +503,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.1", version = "0.15", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.2", version = "0.15", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
