@@ -170,6 +170,24 @@ pub trait RuntimeProvider {
         let _ = p;
         Ok(None)
     }
+    /// The configuration version that a host takes for the wallet of `i` from the admission read
+    /// `observed`, compared with its own account `retained`: the version of an owner's
+    /// configuration change that this rail verified on the network. The host asks while no
+    /// operation of the wallet is open, whatever the two versions are. `None` when `observed` shows
+    /// the configuration that `retained` describes. A change that the host cannot take, such as one
+    /// that also moved the wallet's replay state or a version that went back, is refused. The
+    /// default refuses.
+    fn configuration_change(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        retained: &crate::vendor::runtime::Accounting,
+        observed: &crate::vendor::runtime::Snapshot,
+    ) -> Result<Option<u64>> {
+        let _ = (i, retained, observed);
+        Err(Error::unsupported(
+            "This rail does not verify a configuration change",
+        ))
+    }
     fn prepare_owner(
         &self,
         i: &crate::vendor::runtime::Installation,
@@ -221,6 +239,36 @@ pub trait RuntimeProvider {
     ) -> Result<Option<crate::vendor::runtime::Signed>> {
         let _ = (code, max_fee, now);
         Err(Error::unsupported("This rail does not renew wallet code"))
+    }
+    /// [`Self::prepare_code_within`] of the wallet code `code`, in this rail's code format, with the
+    /// time bound that the caller fixed: the transaction can apply from `validity.now` until
+    /// `validity.expires_at`, and its own bound (`Signed::info().expires_at`) is at most
+    /// `validity.expires_at`. A bound that the rail cannot sign within is refused before anything
+    /// is signed. The default refuses.
+    fn prepare_code_until(
+        &self,
+        i: &crate::vendor::runtime::Installation,
+        code: &[u8],
+        max_fee: u64,
+        validity: crate::vendor::runtime::Validity,
+    ) -> Result<Option<crate::vendor::runtime::Signed>> {
+        let _ = (i, code, max_fee, validity);
+        Err(Error::unsupported(
+            "This rail does not prepare wallet code transactions within a time bound",
+        ))
+    }
+    /// [`Self::prepare_code_renewal`] with the time bound that the caller fixed, as for
+    /// [`Self::prepare_code_until`]. The default refuses.
+    fn prepare_code_renewal_until(
+        &self,
+        code: &[u8; 32],
+        max_fee: u64,
+        validity: crate::vendor::runtime::Validity,
+    ) -> Result<Option<crate::vendor::runtime::Signed>> {
+        let _ = (code, max_fee, validity);
+        Err(Error::unsupported(
+            "This rail does not renew wallet code within a time bound",
+        ))
     }
     /// Whether the code transaction `p` from `prepare_code_within` or `prepare_code_renewal` is
     /// still needed: an upload until its code is live, a renewal while the code's lifetime is
@@ -641,6 +689,65 @@ mod defaults {
     /// rail can observe its code, and a caller that took a default answer could send again a
     /// transaction that another one made needless. A rail without code transactions prepares
     /// none.
+    pub(super) fn installation() -> crate::vendor::runtime::Installation {
+        crate::vendor::runtime::Installation {
+            description: crate::vendor::profiles::Description {
+                network: "test:network".into(),
+                wallet: String::new(),
+                agent: String::new(),
+                policy_id: String::new(),
+                owner: String::new(),
+                server: String::new(),
+                asset: String::new(),
+                asset_symbol: String::new(),
+                source: String::new(),
+                source_hash: String::new(),
+                module_digest: String::new(),
+                params: Default::default(),
+            },
+            config: serde_json::value::RawValue::from_string("{}".into()).unwrap(),
+            export: None,
+            authority: None,
+        }
+    }
+    pub(super) fn packet() -> crate::vendor::runtime::Packet {
+        crate::vendor::runtime::Packet::new("test:network", &serde_json::json!({}), &PACKETS)
+            .unwrap()
+    }
+    /// The code of a refusal of `result`: 3 is a rail that does not implement the call.
+    pub(super) fn refused<T>(result: Result<T>) -> i32 {
+        result.map(drop).unwrap_err().code
+    }
+    /// A rail that does not verify a configuration change or sign a code transaction within a
+    /// time bound is refused, never given an answer.
+    #[test]
+    fn a_rail_refuses_the_time_bounds_and_configuration_changes_that_it_does_not_implement() {
+        use crate::vendor::runtime::{Accounting, Snapshot, Validity};
+        let snapshot = Snapshot {
+            accounting: Accounting::default(),
+            observed_height: 1,
+            paused: false,
+            params: Default::default(),
+            state: Default::default(),
+            evidence: packet(),
+        };
+        assert_eq!(
+            refused(Bare.configuration_change(&installation(), &Accounting::default(), &snapshot)),
+            3
+        );
+        let validity = Validity {
+            now: 1,
+            expires_at: 2,
+        };
+        assert_eq!(
+            refused(Bare.prepare_code_until(&installation(), &[], 1, validity)),
+            3
+        );
+        assert_eq!(
+            refused(Bare.prepare_code_renewal_until(&[1; 32], 1, validity)),
+            3
+        );
+    }
     #[test]
     fn a_rail_without_code_transactions_answers_nothing_about_them() {
         let packet = crate::vendor::runtime::Signed(
