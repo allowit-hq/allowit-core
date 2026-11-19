@@ -12,7 +12,8 @@ pub fn day(now: u64) -> u64 {
 }
 
 /// The last second of the UTC day of `now`. An operation that a policy evaluates at `now` counts
-/// in that day, so its validity ends at this second at the latest.
+/// in that day, so its validity ends at this second at the latest. In the last day that `u64`
+/// holds, the answer is `u64::MAX`.
 pub fn day_end(now: u64) -> u64 {
     day(now).saturating_mul(DAY).saturating_add(DAY - 1)
 }
