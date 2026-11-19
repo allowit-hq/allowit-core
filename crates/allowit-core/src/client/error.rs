@@ -5,7 +5,8 @@ pub struct Error {
     pub message: String,
     pub status: Option<u16>,
     pub config: bool,
-    /// The stable `code` of a typed server refusal `{error, code, details}`, when the server sent one.
+    /// The stable `code` of a typed refusal: the code of a server's refusal `{error, code,
+    /// details}`, or of a local check that `Error::coded` names.
     pub api_code: Option<String>,
     /// The `details` object of a typed server refusal, when the server sent one. It is server
     /// data: read a text field through [`Error::detail`] before printing it.

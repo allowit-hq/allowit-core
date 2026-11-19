@@ -28,9 +28,9 @@ pub fn day_end(now: u64) -> u64 {
 /// day's volume, which counts gas. A fee of a day that is over counts in the lifetime spending
 /// only, and a release never starts a day. A release takes no figure below zero. The calls and
 /// the unpriced marks do not change otherwise. A sum that overflows is `Overflow`. `InvalidState`
-/// refuses what Core's decoder and `post_flight` refuse: a negative figure, a day that no time
-/// reaches, in the figures or as `day`, and figures, before or after the change, that leave no
-/// room for one more call or unit.
+/// refuses a negative figure, also a daily figure of an earlier day, which `post_flight` would
+/// first roll over to zero; a day that no time reaches, in the figures or as `day`; and figures,
+/// before or after the change, that leave no room for one more call or unit.
 pub fn charge_fee(
     state: &AllowitStandardState,
     day: u64,

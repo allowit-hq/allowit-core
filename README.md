@@ -56,8 +56,9 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `paid_service`: the paid-service hook. The default is none.
 - `settlement_service`: the settlement-service hook. The default is none.
 - `custom_wallet_build`: the "build custom wallet" hook. The default is none.
-- `message_signature`: the text-message signature with which a server signs its statements;
-  `MessageSignature::method` names the scheme. The default names none.
+- `message_signature`: the text-message signature with which a server signs its statements. The
+  default is no hook (`None`); a rail that gives the hook names its scheme with
+  `MessageSignature::method`, whose default refuses.
 - `Resources::require_live`: a contract wallet is live while its network holds its instance and its
   code; otherwise the refusal is `contract_expired`.
 
