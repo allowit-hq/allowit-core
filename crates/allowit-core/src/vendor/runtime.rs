@@ -133,6 +133,16 @@ pub struct Signature {
 pub trait Signer {
     fn identity(&self) -> &str;
     fn sign_hash(&self, digest: &[u8; 32]) -> Result<Vec<u8>>;
+    /// The signature of the exact `bytes`, for a rail whose transaction signature covers the
+    /// whole serialized message, not a 32-byte hash of it (Solana). The signer signs the bytes
+    /// as they are: it adds no prefix and hashes nothing. A signer that signs only hashes keeps
+    /// the default, which refuses.
+    fn sign_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>> {
+        let _ = bytes;
+        Err(crate::client::error::Error::unsupported(
+            "This signer signs only 32-byte hashes",
+        ))
+    }
 }
 /// The server's own accounts that send contract-wallet operations and code uploads and pay their
 /// network fees. The server holds their keys; a rail signs each transaction that one of them
@@ -143,6 +153,15 @@ pub trait SendingAccounts: Send + Sync {
     fn account(&self) -> Result<String>;
     /// The signature of `hash` by the key of `account`, as the rail's transaction signature.
     fn sign(&self, account: &str, hash: &[u8; 32]) -> Result<Vec<u8>>;
+    /// The signature of the exact `bytes` by the key of `account`, for a rail whose transaction
+    /// signature covers the whole serialized message (Solana). Same rules as
+    /// [`Signer::sign_bytes`]; the default refuses.
+    fn sign_bytes(&self, account: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        let _ = (account, bytes);
+        Err(crate::client::error::Error::unsupported(
+            "These sending accounts sign only 32-byte hashes",
+        ))
+    }
 }
 /// Existing portable Core evaluator. The server supplies only its admitted compiled policy.
 pub type Evaluator<'a> = &'a dyn Fn(&allowit::AllowitContext) -> allowit::Result;
@@ -783,6 +802,73 @@ mod tests {
         let text = serde_json::to_string(&full).unwrap();
         assert!(text.contains(r#""volumeDaily":7,"unpricedTotal":true,"unpricedDaily":true"#));
         assert_eq!(serde_json::from_str::<Accounting>(&text).unwrap(), full);
+    }
+    struct HashOnly;
+    impl Signer for HashOnly {
+        fn identity(&self) -> &str {
+            "hash-only"
+        }
+        fn sign_hash(&self, digest: &[u8; 32]) -> Result<Vec<u8>> {
+            Ok(digest.to_vec())
+        }
+    }
+    impl SendingAccounts for HashOnly {
+        fn account(&self) -> Result<String> {
+            Ok("hash-only".into())
+        }
+        fn sign(&self, _: &str, hash: &[u8; 32]) -> Result<Vec<u8>> {
+            Ok(hash.to_vec())
+        }
+    }
+    /// Signs the exact bytes it receives: the signature is the bytes reversed, so a test sees
+    /// that nothing hashed or prefixed them on the way.
+    struct Whole;
+    impl Signer for Whole {
+        fn identity(&self) -> &str {
+            "whole"
+        }
+        fn sign_hash(&self, digest: &[u8; 32]) -> Result<Vec<u8>> {
+            Signer::sign_bytes(self, digest)
+        }
+        fn sign_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>> {
+            Ok(bytes.iter().rev().copied().collect())
+        }
+    }
+    impl SendingAccounts for Whole {
+        fn account(&self) -> Result<String> {
+            Ok("whole".into())
+        }
+        fn sign(&self, account: &str, hash: &[u8; 32]) -> Result<Vec<u8>> {
+            SendingAccounts::sign_bytes(self, account, hash)
+        }
+        fn sign_bytes(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+            Ok(bytes.iter().rev().copied().collect())
+        }
+    }
+    #[test]
+    fn a_hash_only_signer_refuses_whole_messages() {
+        let message = [7u8; 200];
+        let signer: &dyn Signer = &HashOnly;
+        let error = signer.sign_bytes(&message).unwrap_err();
+        assert_eq!((error.code, error.config), (3, false));
+        assert_eq!(error.message, "This signer signs only 32-byte hashes");
+        let accounts: &dyn SendingAccounts = &HashOnly;
+        let error = accounts.sign_bytes("hash-only", &message).unwrap_err();
+        assert_eq!((error.code, error.config), (3, false));
+        assert_eq!(
+            error.message,
+            "These sending accounts sign only 32-byte hashes"
+        );
+        assert_eq!(signer.sign_hash(&[1; 32]).unwrap(), vec![1; 32]);
+    }
+    #[test]
+    fn a_whole_message_signer_receives_the_exact_bytes() {
+        let message: Vec<u8> = (0..=255u8).chain(0..100).collect();
+        let expected: Vec<u8> = message.iter().rev().copied().collect();
+        let signer: &dyn Signer = &Whole;
+        assert_eq!(signer.sign_bytes(&message).unwrap(), expected);
+        let accounts: std::sync::Arc<dyn SendingAccounts> = std::sync::Arc::new(Whole);
+        assert_eq!(accounts.sign_bytes("whole", &message).unwrap(), expected);
     }
     #[test]
     fn request_equality_never_equates_parse_failures() {
