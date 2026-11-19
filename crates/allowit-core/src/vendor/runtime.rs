@@ -58,11 +58,12 @@ pub enum Action {
 pub struct Terms {
     pub args: BTreeMap<String, PolicyValue>,
     pub expense: Option<Expense>,
-    /// Native units that the wallet repaid above the network fees of its earlier confirmed
-    /// operations, as the server's account of [`Fee::repaid_native_units`] less
-    /// [`Fee::native_units`] keeps them. A rail whose wallet repays the network fee subtracts them
-    /// from the gas that this operation repays, down to zero; the wallet counts what it repays.
-    /// Zero for a wallet that repays no gas.
+    /// Native units that the wallet repaid above its own shares of the network fees of its
+    /// earlier confirmed operations ([`Fee::repaid_native_units`]). The server keeps one carry for
+    /// each wallet: it gives the carry to `RuntimeProvider::settle_receipt` and stores the
+    /// [`Settlement::gas_carry`] that the rail returns. A rail whose wallet repays the network fee
+    /// subtracts the carry from the gas that this operation repays, down to zero; the wallet
+    /// counts what it repays. Zero for a wallet that repays no gas.
     pub gas_carry_units: u128,
 }
 #[derive(Clone, Debug)]
@@ -428,8 +429,9 @@ pub struct Fee {
     pub charged_units: i128,
     /// The native units that the wallet repaid to the transaction's source for the network fee
     /// in the same transaction. Zero for a failed transaction and for a wallet that repays no
-    /// gas. A confirmed operation moves the server's gas carry by this amount less
-    /// `native_units`.
+    /// gas. A confirmed operation moves its wallet's gas carry by this amount less the
+    /// operation's own share of `native_units`, which the rail allocates (all of it when the
+    /// transaction carries one operation); [`Settlement::gas_carry`] gives the result.
     pub repaid_native_units: u128,
 }
 /// What one executed operation adds to its wallet's figures, as the wallet counts it (Core's
@@ -456,8 +458,8 @@ pub enum OperationOutcome {
     /// the operation and its reservation, looks for its other envelopes
     /// (`RuntimeProvider::observe_authorizations`) and for its lapse (`RuntimeProvider::lapsed`),
     /// and releases it only on a settlement whose outcome is `Executed` or `Failed`, or on its
-    /// lapse. The fee of this settlement (`Settlement::fee_units`) is charged once, by its
-    /// `transaction`, and the reservation stays whole until the final settlement.
+    /// lapse. The fee of this settlement (`Settlement::fee_units`) is charged once for each
+    /// operation and `transaction`, and the reservation stays whole until the final settlement.
     Open,
 }
 /// What one receipt changes for one operation: its outcome, and the figures that a server keeps
@@ -475,9 +477,10 @@ pub struct Settlement {
     /// caller counts what [`Settlement::usage_for`] gives, never this field alone.
     pub usage: Option<Usage>,
     /// The network fee in native units that this operation's wallet is charged for the receipt's
-    /// transaction, as the rail defines it: zero when a settlement service or another party paid
-    /// the transaction's fee; for a transaction that carries several operations, this operation's
-    /// own share. It is the only fee figure that a caller prices.
+    /// transaction, as the rail defines it: zero when a settlement service or another party bears
+    /// the transaction's fee and the wallet pays none of it; what the wallet repaid when it repays
+    /// the party that paid the fee; for a transaction that carries several operations, this
+    /// operation's own share. It is the only fee figure that a caller prices.
     pub fee_units: u128,
     /// The gas that the wallet counted itself for this operation in the receipt's transaction, in
     /// installed-asset units, for a wallet that counts its own gas: zero when it counted none, as
@@ -486,13 +489,13 @@ pub struct Settlement {
     ///
     /// `None` for a wallet that counts no gas itself, as a keypair wallet: the caller prices
     /// `fee_units` with `ServerHooks::price_fee` (the wallet's asset) and charges the price to the
-    /// figures that it keeps with `accounting::charge_fee`, once for each `transaction`, in the
-    /// UTC day in which the operation was evaluated. A settlement whose outcome is `Executed` or
-    /// `Failed` is final: figures that hold a reserved fee bound for this operation, as a keypair
-    /// wallet's policy state does when its policy counts the fee, take the price less that
-    /// reservation (a negative difference releases the unused part), and figures without a
-    /// reservation take the price. An `Open` settlement charges the price to every figure that it
-    /// reaches and leaves the reservation whole for the final settlement.
+    /// figures that it keeps with `accounting::charge_fee`, once for each operation and
+    /// `transaction`, in the UTC day in which the operation was evaluated. A settlement whose
+    /// outcome is `Executed` or `Failed` is final: figures that hold a reserved fee bound for this
+    /// operation, as a keypair wallet's policy state does when its policy counts the fee, take the
+    /// price less that reservation (a negative difference releases the unused part), and figures
+    /// without a reservation take the price. An `Open` settlement charges the price to every
+    /// figure that it reaches and leaves the reservation whole for the final settlement.
     pub counted_gas: Option<i128>,
     /// The nonce of the wallet's next operation, for a wallet whose server keeps its replay state
     /// ([`Accounting::nonce`]): the nonce of `accounting` plus one after an executed operation,
@@ -500,10 +503,12 @@ pub struct Settlement {
     /// the call gives no `accounting`. `None` for a wallet that refuses a replay by itself, as a
     /// contract wallet, whatever `accounting` is.
     pub next_nonce: Option<u64>,
-    /// The server's gas carry after the receipt's transaction ([`Terms::gas_carry_units`]), in
-    /// native units: what the wallet has repaid above the network fees of its operations, as this
-    /// rail counts the receipt's fee. A rail whose wallets repay no gas returns the carry that it
-    /// took.
+    /// The wallet's gas carry after this operation ([`Terms::gas_carry_units`]), in native units:
+    /// after an executed operation, the `carry` that the call gave plus what the operation repaid
+    /// less its own share of the transaction's network fee, down to zero, as the rail allocates
+    /// that fee; otherwise the `carry` that the call gave. The caller stores it as the wallet's
+    /// carry and computes no carry of its own. A rail whose wallets repay no gas returns the carry
+    /// that it took.
     pub gas_carry: u128,
 }
 impl Settlement {
