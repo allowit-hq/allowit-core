@@ -241,7 +241,7 @@ mod tests {
     /// A title and a cause state no payment outcome, unless the retry kind is `settled`.
     fn word_rule(field: &str, text: &str, kind: Option<&str>) -> Option<&'static str> {
         const IDS: [&str; 2] = ["id", "ids"];
-        const PAYMENT: [&str; 19] = [
+        const PAYMENT: [&str; 23] = [
             "pay",
             "pays",
             "paying",
@@ -249,7 +249,10 @@ mod tests {
             "unpaid",
             "repay",
             "repays",
+            "repaying",
             "repaid",
+            "payment",
+            "payments",
             "settle",
             "settles",
             "settled",
@@ -260,10 +263,20 @@ mod tests {
             "charged",
             "refund",
             "refunds",
+            "refunding",
             "refunded",
         ];
-        const RETRY: [&str; 6] = ["retry", "retries", "retried", "resend", "resends", "resent"];
-        const OUTCOME: [&str; 13] = [
+        const RETRY: [&str; 8] = [
+            "retry",
+            "retries",
+            "retried",
+            "retrying",
+            "resend",
+            "resends",
+            "resending",
+            "resent",
+        ];
+        const OUTCOME: [&str; 14] = [
             "paid",
             "unpaid",
             "settle",
@@ -276,6 +289,7 @@ mod tests {
             "charged",
             "refund",
             "refunds",
+            "refunding",
             "refunded",
         ];
         let list = words(text);
@@ -469,6 +483,7 @@ mod tests {
                 code::CODE_HASH_MISMATCH,
                 code::TOOLCHAIN_MISSING,
                 code::BUILD_FAILED,
+                code::SOURCE_REJECTED,
                 code::BUILD_MISSING,
                 crate::vendor::owner_session::NETWORK_UNAVAILABLE,
             ] {

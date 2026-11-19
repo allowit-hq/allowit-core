@@ -32,15 +32,16 @@ export const namesReader = text => words(text).some(word => READER_WORDS.has(wor
 // The word rules, complete for their word lists: an entry's own words are checked word by word.
 // A step (`next`, `agent`) names no ID, no payment and no retry: the template of its retry kind says those.
 const ID_WORDS = new Set(['id', 'ids']);
-const PAYMENT_WORDS = new Set(['pay', 'pays', 'paying', 'paid', 'unpaid', 'repay', 'repays', 'repaid', 'settle', 'settles',
-  'settled', 'settling', 'settlement', 'settlements', 'unsettled', 'charged', 'refund', 'refunds', 'refunded']);
-const RETRY_WORDS = new Set(['retry', 'retries', 'retried', 'resend', 'resends', 'resent']);
+const PAYMENT_WORDS = new Set(['pay', 'pays', 'paying', 'paid', 'unpaid', 'repay', 'repays', 'repaying', 'repaid', 'payment',
+  'payments', 'settle', 'settles', 'settled', 'settling', 'settlement', 'settlements', 'unsettled', 'charged', 'refund',
+  'refunds', 'refunding', 'refunded']);
+const RETRY_WORDS = new Set(['retry', 'retries', 'retried', 'retrying', 'resend', 'resends', 'resending', 'resent']);
 // The agent's own step does not repeat anything either: "again" is a template's word there.
 const AGENT_WORDS = new Set(['again']);
 // A title and a cause state no payment outcome, unless the code means one: an entry of the retry kind `settled`. They may
 // say that the agent pays, or name a payment, but not that one was made, settled, charged or refunded.
 const OUTCOME_WORDS = new Set(['paid', 'unpaid', 'settle', 'settles', 'settled', 'settling', 'settlement', 'settlements', 'unsettled',
-  'charged', 'refund', 'refunds', 'refunded']);
+  'charged', 'refund', 'refunds', 'refunding', 'refunded']);
 export const RULES = {
   request: 'it names an ID: the request ID of a retry is in the template of the retry kind',
   payment: 'it names a payment or its outcome: payment steps are in the template of the retry kind',
@@ -101,6 +102,8 @@ export function checkErrorCatalogue(errors) {
   return errors;
 }
 
+/** The longest composed step: the entry's own words and the sentences of its template. */
+export const COMPOSED = 600;
 /** The sentences of a step, joined by one space. */
 const join = (...sentences) => sentences.filter(Boolean).join(' ');
 /**
@@ -114,7 +117,10 @@ export function composeErrorCatalogue(errors) {
     if (entry.retry === undefined) return entry;
     const template = errors.retry[entry.retry];
     const next = entry.for === 'agent' ? join(entry.next, template.owner) : entry.next;
-    return { ...entry, next, agent: join(template.first, entry.agent, template.then) };
+    const agent = join(template.first, entry.agent, template.then);
+    // A composed step is plain text of at most COMPOSED characters, as errors.rs reads it.
+    if (!plain(next, COMPOSED) || !plain(agent, COMPOSED)) throw new Error(`error catalogue entry ${JSON.stringify(entry.code)}: a composed step is plain text of at most ${COMPOSED} characters`);
+    return { ...entry, next, agent };
   });
   return { schemaVersion: errors.schemaVersion, helpPath: errors.helpPath, retry: errors.retry, entries };
 }

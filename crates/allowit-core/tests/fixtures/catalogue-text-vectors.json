@@ -39,7 +39,7 @@
     {
       "field": "agent",
       "text": "Send the payment again under a fresh one.",
-      "rule": "retry"
+      "rule": "payment"
     },
     {
       "field": "agent",
@@ -139,6 +139,36 @@
       "field": "cause",
       "text": "The credits were charged twice.",
       "rule": "payment"
+    },
+    {
+      "field": "next",
+      "text": "Make a second payment.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Keep retrying.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Resending is safe.",
+      "rule": "retry"
+    },
+    {
+      "field": "cause",
+      "text": "The refunding failed.",
+      "rule": "payment"
+    },
+    {
+      "field": "cause",
+      "text": "The payment network did not answer.",
+      "rule": null
+    },
+    {
+      "field": "agent",
+      "text": "Send it again under a fresh one.",
+      "rule": "retry"
     }
   ]
 }
