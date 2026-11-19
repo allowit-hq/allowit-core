@@ -79,10 +79,17 @@ const keypairChain: OwnerChain = {
   keypairSetup: {
     prepare: async ({ asset }) => ({ wallet: asset?.symbol ?? 'w', step: { action: 'a', payload: 'p', hash: 'h', expiresAt: 1 }, complete: signed => signed }),
     read: () => signedSetup,
+    checkAsset: (_payload, _network, asset) => {
+      if (asset?.symbol !== ownAsset.symbol) throw Object.assign(new Error('another asset'), { code: 'asset_mismatch' as ErrorCode });
+    },
     send: async () => 7,
     configuration: (network, wallet, owner, agent, server, asset) => ({ network, wallet, owner, agent, server, asset: asset ?? null }),
   },
 };
+keypairChain.keypairSetup?.checkAsset?.('p', 'example:testnet', reviewed.asset);
+keypairChain.keypairSetup?.checkAsset?.('p', 'example:testnet');
+// A rail written before the check has none: the earlier rail above still has the contract's type.
+void earlierRail.keypairSetup?.checkAsset;
 void keypairChain.keypairSetup?.prepare({ network: 'example:testnet', owner: 'o', agent: 'a', server: 's', amount: '1', asset: reviewed.asset });
 void keypairChain.keypairSetup?.prepare({ network: 'example:testnet', owner: 'o', agent: 'a', server: 's', amount: '1' });
 void keypairChain.keypairSetup?.configuration('example:testnet', 'w', 'o', 'a', 's', reviewedOwnAsset.asset);
