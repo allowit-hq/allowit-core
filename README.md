@@ -222,14 +222,15 @@ A call of a local function that writes a key counts as a write of that key; a fu
 writes only where it is called. A key that starts with `day_` lives one daily window; any other key lives until a
 later write replaces it. The keeper enforces the window: Core's evaluator reads the state map as it gets it, so the
 contract and the server each leave an ended value out of it. `derive` refuses a state call whose key is not a string
-literal of 1 to 32 ASCII letters, digits or `_`, and a write of a standard figure. The literal spells the key itself:
-a key with an escape, such as `"\x61"`, is refused.
+literal of 1 to 32 ASCII letters, digits or `_`, a write of a standard figure and a use of the stored day. The literal
+spells the key itself: a key with an escape, such as `"\x61"`, is refused.
 
 `Derived::figures` names the cumulated figures that the kept statements read, each daily or total: those of the
 kept canonical rules, and each standard figure that a kept statement reads with `get_state`. The wallet keeps
-those figures and the keys whose keeper is `chain`. A statement that reads the stored day (`get_state(ctx, "day")`)
-leaves: a contract wallet stores no day. The server evaluates the whole source on the wallet's values of those
-figures, as it does for a key that the chain keeps. The wallet gives a daily figure of its current window and
+those figures and the keys whose keeper is `chain`. No policy reads the stored day (`get_state(ctx, "day")`): a
+contract wallet stores no day, and it keeps its daily figures in a window of its own, so the day has no value that the
+chain and the server share. The server evaluates the whole source on the wallet's values of those figures, as it does
+for a key that the chain keeps. The wallet gives a daily figure of its current window and
 leaves an ended one out, so a direct read of `day_spent`, `day_total` or `day_unpriced` gets the same value on
 the chain and on the server.
 
@@ -449,7 +450,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.1", version = "0.14", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.2", version = "0.14", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

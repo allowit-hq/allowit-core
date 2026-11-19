@@ -59,9 +59,11 @@
 //! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
 //!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
-//! contract keeps each figure that a kept statement reads ([`Derived::figures`]). A read of the
-//! stored day, `allowit::get_state(ctx, "day")`, leaves: a contract wallet stores no day. No
-//! policy writes a standard figure.
+//! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
+//! writes a standard figure. No policy reads the stored day, `allowit::get_state(ctx, "day")`:
+//! a contract wallet stores no day, and it keeps its daily figures in a window of its own, so
+//! the day has no value that the chain and the server share. A policy reads the daily figures
+//! instead.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -88,7 +90,7 @@
 //!
 //! The contract must know each key before it runs, and Rust source cannot pass a state function
 //! as a value. So [`derive`] refuses a state call whose key is not a string literal of 1 to 32
-//! ASCII letters, digits or `_`, and a write of a standard figure.
+//! ASCII letters, digits or `_`, a write of a standard figure and a use of the stored day.
 //!
 //! [`derive`] also refuses a source that the rule cannot follow by its names, when a statement
 //! or a local item of it leaves: one that takes a mutable reference (`&mut`, `ref mut`), which
@@ -236,7 +238,7 @@ pub const DAILY_PREFIX: &str = "day_";
 pub const MAX_STATE_KEY_BYTES: usize = 32;
 
 /// The standard state keys: the figures, and `day`, the day of the last admitted operation. A
-/// contract wallet stores no day, so a statement that reads it leaves.
+/// contract wallet stores no day, so [`derive`] refuses a use of it.
 const STANDARD: &[&str] = &[
     allowit::CALLS,
     allowit::SPENT,
@@ -1219,8 +1221,8 @@ impl<'a> Parsed<'a> {
     }
 
     /// Every state call of the source. A use of `allowit::get_state` or `allowit::set_state`
-    /// that is no such call, a key that is no valid literal and a write of a standard figure
-    /// are refused.
+    /// that is no such call, a key that is no valid literal, a write of a standard figure and a
+    /// use of the stored day are refused.
     fn state_uses(&self) -> Result<Vec<StateUse>> {
         let mut uses = vec![];
         for at in 0..self.tokens.len() {
@@ -1246,6 +1248,11 @@ impl<'a> Parsed<'a> {
                     "The state key {key:?} (line {line}) is not 1 to {MAX_STATE_KEY_BYTES} ASCII letters, digits or `_`."
                 ));
             }
+            if key == allowit::DAY_KEY {
+                return Err(format!(
+                    "A policy cannot use the stored day \"day\" (`allowit::{name}`, line {line}): a contract wallet stores no day and keeps its daily figures in a window of its own. Read the daily figures instead, such as \"day_spent\"."
+                ));
+            }
             if writes && standard(key) {
                 return Err(format!(
                     "A policy cannot write the standard figure {key:?} (`allowit::set_state`, line {line}): the wallet keeps it. Use another key."
@@ -1261,11 +1268,10 @@ impl<'a> Parsed<'a> {
     }
 
     /// Whether token `i` starts a call that reads or writes policy state that the server
-    /// keeps: a key of the server, or the stored day, which no contract wallet stores.
+    /// keeps.
     fn state_at(&self, i: usize) -> bool {
-        self.state_use(i).is_some_and(|(_, key)| {
-            key == allowit::DAY_KEY || self.server_keys.borrow().contains(key)
-        })
+        self.state_use(i)
+            .is_some_and(|(_, key)| self.server_keys.borrow().contains(key))
     }
 
     fn server(&self, from: usize, to: usize, helpers: &HashSet<String>) -> bool {

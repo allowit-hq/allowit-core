@@ -1540,7 +1540,7 @@ fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
             ("day_unpriced", true)
         ]
     );
-    // A read of a standard key keeps that figure and no other; `day` keeps none.
+    // A read of a standard key keeps that figure and no other.
     let read = |key: &str| {
         figures(&format!(
             "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {{\n    let _figure: Option<AllowitValue> = allowit::get_state(ctx, \"{key}\")?;\n    Ok(())\n}}\n"
@@ -1556,24 +1556,29 @@ fn a_read_of_a_standard_figure_stays_and_the_wallet_keeps_the_figure() {
     ] {
         assert_eq!(read(key), [(key, daily)]);
     }
-    assert!(read("day").is_empty());
     // The stored day is the day of the last admitted operation. A contract wallet stores no
-    // day, so a statement that reads it leaves: only the server evaluates it.
+    // day and keeps its daily figures in a window of its own, so the day has no value that the
+    // chain and the server share: no policy reads it, in a statement that stays or in one that
+    // leaves, and no policy writes it.
     let day = source.replace(
         "    assert!(calls != Some(1_000));",
         "    let day: Option<u64> = allowit::get_state(ctx, \"day\")?;\n    assert!(day.is_none() || calls != Some(1_000));",
     );
     assert_ne!(day, source);
-    let derived = derive(&day).unwrap();
-    assert!(!derived.source.contains("\"day\"") && derived.source.contains("\"calls\""));
-    let [check] = &derived.server_only[..] else {
-        panic!("one check leaves");
-    };
-    assert_eq!(
-        (check.check.as_str(), check.cause, check.movable()),
-        ("assert", Cause::StoredState, false)
+    let served = day.replace(
+        "    let day: Option<u64>",
+        "    let answer = allowit::decision(ctx, &allowit::AllowitDecision { id: \"day\", query: \"Is today a working day?\", deny_below: 5000, allow_above: 5000 })?;\n    let day: Option<u64>",
     );
-    assert!(derived.state.is_empty());
+    assert_ne!(served, day);
+    let written = source.replace(
+        "    assert!(calls != Some(1_000));",
+        "    allowit::set_state(ctx, \"day\", 1u64)?;",
+    );
+    assert_ne!(written, source);
+    for refused in [&day, &served, &written] {
+        let error = derive(refused).unwrap_err();
+        assert!(error.contains("stored day \"day\""), "{error}");
+    }
 
     // A read that depends on a server function leaves, and keeps no figure for the contract.
     let served = source.replace(
@@ -1918,8 +1923,8 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
             kept
         };
         // The contract's state for one evaluation. The stored day is no policy-visible value of
-        // a contract: a statement that reads it leaves. The evaluator's own accounting of the
-        // daily figures still needs it, as a contract knows the window of its daily entry.
+        // a contract: no policy reads it. The evaluator's own accounting of the daily figures
+        // still needs it, as a contract knows the window of its daily entry.
         let on_chain_state = |state: &AllowitMap| {
             let mut kept = project(state);
             if let Some(day) = state.get("day") {
