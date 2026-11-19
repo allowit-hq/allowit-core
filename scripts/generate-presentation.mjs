@@ -764,6 +764,12 @@ export interface OwnerChain {
     /** \`amount\` is in the wallet's asset: \`asset\`, or the asset of the network itself without one. A caller can state none. */
     prepare(input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string; readonly asset?: WalletAsset | null | undefined }): Promise<PreparedKeypairSetup>;
     read(signedPayload: string, network: string): SignedKeypairSetup | null;
+    /**
+     * Checks that signed setup bytes set up a wallet of \`asset\`: the asset of the reviewed policy, or the asset of the
+     * network itself without one. Returns when they do. Throws an error whose \`code\` is \`asset_mismatch\` when they set
+     * up another asset or their asset cannot be read. The rail reads and compares the asset; a workflow only carries it.
+     */
+    checkAsset?(signedPayload: string, network: string, asset?: WalletAsset | null): void;
     /** Sends signed setup bytes: the ledger of the successful transaction, or null without a certain answer. */
     send(network: string, signedPayload: string, hash: string): Promise<number | null>;
     /** The installation document that the server registers for the account, with the asset that the wallet holds. */
