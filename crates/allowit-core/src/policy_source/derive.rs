@@ -228,7 +228,9 @@ pub struct StateEntry {
     ///
     /// The keeper enforces the window. The evaluator of this crate reads the state map as it
     /// gets it and carries every key forward: the contract and the server each leave an
-    /// ended value out of the state that they give to an evaluation.
+    /// ended value out of the state that they give to an evaluation
+    /// ([`crate::daily_window_open`]), and each keeps the window of a value after an operation
+    /// by [`crate::daily_window_end`], Core's portable rule.
     pub daily: bool,
     /// Who stores the value.
     pub keeper: Keeper,
@@ -236,6 +238,7 @@ pub struct StateEntry {
 
 /// The prefix of a state key whose value lives one daily window.
 pub const DAILY_PREFIX: &str = "day_";
+
 /// The most bytes of a state key.
 pub const MAX_STATE_KEY_BYTES: usize = 32;
 

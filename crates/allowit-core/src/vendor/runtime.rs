@@ -589,6 +589,11 @@ impl Receipt {
     pub fn info(&self) -> Result<ReceiptInfo> {
         self.0.provider.receipt_info(&self.0)
     }
+    /// When the receipt's operation settled, in Unix seconds, or `None` when the rail does not
+    /// state it ([`PacketProvider::receipt_settled_at`]).
+    pub fn settled_at(&self) -> Result<Option<u64>> {
+        self.0.provider.receipt_settled_at(&self.0)
+    }
 }
 /// Atomically reject a different signed packet under an existing operation ID.
 pub trait OperationStore {
@@ -770,6 +775,14 @@ pub trait PacketProvider: Send + Sync {
     fn same_snapshot(&self, a: &Snapshot, b: &Snapshot) -> Result<bool>;
     fn verify_receipt(&self, r: &Packet, p: &Packet) -> Result<()>;
     fn receipt_info(&self, p: &Packet) -> Result<ReceiptInfo>;
+    /// When the operation of the verified receipt `p` settled, in Unix seconds: the close time of
+    /// the ledger or block that holds its transaction, as the network states it in the receipt.
+    /// `None` when the rail does not state it; a caller then takes the time at which it first
+    /// retained the receipt, never a later time at which it processes it. The default states none.
+    fn receipt_settled_at(&self, p: &Packet) -> Result<Option<u64>> {
+        let _ = p;
+        Ok(None)
+    }
     /// The identity of an owner-signed packet ([`OwnerSigned::info`]). The default refuses.
     fn owner_signed_info(&self, p: &Packet) -> Result<OwnerSignedInfo> {
         let _ = p;
@@ -828,6 +841,62 @@ mod tests {
         fn receipt_info(&self, _: &Packet) -> Result<ReceiptInfo> {
             unreachable!()
         }
+    }
+    /// A rail that states when a receipt's operation settled, from the receipt's own document.
+    struct Dated;
+    static DATED: Dated = Dated;
+    impl PacketProvider for Dated {
+        fn request_id(&self, p: &Packet) -> Result<[u8; 32]> {
+            PROVIDER.request_id(p)
+        }
+        fn owner_info(&self, p: &Packet) -> Result<OwnerInfo> {
+            PROVIDER.owner_info(p)
+        }
+        fn prepared_metadata(&self, p: &Packet) -> Result<PreparedMetadata> {
+            PROVIDER.prepared_metadata(p)
+        }
+        fn info(&self, p: &Packet, k: Kind) -> Result<PacketInfo> {
+            PROVIDER.info(p, k)
+        }
+        fn validate_signed(&self, p: &Packet) -> Result<()> {
+            PROVIDER.validate_signed(p)
+        }
+        fn signed_preparation(&self, p: &Packet) -> Result<Prepared> {
+            PROVIDER.signed_preparation(p)
+        }
+        fn verify_consent(&self, s: &Snapshot, m: &str, g: &[Signature]) -> Result<()> {
+            PROVIDER.verify_consent(s, m, g)
+        }
+        fn signer_weight(&self, s: &Snapshot, i: &str) -> Result<u32> {
+            PROVIDER.signer_weight(s, i)
+        }
+        fn authority_document(&self, s: &Snapshot) -> Result<serde_json::Value> {
+            PROVIDER.authority_document(s)
+        }
+        fn same_snapshot(&self, a: &Snapshot, b: &Snapshot) -> Result<bool> {
+            PROVIDER.same_snapshot(a, b)
+        }
+        fn verify_receipt(&self, r: &Packet, p: &Packet) -> Result<()> {
+            PROVIDER.verify_receipt(r, p)
+        }
+        fn receipt_info(&self, p: &Packet) -> Result<ReceiptInfo> {
+            PROVIDER.receipt_info(p)
+        }
+        fn receipt_settled_at(&self, p: &Packet) -> Result<Option<u64>> {
+            let document: serde_json::Value = serde_json::from_str(p.document().get())
+                .map_err(|_| crate::client::error::Error::usage("unreadable receipt"))?;
+            Ok(document["closedAt"].as_u64())
+        }
+    }
+    /// A receipt states when its operation settled only when its rail states it: a rail without
+    /// the hook states none, and the caller takes the time at which it first retained the receipt.
+    #[test]
+    fn a_receipt_states_its_settlement_time_when_its_rail_does() {
+        let document = serde_json::json!({"closedAt": 1_795_000_000u64});
+        let plain = Receipt(Packet::new("test:network", &document, &PROVIDER).unwrap());
+        assert_eq!(plain.settled_at().unwrap(), None);
+        let dated = Receipt(Packet::new("test:network", &document, &DATED).unwrap());
+        assert_eq!(dated.settled_at().unwrap(), Some(1_795_000_000));
     }
     #[test]
     fn params_update_changes_only_installed_params_of_the_same_type() {
