@@ -442,6 +442,66 @@ pub struct Usage {
     pub spent_units: i128,
     pub unpriced: bool,
 }
+/// What a receipt of a transaction means for the operation that the transaction carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperationOutcome {
+    /// The transaction executed the operation: its effects and its figures count.
+    Executed,
+    /// The transaction failed, and no other transaction can carry the operation any more: it is
+    /// over and counts no effect.
+    Failed,
+    /// The transaction did not execute the operation, and another transaction can still carry
+    /// it, as another envelope of a contract wallet's authorization. The caller keeps the
+    /// operation and its reservation, looks for its other envelopes
+    /// (`RuntimeProvider::observe_authorizations`) and for its lapse (`RuntimeProvider::lapsed`),
+    /// and releases it only on a receipt whose outcome is `Executed` or `Failed`, or on its lapse.
+    Open,
+}
+/// What one receipt changes: the outcome of the operation, and the figures that a server keeps
+/// for the wallet beside those that the wallet keeps itself. The caller stores each value as the
+/// rail gives it, computes none of them, and applies one settlement once for each operation and
+/// `transaction`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Settlement {
+    /// The identity of the transaction that the receipt shows, in the rail's own bytes and length
+    /// (a hash, a signature): for a payment authorization that another party settles, that
+    /// party's transaction.
+    pub transaction: Vec<u8>,
+    pub outcome: OperationOutcome,
+    /// What the operation adds to its wallet's figures, as the wallet counts it ([`Usage`], its
+    /// gas included), for an executed operation of a rail that counts it. The caller adds it to
+    /// the figures that it keeps for the wallet with Core's post-flight, in the UTC day in which
+    /// the operation was evaluated: the day whose limits admitted it. `None` otherwise.
+    pub usage: Option<Usage>,
+    /// The gas that the wallet counted itself for the receipt's transaction, in installed-asset
+    /// units, for a wallet that counts its own gas: zero when its gas carry covered the repayment
+    /// or the transaction failed. It is a report; the caller charges no fee of its own for this
+    /// transaction. `None` for a wallet that counts no gas itself: the caller prices the receipt's
+    /// fee (`ServerHooks::charged_fee`) and charges it to the figures that it keeps.
+    pub counted_gas: Option<i128>,
+    /// The nonce of the wallet's next operation, for a wallet whose server keeps its replay state
+    /// ([`Accounting::nonce`]). `None` for a wallet that refuses a replay by itself.
+    pub next_nonce: Option<u64>,
+    /// The server's gas carry after the receipt's transaction ([`Terms::gas_carry_units`]), in
+    /// native units: what the wallet has repaid above the network fees of its operations, as this
+    /// rail counts the receipt's fee. A rail whose wallets repay no gas returns the carry that it
+    /// took.
+    pub gas_carry: u128,
+}
+/// The fee ceiling of an operation and the facts of its admission, as the server gives them to
+/// the rail's expense bound (`RuntimeProvider::expense`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeeCeiling {
+    /// The fee ceiling in the network's native units.
+    pub max_fee_units: u128,
+    /// The server's price of that ceiling in installed-asset units
+    /// (`ServerHooks::price_fee`).
+    pub gas_units: i128,
+    /// The ledger height that the server's admission read observed.
+    pub observed_height: u64,
+    /// The UTC day of the evaluation (`accounting::day`).
+    pub day: u64,
+}
 impl Receipt {
     pub fn verify_operation(&self, signed: &Signed) -> Result<()> {
         self.0.provider.verify_receipt(&self.0, &signed.0)
