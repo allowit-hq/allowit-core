@@ -11,7 +11,7 @@ pub use allowit::{
 
 /// The Python gate and host-compile helper from this package's released inputs.
 pub const PYTHON_HELPER: &str = include_str!("../resources/policy_source.py");
-/// The original helper terms. Embedding the helper grants no additional license.
+/// The helper's licence text: MIT, the licence of this repository.
 pub const PYTHON_HELPER_TERMS: &str = include_str!("../resources/policy-source-LICENSE");
 
 type Result<T> = std::result::Result<T, String>;

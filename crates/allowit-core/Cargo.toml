@@ -2,7 +2,7 @@
 name = "allowit-core"
 version.workspace = true
 edition.workspace = true
-license-file = "LICENSES.md"
+license = "MIT"
 description = "Shared host primitives for Allowit rail clients and SDK engines"
 repository.workspace = true
 
