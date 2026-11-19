@@ -1174,8 +1174,8 @@ fn an_arm_without_a_comma_leaves_alone() {
     );
     assert_ne!(continued, source);
     assert!(derive(&continued).unwrap().source.contains("400 => {},"));
-    // A `const` block and a macro with braces need no comma either.
-    for body in ["const {}", "matches! { ctx.request.amount, 1 }"] {
+    // A `const` block needs no comma either.
+    for body in ["const {}"] {
         let other = source
             .replace(
                 "1 => if allowit::new_decision_context(ctx, None).is_ok() {}\n",
@@ -1236,6 +1236,15 @@ fn a_const_fn_is_one_declaration() {
         derived.source.contains("const fn limit()")
             && derived.source.contains("assert!(limit() > 0)")
     );
+}
+
+/// A pattern that names a constructor of the language, such as `None`, binds no name: a
+/// later `None` keeps its open type.
+#[test]
+fn a_constructor_in_a_pattern_is_no_binding_of_a_fixed_type() {
+    let source = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    match ctx.request.token_out {\n        None => {}\n        _ => {}\n    }\n    let x = None;\n    let n = 1;\n    assert!(x != Some(n));\n    if allowit::new_decision_context(ctx, None).is_ok() {\n        let _typed: Option<u64> = x;\n    }\n    allowit::set_state(ctx, \"flag\", (n << 31) > 0)?;\n    Ok(())\n}\n";
+    source_shape_with_host_calls(source, REGISTRY).unwrap();
+    assert_eq!(keys(source), [("flag".to_owned(), Keeper::Server, false)]);
 }
 
 /// The `const` parameters of generic functions are no items: two of them with one name are

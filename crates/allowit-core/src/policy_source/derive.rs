@@ -80,8 +80,8 @@
 //! The derivation reads tokens, not a syntax tree, and ends each statement where the Rust
 //! parser ends it: a block-like statement (a branch, a loop, a block, a macro with braces, a
 //! `const` block) ends at its last `}` unless `.` or `?` follows, and any other statement ends
-//! at its `;`. A match arm with a block-like body, a `const` block or a macro with braces ends
-//! at its last `}` in the same way. So each
+//! at its `;`. A match arm whose body is block-like or a `const` block ends at its last `}` in
+//! the same way. So each
 //! statement, each item and each arm of a block is a step of its own. The on-chain part states
 //! `warn` where the source states the lint level `deny` or `forbid`: it leaves code out, and a
 //! lint level changes nothing that the policy does.
@@ -799,17 +799,11 @@ impl<'a> Parsed<'a> {
                                 self.text(start),
                                 "if" | "match" | "loop" | "while" | "for" | "{"
                             );
-                            // So does a `const` block, and a macro with braces.
-                            let braced = match (self.text(start), self.text(start + 1)) {
-                                ("const", "{") => self.close(start + 1),
-                                (_, "!")
-                                    if self.word(start).is_some()
-                                        && self.text(start + 2) == "{" =>
-                                {
-                                    self.close(start + 2)
-                                }
-                                _ => None,
-                            };
+                            // So does a `const` block. A macro with braces needs a comma there.
+                            let braced = (self.text(start) == "const"
+                                && self.text(start + 1) == "{")
+                                .then(|| self.close(start + 1))
+                                .flatten();
                             let exact = block_like
                                 .then(|| self.block_like_end(start, close))
                                 .flatten()
@@ -1686,9 +1680,14 @@ pub fn derive(source: &str) -> Result<Derived> {
                         !text.starts_with(|c: char| c.is_ascii_digit())
                             || SUFFIXES.iter().any(|suffix| text.ends_with(suffix))
                     }
+                    // The constructors of the language are no bindings, also where a pattern
+                    // names one: `None` has an open type.
                     Kind::Word => {
                         matches!(text, "true" | "false")
-                            || p.word(at).is_some_and(|name| known.contains(name))
+                            || p.word(at).is_some_and(|name| {
+                                known.contains(name)
+                                    && !matches!(name, "None" | "Some" | "Ok" | "Err")
+                            })
                     }
                     _ => false,
                 }
