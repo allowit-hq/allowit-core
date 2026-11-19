@@ -83,7 +83,7 @@
     },
     {
       "field": "agent",
-      "text": "Retry the payment.",
+      "text": "Retry the call.",
       "rule": "retry"
     },
     {
