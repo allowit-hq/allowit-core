@@ -734,6 +734,11 @@ pub const CONTRACT_EXPIRED: &str = "contract_expired";
 /// the proof of its lapse.
 pub const OWNER_TRANSACTION_EXPIRED: &str = "owner_transaction_expired";
 
+/// The problem code of an owner step's preparation whose reads of the ledger crossed more than
+/// one ledger: nothing was signed or retained, and the caller prepares the step once more with
+/// the same inputs.
+pub const STALE_OWNER_OBSERVATION: &str = "stale_owner_observation";
+
 /// Public failure information.
 #[derive(Clone, Debug)]
 pub struct Problem {
