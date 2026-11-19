@@ -51,6 +51,14 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - `paid_service`: the paid-service hook. The default is none.
 - `settlement_service`: the settlement-service hook. The default is none.
 - `custom_wallet_build`: the "build custom wallet" hook. The default is none.
+- `message_signature`: the text-message signature with which a server signs its statements;
+  `MessageSignature::method` names the scheme. The default names none.
+- `Resources::require_live`: a contract wallet is live while its network holds its instance and its
+  code; otherwise the refusal is `contract_expired`.
+
+`allowit_core::accounting` (feature `std`) is a host's account of the standard figures between
+operations, in Core's UTC days: `day` and `day_end` of a time, and `charge_fee`, the change of the
+figures by a fee that a receipt shows or by the release of an unused fee bound.
 
 ## Paid services and the marketplace catalog
 

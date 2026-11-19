@@ -391,6 +391,21 @@ pub struct Resources {
     pub wallet_present: bool,
     pub lifetime: Option<Lifetime>,
 }
+impl Resources {
+    /// Refuse a contract wallet that is not live: a wallet is live while the network holds both
+    /// its instance and its code. Without either, it takes no operation or owner step, and the
+    /// refusal is [`CONTRACT_EXPIRED`] (409). A keypair wallet has no code; its host does not ask.
+    pub fn require_live(&self) -> Result<()> {
+        if self.wallet_present && self.code_present {
+            return Ok(());
+        }
+        Err(crate::client::error::Error::refused(
+            409,
+            CONTRACT_EXPIRED,
+            "The wallet's instance or its code lapsed on its network. Nothing was signed or sent.",
+        ))
+    }
+}
 #[derive(Clone, Debug)]
 pub struct ReceiptInfo {
     pub transaction_hash: [u8; 32],
@@ -869,6 +884,22 @@ mod tests {
         assert_eq!(signer.sign_bytes(&message).unwrap(), expected);
         let accounts: std::sync::Arc<dyn SendingAccounts> = std::sync::Arc::new(Whole);
         assert_eq!(accounts.sign_bytes("whole", &message).unwrap(), expected);
+    }
+    /// A contract wallet is live only with its instance and its code; without either the
+    /// refusal is `contract_expired`.
+    #[test]
+    fn a_wallet_without_its_instance_or_its_code_is_not_live() {
+        let resources = |wallet_present, code_present| Resources {
+            code_present,
+            wallet_present,
+            lifetime: None,
+        };
+        assert!(resources(true, true).require_live().is_ok());
+        for (wallet, code) in [(true, false), (false, true), (false, false)] {
+            let refused = resources(wallet, code).require_live().unwrap_err();
+            assert_eq!(refused.api_code.as_deref(), Some(CONTRACT_EXPIRED));
+            assert_eq!(refused.status, Some(409));
+        }
     }
     #[test]
     fn request_equality_never_equates_parse_failures() {

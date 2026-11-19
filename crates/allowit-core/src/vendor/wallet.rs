@@ -23,6 +23,14 @@ pub trait MessageSignature: Sync {
         message: &str,
         signature: &[u8],
     ) -> Result<()>;
+    /// The name of this signature scheme, which a host states beside a statement that it asks a
+    /// wallet to sign, so that the wallet signs it as this rail's text message. The default
+    /// refuses: a rail names its scheme.
+    fn method(&self) -> Result<&'static str> {
+        Err(crate::client::error::Error::unsupported(
+            "This rail does not name its text-message signature",
+        ))
+    }
 }
 pub trait PrivateSigner: Send + Sync {
     fn address(&self) -> &str;
@@ -36,4 +44,27 @@ pub trait KeyProvider: Sync {
     fn derive(&self, entropy: &[u8]) -> Result<Box<dyn PrivateSigner>>;
     fn parse(&self, secret: &str) -> Result<Box<dyn PrivateSigner>>;
     fn validate_identity(&self, address: &str, public_key: &str, key_type: &str) -> Result<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// A rail that does not name its text-message signature is refused, never given a name.
+    #[test]
+    fn a_signature_without_a_name_is_refused() {
+        struct Unnamed;
+        impl MessageSignature for Unnamed {
+            fn sign_message(&self, _: &dyn Signer, _: &str) -> Result<Vec<u8>> {
+                unimplemented!()
+            }
+            fn verify_message(&self, _: &str, _: &str, _: &str, _: &[u8]) -> Result<()> {
+                unimplemented!()
+            }
+        }
+        let refused = Unnamed.method().unwrap_err();
+        assert_eq!(
+            refused.message,
+            "This rail does not name its text-message signature"
+        );
+    }
 }
