@@ -2043,5 +2043,9 @@ fn source_calls_lists_rules_and_host_calls_in_source_order() {
         ["call_limit", "payment_limit"]
     );
     assert_eq!(derive(split).unwrap().kept, ["payment_limit", "call_limit"]);
+    // A rule called with generic arguments is a call; a host function called so is not.
+    let turbofish = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::payment_limit::<>(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\n";
+    assert_eq!(source_calls(turbofish).unwrap().rules, ["payment_limit"]);
+    assert_eq!(derive(turbofish).unwrap().kept, ["payment_limit"]);
     assert!(source_calls("let s = \"unterminated;").is_err());
 }

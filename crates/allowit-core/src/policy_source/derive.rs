@@ -1494,19 +1494,27 @@ pub fn source_calls(source: &str) -> Result<SourceCalls> {
     let rules = param_keys();
     let mut calls = SourceCalls::default();
     for i in 0..parsed.tokens.len() {
-        if parsed.text(i.wrapping_sub(1)) == "::"
-            || parsed.text(i + 1) != "::"
-            || parsed.text(i + 3) != "("
-        {
+        if parsed.text(i.wrapping_sub(1)) == "::" || parsed.text(i + 1) != "::" {
             continue;
         }
         let (Some(namespace), Some(function)) = (parsed.word(i), parsed.word(i + 2)) else {
             continue;
         };
         if namespace == "allowit" {
-            if rules.contains(&function) && !calls.rules.iter().any(|rule| rule == function) {
+            // A canonical rule can take generic arguments: `allowit::payment_limit::<>(ctx, ...)`.
+            let called = match parsed.text(i + 3) {
+                "(" => true,
+                "::" if parsed.text(i + 4) == "<" => parsed
+                    .after_generics(i + 4)
+                    .is_some_and(|after| parsed.text(after) == "("),
+                _ => false,
+            };
+            if called && rules.contains(&function) && !calls.rules.iter().any(|r| r == function) {
                 calls.rules.push(function.to_owned());
             }
+            continue;
+        }
+        if parsed.text(i + 3) != "(" {
             continue;
         }
         let path = format!("{namespace}::{function}");
