@@ -1468,6 +1468,58 @@ fn own_lines(source: &str, start: usize, end: usize) -> (usize, usize) {
     (from, to)
 }
 
+/// The canonical rules and the host calls that a policy source calls, each in source order and
+/// without repetition, as [`derive`] reads the source.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceCalls {
+    /// The canonical rules that the source calls as `allowit::<rule>(...)`.
+    pub rules: Vec<String>,
+    /// The calls of a two-segment path `<namespace>::<function>(...)` that the portable profile
+    /// does not hold: the functions of the policy packages and rails that a host registers.
+    pub host_calls: Vec<String>,
+}
+
+/// The calls of `source` ([`SourceCalls`]). Comments and literals hold no call, a raw identifier
+/// names the same function as its plain spelling, and a path that is not called or that is the
+/// tail of a longer path is no call. A host takes the rules of its placements from here, so that
+/// every reader of a source sees the calls that the derivation sees.
+pub fn source_calls(source: &str) -> Result<SourceCalls> {
+    let parsed = Parsed {
+        source,
+        tokens: lex(source)?,
+        nodes: vec![],
+        server_keys: RefCell::default(),
+        item_scopes: RefCell::default(),
+    };
+    let rules = param_keys();
+    let mut calls = SourceCalls::default();
+    for i in 0..parsed.tokens.len() {
+        if parsed.text(i.wrapping_sub(1)) == "::"
+            || parsed.text(i + 1) != "::"
+            || parsed.text(i + 3) != "("
+        {
+            continue;
+        }
+        let (Some(namespace), Some(function)) = (parsed.word(i), parsed.word(i + 2)) else {
+            continue;
+        };
+        if namespace == "allowit" {
+            if rules.contains(&function) && !calls.rules.iter().any(|rule| rule == function) {
+                calls.rules.push(function.to_owned());
+            }
+            continue;
+        }
+        let path = format!("{namespace}::{function}");
+        if namespace.starts_with(|c: char| c.is_ascii_lowercase())
+            && !gate::portable_path(&path)
+            && !calls.host_calls.contains(&path)
+        {
+            calls.host_calls.push(path);
+        }
+    }
+    Ok(calls)
+}
+
 /// Derive the on-chain part of `source`. See the module text for the rule.
 ///
 /// `source` is server policy source that passed

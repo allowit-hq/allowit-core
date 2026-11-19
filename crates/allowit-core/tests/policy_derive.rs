@@ -2019,3 +2019,29 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
     }
     assert_eq!(wrote.values().filter(|count| **count > 0).count(), 7);
 }
+
+/// `source_calls` lists the canonical rules and the host calls of a source in source order, as
+/// the derivation reads them: a raw identifier names the same rule, a comment or a literal holds no
+/// call, whitespace and line breaks inside a path are part of the call, a longer path is no call
+/// of its tail, a path that is not called is no call, and a portable function such as
+/// `u64::from` is no host call.
+#[test]
+fn source_calls_lists_rules_and_host_calls_in_source_order() {
+    use allowit_core::policy_source::{SourceCalls, source_calls};
+    let source = "use allowit::prelude::*;\nuse allowit::AllowitDecision;\n// allowit::payment_limit(ctx) in a comment\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    /* allowit::tokens(ctx) /* catalog::quote(ctx) */ */\n    let text = \"allowit::destinations(ctx) catalog::quote(ctx)\";\n    let score = allowit::decision(ctx, &AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    if score < 9000 {\n        allowit::call_limit(ctx, &ctx.params[allowit::CALL_LIMIT])?;\n    }\n    allowit::r#payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    allowit :: call_limit (ctx, &ctx.params[allowit::CALL_LIMIT])?;\n    catalog\n        ::report(ctx)?;\n    outer::catalog::quote(ctx)?;\n    let f = allowit::tokens;\n    let n = u64::from(1u32);\n    assert!(text.len() > n as usize && f == f);\n    Ok(())\n}\n";
+    assert_eq!(
+        source_calls(source).unwrap(),
+        SourceCalls {
+            rules: vec!["call_limit".into(), "payment_limit".into()],
+            host_calls: vec!["catalog::report".into()],
+        }
+    );
+    // The rules that the on-chain part keeps are those of `Derived::kept`, in its order.
+    let split = "use allowit::prelude::*;\nuse allowit::AllowitDecision;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    let score = allowit::decision(ctx, &AllowitDecision { id: \"a\", query: \"Is this research?\", deny_below: 1, allow_above: 2 })?;\n    if score < 9000 {\n        allowit::call_limit(ctx, &ctx.params[allowit::CALL_LIMIT])?;\n    }\n    allowit::r#payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    allowit::call_limit(ctx, &ctx.params[allowit::CALL_LIMIT])?;\n    Ok(())\n}\n";
+    assert_eq!(
+        source_calls(split).unwrap().rules,
+        ["call_limit", "payment_limit"]
+    );
+    assert_eq!(derive(split).unwrap().kept, ["payment_limit", "call_limit"]);
+    assert!(source_calls("let s = \"unterminated;").is_err());
+}
