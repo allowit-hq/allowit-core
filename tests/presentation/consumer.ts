@@ -63,6 +63,20 @@ const earlierRail: OwnerChain = {
   },
 };
 void earlierRail;
+// A caller of the earlier contract states no asset, so a rail whose hooks require one does not have the type.
+const requiresAsset: OwnerChain = {
+  ...chain,
+  keypairSetup: {
+    read: () => signedSetupWithoutAsset,
+    send: async () => 7,
+    // @ts-expect-error The setup hook takes a request without an asset.
+    prepare: async (input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string; readonly asset: WalletAsset }) =>
+      ({ wallet: input.asset.symbol, step: { action: 'a', payload: 'p', hash: 'h', expiresAt: 1 }, complete: signed => signed }),
+    // @ts-expect-error The installation document is asked for without an asset too.
+    configuration: (network: string, wallet: string, owner: string, agent: string, server: string, asset: WalletAsset) => ({ network, wallet, owner, agent, server, asset: asset.symbol }),
+  },
+};
+void requiresAsset;
 const keypairChain: OwnerChain = {
   ...chain,
   keypairSetup: {

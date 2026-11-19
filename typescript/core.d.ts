@@ -724,13 +724,16 @@ export interface OwnerChain {
   expiredRecord(network: string, hash: string, signedPayload: string): Promise<{ readonly ledger: number } | null>;
   /** The steps of a keypair wallet's account, which one owner signature creates and funds. A rail without one omits it. */
   readonly keypairSetup?: {
-    /** `amount` is in the wallet's asset: `asset`, or the asset of the network itself without one. */
-    prepare(input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string; readonly asset?: WalletAsset | null }): Promise<PreparedKeypairSetup>;
+    /**
+     * `amount` is in the wallet's asset: `asset`, or the asset of the network itself without one. The two hooks
+     * that take the asset are function properties, so a rail whose hook requires an asset does not have this type.
+     */
+    readonly prepare: (input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string; readonly asset?: WalletAsset | null }) => Promise<PreparedKeypairSetup>;
     read(signedPayload: string, network: string): SignedKeypairSetup | null;
     /** Sends signed setup bytes: the ledger of the successful transaction, or null without a certain answer. */
     send(network: string, signedPayload: string, hash: string): Promise<number | null>;
     /** The installation document that the server registers for the account, with the asset that the wallet holds. */
-    configuration(network: string, wallet: string, owner: string, agent: string, server: string, asset?: WalletAsset | null): Record<string, unknown>;
+    readonly configuration: (network: string, wallet: string, owner: string, agent: string, server: string, asset?: WalletAsset | null) => Record<string, unknown>;
   };
   /** The owner's approval of a keypair wallet's policy: one message signature. A rail without one omits it. */
   readonly approval?: {
