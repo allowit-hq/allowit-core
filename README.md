@@ -450,7 +450,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.14.2", version = "0.14", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.15.0", version = "0.15", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
