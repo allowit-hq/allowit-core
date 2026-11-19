@@ -132,6 +132,8 @@ golden!(
     inferred_number => "inferred-number",
     pruned_type => "pruned-type",
     arm_without_comma => "arm-without-comma",
+    for_pattern => "for-pattern",
+    arm_generic_comma => "arm-generic-comma",
 );
 /// A package function has no host library here, so this shape does not compile in the test.
 const PACKAGE: (&str, &str) = (
@@ -1197,6 +1199,31 @@ fn an_arm_without_a_comma_leaves_alone() {
     );
 }
 
+/// The pattern of a `for` can hold braces, and a `,` between generic arguments ends no arm:
+/// both sources derive to a part that compiles (the golden test compiles it).
+#[test]
+fn a_for_pattern_with_braces_and_a_generic_comma_in_an_arm_derive_whole() {
+    for name in ["for-pattern", "arm-generic-comma"] {
+        let source = GOLDEN
+            .iter()
+            .find(|(golden, ..)| *golden == name)
+            .unwrap()
+            .1;
+        source_shape_with_host_calls(source, REGISTRY).unwrap();
+        assert_eq!(
+            keys(source),
+            [("flag".to_owned(), Keeper::Server, false)],
+            "{name}"
+        );
+    }
+    let arm = derive(include_str!("fixtures/derive/arm-generic-comma.rs")).unwrap();
+    assert!(
+        arm.source.contains("        1 => {},\n        _ => {}\n"),
+        "{}",
+        arm.source
+    );
+}
+
 /// The on-chain part leaves code out, so it states `warn` where the source states `deny` or
 /// `forbid`: a lint that turns unused code into an error could stop it from compiling.
 #[test]
@@ -1858,6 +1885,8 @@ fn the_on_chain_part_allows_what_the_whole_source_allows_with_the_same_state() {
         ("inferred-number", inferred_number::BOTH),
         ("pruned-type", pruned_type::BOTH),
         ("arm-without-comma", arm_without_comma::BOTH),
+        ("for-pattern", for_pattern::BOTH),
+        ("arm-generic-comma", arm_generic_comma::BOTH),
     ] {
         // The keys that the server keeps: the contract never holds them.
         let source = GOLDEN

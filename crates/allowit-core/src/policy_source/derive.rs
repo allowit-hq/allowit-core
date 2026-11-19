@@ -708,6 +708,13 @@ impl<'a> Parsed<'a> {
             .filter(|last| *last < end && !matches!(self.text(last + 1), "." | "?"))
     }
 
+    /// The `{` that opens the body of the `for` at token `p`. Its pattern can hold braces, as
+    /// in `for S { a, .. } in xs { ... }`, so the body comes after the value that follows `in`.
+    fn for_body(&self, p: usize, end: usize) -> Option<usize> {
+        let at = self.find(p + 1, end, &["in"])?;
+        self.body_after(at + 1, end)
+    }
+
     /// The last token of the branch statement whose keyword or `{` is token `p`, also when its
     /// header holds a block, which [`Parsed::branch`] does not split.
     fn block_like_end(&self, p: usize, end: usize) -> Option<usize> {
@@ -726,7 +733,8 @@ impl<'a> Parsed<'a> {
                     }
                 }
             }
-            "match" | "while" | "for" => self.close(self.body_after(p + 1, end)?),
+            "match" | "while" => self.close(self.body_after(p + 1, end)?),
+            "for" => self.close(self.for_body(p, end)?),
             "loop" if self.text(p + 1) == "{" => self.close(p + 1),
             "{" => self.close(p),
             _ => None,
@@ -813,7 +821,8 @@ impl<'a> Parsed<'a> {
                                 });
                             let stop = match exact {
                                 Some(last) => last + 1,
-                                None => self.find(body, close, &[","]).unwrap_or(close),
+                                // A `,` between generic arguments ends no arm.
+                                None => self.argument_end(body, close).unwrap_or(close),
                             };
                             if stop == body {
                                 return None;
@@ -828,7 +837,12 @@ impl<'a> Parsed<'a> {
                 }
             }
             "while" | "for" => {
-                let open = self.block_after(p + 1, end).filter(|open| *open > p + 1)?;
+                // The pattern of a `for` can hold braces: its value starts after `in`.
+                let from = match self.text(p) {
+                    "for" => self.find(p + 1, end, &["in"])? + 1,
+                    _ => p + 1,
+                };
+                let open = self.block_after(from, end).filter(|open| *open > from)?;
                 let close = self.close(open)?;
                 branch.headers.push((p + 1, open));
                 branch.blocks.push((open, close));
@@ -1338,6 +1352,7 @@ impl<'a> Parsed<'a> {
                 "loop" | "while" | "for" if self.tokens[i].kind == Kind::Word => {
                     let body = match self.text(i) {
                         "loop" => Some(i + 1).filter(|open| self.text(*open) == "{"),
+                        "for" => self.for_body(i, to),
                         _ => self.body_after(i + 1, to),
                     };
                     bodies.extend(body);
