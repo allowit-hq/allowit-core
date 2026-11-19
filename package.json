@@ -22,7 +22,6 @@
     "typescript/core.js",
     "typescript/core.d.ts",
     "typescript/canonical-functions.json",
-    "typescript/error-catalogue.json",
     "LICENSE"
   ],
   "scripts": {

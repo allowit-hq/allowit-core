@@ -276,12 +276,31 @@ A policy that needs another param or its own state uses the `custom` kind.
 
 ## Error catalogue
 
-[`error-catalogue.json`](typescript/error-catalogue.json) holds one entry for each typed error code that a server, a
-rail or a client sends. An entry has the code, who reads it (`owner`, `agent` or `operator`), a title, the cause in
-the owner's words, the owner's next step in the app, and the agent's next step when a terminal reader does
-something else; every entry for the agent has that step. Every host
-shows this text for the code and links the help page of the code, `<app origin>/help/<code>`. The sender's own text
-stays behind a details control in the app and behind `--verbose` in the CLI. A host holds no error text of its own.
+[`error-catalogue.json`](typescript/error-catalogue.json) is the source of the catalogue: one entry for each typed
+error code that a server, a rail or a client sends. An entry has the code, who reads it (`owner`, `agent` or
+`operator`), a title, the cause in the owner's words, the owner's next step in the app, the agent's next step when a
+terminal reader does something else, and a retry kind when its reader can send the request again or must not. Every
+entry for the agent has an agent step. Every host shows this text for the code and links the help page of the code,
+`<app origin>/help/<code>`. The sender's own text stays behind a details control in the app and behind `--verbose` in
+the CLI. A host holds no error text of its own.
+
+One code has one recovery: where the senders of a code need different recoveries, they send different codes.
+
+A retry kind says what happens to the request that the error answered:
+
+| Kind | The request |
+| --- | --- |
+| `same` | Has no final outcome, or the server answers it from its kept outcome: it goes again unchanged. |
+| `owner` | Keeps its outcome until the owner acts on the policy; then it goes again unchanged. |
+| `final` | Can have taken effect: the agent reads it first and sends a new one only once it ended without a payment. |
+| `settled` | Belongs to a purchase with a payment that settled or is settling: the agent does not pay for it again. |
+| `none` | Does not go again. |
+
+Each kind has one template in the source: the agent's sentences around the entry's own step, and the owner's sentence
+at the end of the owner's step of an entry for the agent. `scripts/generate-presentation.mjs` composes each step from
+the entry's own words and its template, and writes the composed catalogue to
+[`crates/allowit-core/resources/error-catalogue.json`](crates/allowit-core/resources/error-catalogue.json) and to
+`errorCatalogue` in the npm package. Hosts read only the composed catalogue.
 
 ```rust
 use allowit_core::errors;
@@ -302,10 +321,22 @@ The catalogue holds Allowit's own refusal codes. The reason codes of the payment
 a seller, such as `invalidReason` and `errorReason`, belong to that protocol and are not in the catalogue.
 
 A new typed code gets its entry in the same change that defines the code. `pnpm run check` refuses an entry with a
-missing or overlong text, a second entry for a code, or an unknown field. Catalogue text is printable
-ASCII, so a page, a terminal and a Rust host show it as written, and a title or a cause names no reader ("you"): an
-owner and an agent read the same entry. Each repository that defines codes or shows errors has a
-test that fails for a code without an entry.
+missing or overlong text, a second entry for a code, an unknown retry kind or an unknown field. Catalogue text is
+printable ASCII, so a page, a terminal and a Rust host show it as written, and a title or a cause names no reader
+("you"): an owner and an agent read the same entry.
+
+Only a template names a request ID, a payment or a retry. The generator and the Rust test check each word of an
+entry's own text against fixed word lists, so the check is complete for those lists:
+
+- A step (`next`, `agent`) has no ID word (`id`, `ids`), no payment word (`pay`, `paid`, `settle`, `settlement`,
+  `charged`, `refund` and their forms) and no retry word (`retry`, `resend` and their forms). The agent's step also
+  has no `again`.
+- A title and a cause have no payment outcome word (`paid`, `unpaid`, the forms of `settle`, `charged`, the forms of
+  `refund`), unless the code means a settled payment: retry kind `settled`.
+
+Both rule sets read the cases of
+[`catalogue-text-vectors.json`](crates/allowit-core/tests/fixtures/catalogue-text-vectors.json). Each repository that
+defines codes or shows errors has a test that fails for a code without an entry.
 
 ## Asset units
 

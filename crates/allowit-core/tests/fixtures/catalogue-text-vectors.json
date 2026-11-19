@@ -1,77 +1,144 @@
 {
-  "_comment": "Cases of the catalogue's text rules. scripts/error-catalogue.mjs and the tests of crates/allowit-core/src/errors.rs both read them: rule is outcome, original or null.",
+  "_comment": "Cases of the catalogue's word rules. scripts/error-catalogue.mjs and the tests of crates/allowit-core/src/errors.rs both read them: field is the field of the entry's own words, kind its retry kind, and rule request, payment, retry or null.",
   "cases": [
     {
-      "text": "Nothing was paid.",
-      "rule": "outcome"
+      "field": "cause",
+      "text": "The server refused it. Nothing was paid.",
+      "rule": "payment"
     },
     {
-      "text": "The server refused it. nothing is changed.",
-      "rule": "outcome"
-    },
-    {
-      "text": "No draft changed.",
-      "rule": "outcome"
-    },
-    {
-      "text": "The call was not made.",
-      "rule": "outcome"
-    },
-    {
+      "field": "cause",
       "text": "Nothing was lost.",
       "rule": null
     },
     {
+      "field": "cause",
       "text": "Nothing isomorphic was found.",
       "rule": null
     },
     {
-      "text": "Nothing was sentient.",
-      "rule": null
-    },
-    {
-      "text": "Nothing was paid_out.",
-      "rule": null
-    },
-    {
+      "field": "agent",
       "text": "Send it with a new request ID.",
-      "rule": "original"
+      "rule": "request"
     },
     {
-      "text": "Send it with a new request ID, then read the original request.",
-      "rule": "original"
-    },
-    {
-      "text": "Check the unoriginal request, then send a new request ID.",
-      "rule": "original"
-    },
-    {
-      "text": "Run allowit statuses, then send a new request ID.",
-      "rule": "original"
-    },
-    {
-      "text": "Read it with allowit status ID, then send a new request ID.",
-      "rule": null
-    },
-    {
-      "text": "Two new request IDs are listed.",
-      "rule": null
-    },
-    {
-      "text": "Read the original request with allowit status ID first, then use a new request ID.",
-      "rule": null
-    },
-    {
-      "text": "The agent checks the original request first, and sends a changed one with a new request ID.",
-      "rule": null
-    },
-    {
+      "field": "agent",
       "text": "Read the original request first, then use a new request ID.",
-      "rule": "original"
+      "rule": "request"
     },
     {
-      "text": "Send the original request unchanged, or use a new request ID for the new one.",
-      "rule": "original"
+      "field": "next",
+      "text": "The agent checks the original request first, and sends a changed one with a new request ID.",
+      "rule": "request"
+    },
+    {
+      "field": "cause",
+      "text": "The payment did not settle.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Send the payment again under a fresh one.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Run allowit POLICY_ID help.",
+      "rule": "request"
+    },
+    {
+      "field": "agent",
+      "text": "Use the ids from the results.",
+      "rule": "request"
+    },
+    {
+      "field": "agent",
+      "text": "Do not pay twice.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Pay_out the seller.",
+      "rule": "payment"
+    },
+    {
+      "field": "next",
+      "text": "A payment that settled is not repeated.",
+      "rule": "payment"
+    },
+    {
+      "field": "next",
+      "text": "The settlement ends soon.",
+      "rule": "payment"
+    },
+    {
+      "field": "agent",
+      "text": "Send the request again in a moment.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Resend the call.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Retry the payment.",
+      "rule": "retry"
+    },
+    {
+      "field": "next",
+      "text": "Sign in again.",
+      "rule": null
+    },
+    {
+      "field": "next",
+      "text": "Retry the step.",
+      "rule": "retry"
+    },
+    {
+      "field": "agent",
+      "text": "Ask the owner to answer the request.",
+      "kind": "owner",
+      "rule": null
+    },
+    {
+      "field": "cause",
+      "text": "The agent cannot pay from it.",
+      "rule": null
+    },
+    {
+      "field": "title",
+      "text": "This request ID already has a decision",
+      "rule": null
+    },
+    {
+      "field": "cause",
+      "text": "The facilitator settled this authorization.",
+      "rule": "payment"
+    },
+    {
+      "field": "cause",
+      "text": "The facilitator settled this authorization.",
+      "kind": "settled",
+      "rule": null
+    },
+    {
+      "field": "title",
+      "text": "This payment is already settled",
+      "kind": "final",
+      "rule": "payment"
+    },
+    {
+      "field": "title",
+      "text": "This payment is already settled",
+      "kind": "settled",
+      "rule": null
+    },
+    {
+      "field": "cause",
+      "text": "The credits were charged twice.",
+      "rule": "payment"
     }
   ]
 }
