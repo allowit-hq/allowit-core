@@ -430,10 +430,11 @@ The exported metadata hash identifies the exact JSON bytes shared by Rust and Ja
 params-update workflows with their journal and recovery rules. A rail supplies `ownerChain`: the network's
 `TransactionRecord` of a transaction, the record of an expired signed step, and, for a keypair wallet, the steps of
 its account setup (`prepare`, `read`, `send`, `configuration`) and the check of the owner's policy approval.
-A keypair wallet holds one asset. `WalletAsset` names it by its code and its issuer, as the policy does; an asset of
-the network itself has no issuer. The host states it in `ReviewedPolicy.asset`, the workflow hands it to `prepare`
-and `configuration`, and the rail reads it back from signed setup bytes (`SignedKeypairSetup.asset`). Without one,
-the wallet holds the asset of the network itself.
+A keypair wallet holds one asset. `WalletAsset` names it by its code and its issuer, as the policy does; the asset
+of the network itself has `issuer: null`. Every place of the asset is optional: the host can state it in
+`ReviewedPolicy.asset`, the workflow hands it to `prepare` and `configuration`, and a rail can read it back from
+signed setup bytes in `SignedKeypairSetup.asset`. A host or a rail that states none means the asset of the network
+itself.
 
 The owner-review types (`OwnerReviewSnapshot`, `OwnerReview`, `OwnerReviewRow`, `PastDecision`, `OwnerAnswer` and the
 types that they use) describe what a server answers about a request that waits for its policy owner and about a

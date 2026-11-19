@@ -42,6 +42,27 @@ const reviewed: ReviewedPolicy = { source: 's', params: {}, asset: walletAsset }
 const reviewedOwnAsset: ReviewedPolicy = { source: 's', params: {}, asset: null };
 const reviewedWithoutAsset: ReviewedPolicy = { source: 's', params: {} };
 const signedSetup: SignedKeypairSetup = { hash: 'h', owner: 'o', wallet: 'w', agent: 'a', server: 's', validUntil: 1, asset: ownAsset };
+// A rail that reads no asset from signed bytes states none: the read of an earlier release still has the type.
+const signedSetupWithoutAsset: SignedKeypairSetup = { hash: 'h', owner: 'o', wallet: 'w', agent: 'a', server: 's', validUntil: 1 };
+// A rail written before the asset: its hooks take no asset and read none, and they still have the contract's type.
+const earlierRail: OwnerChain = {
+  ...chain,
+  keypairSetup: {
+    prepare: async (input: { readonly network: string; readonly owner: string; readonly agent: string; readonly server: string; readonly amount: string }) =>
+      ({ wallet: input.owner, step: { action: 'a', payload: 'p', hash: 'h', expiresAt: 1 }, complete: signed => signed }),
+    read: () => signedSetupWithoutAsset,
+    send: async () => 7,
+    configuration: (network: string, wallet: string, owner: string, agent: string, server: string) => ({ network, wallet, owner, agent, server }),
+  },
+  approval: {
+    read: () => null,
+    holds: (_fields, _wallet, policy: { readonly source: string; readonly params: PolicyValues; readonly rules?: unknown; readonly tier?: unknown }) => policy.source === 's',
+    step: message => ({ action: 'a', payload: message, hash: 'h', expiresAt: 1 }),
+    walletOwner: async () => null,
+    signedBy: () => false,
+  },
+};
+void earlierRail;
 const keypairChain: OwnerChain = {
   ...chain,
   keypairSetup: {
