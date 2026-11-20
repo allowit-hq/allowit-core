@@ -2262,8 +2262,9 @@ fn a_leaving_statement_that_a_daily_value_of_the_chain_decides_is_refused() {
 /// The rule holds only for a daily value that the chain keeps. The server keeps a key whose
 /// write leaves and a key that only leaving statements read, and it holds an operation inside
 /// their window. A value that is not daily has no window. A standard daily figure follows the
-/// rule when the wallet keeps it and a statement that left reads it with `get_state`; its
-/// canonical rule needs no bound, because the figure only grows inside its window.
+/// rule when the wallet keeps it and a statement that left reads it, with `get_state` or with
+/// its canonical rule. The server gives a figure that no statement of the on-chain part reads
+/// or checks.
 #[test]
 fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_statement() {
     // The write depends on the question: the server keeps the key, and its reader leaves.
