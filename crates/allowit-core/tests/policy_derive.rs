@@ -2386,7 +2386,7 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         );
     };
     let expiry = "    allowit::expires_at(ctx, &ctx.params[allowit::EXPIRES_AT])?;\n";
-    // The expiry rule and a read of the time before the question stay on chain.
+    // The rule `expires_at` and a read of the time before the question stay on chain.
     let kept = daily_and_question(
         &format!("{expiry}    assert!(ctx.request.now > 1_700_000_000);\n"),
         "",
@@ -2429,7 +2429,7 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         "fn late(ctx: &AllowitContext) -> bool {\n    ctx.request.now % 86_400 > 43_200\n}\npub fn execute",
     );
     timed(&function, 13);
-    // The expiry rule that only the server runs, the time that it returns, and an approval on
+    // The rule `expires_at` that only the server runs, the time that it returns, and an approval on
     // the time before the question.
     timed(
         &daily_and_question("", &format!("    if score < 9000 {{\n    {expiry}    }}\n")),

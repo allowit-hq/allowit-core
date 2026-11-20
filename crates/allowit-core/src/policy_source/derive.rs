@@ -58,51 +58,61 @@
 //! starts with `day_` lives one daily window; any other key lives until a later write replaces
 //! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
 //!
-//! The chain keeps a daily value in a window of its own clock, and it does not run a statement
-//! that left. The server holds an operation inside the window of a value that it keeps itself,
-//! and the contract checks a kept statement again when it executes. Nothing holds the operation
-//! inside the window of a daily value of the chain that a statement that left depends on: the
-//! window can end between the server's evaluation and the execution, and the contract then
-//! admits what that statement would have judged otherwise. So [`derive`] refuses a source in
-//! which such a value reaches a statement that left. The value reaches it when the statement:
+//! # What a statement that only the server runs may read
 //!
-//! - reads the key, itself or through a local function that reads it;
-//! - reads a name that depends on the value: a name that a kept statement binds or can assign
-//!   when that statement reads the value or such a name, or stands in a branch or a loop on it;
-//! - stands in a branch or a loop of a kept statement that depends on the value, or in a loop
-//!   or a labeled block that encloses a kept statement which depends on the value and holds a
-//!   `break`, a `continue` or a `return` other than `return Err(...)`;
-//! - comes, in the text of `execute`, after a kept statement that depends on the value and
-//!   holds a `return` other than `return Err(...)`.
+//! A statement that left runs once, on the server, when the server prepares the operation. The
+//! ledger applies the operation later, and the contract runs only the on-chain part then. So a
+//! statement that left reads only what the ledger cannot judge differently at the settlement:
 //!
-//! A denial that depends on the value hides no statement: the contract denies again. The owner
-//! keeps the key on the server, by a write that depends on the server function, or moves the
-//! check before the server function, where the contract runs it too.
+//! 1. It may read what cannot change between the server's evaluation and the settlement: the
+//!    request's fields other than its time, the owner's params, constants, and a value that is
+//!    not daily (a lasting state key of either keeper, a total figure).
+//! 2. It may read and write a daily value that the server keeps: a `day_` key whose write
+//!    depends on a server function, and a daily figure that no statement of the on-chain part
+//!    reads or checks. The server judges that window at the ledger's time and ends the
+//!    operation with the window, so the operation settles inside the window that the server
+//!    evaluated.
+//! 3. It may not depend on a daily value that the contract keeps: a `day_` key whose keeper is
+//!    the chain, or a daily figure that the on-chain part reads or checks
+//!    ([`Derived::figures`]). The contract counts that window in its own clock and does not run
+//!    the statement again. Every call of a canonical daily rule on such a figure counts, also
+//!    one that only denies: its outcome is the figure's.
+//! 4. It may not depend on the time of the request: `ctx.request.now`, read from the request
+//!    or from a copy of it, or the value or the outcome of `allowit::expires_at`. The server
+//!    evaluates at the preparation, and the contract at the settlement ledger.
+//! 5. "Depends" is one reach rule for 3 and 4. The statement:
+//!    - reads the value, itself or through a local function that reads it;
+//!    - reads a name that depends on the value: a name that a kept statement binds or can
+//!      assign when that statement reads the value or such a name, or stands in a branch or a
+//!      loop on it;
+//!    - stands in a branch or a loop of a kept statement that depends on the value, or in a
+//!      loop or a labeled block that encloses a kept statement which depends on the value and
+//!      holds a `break`, a `continue` or a `return` other than `return Err(...)`;
+//!    - comes, in the text of `execute`, after a kept statement that depends on the value and
+//!      holds a `return` other than `return Err(...)`.
+//!
+//! [`derive`] refuses a source that breaks 3 or 4, and the refusal says what the owner does
+//! next: move the check before the server function, where the contract runs it too; keep a
+//! `day_` key on the server, by a write that depends on the server function; or keep a daily
+//! figure on the server, by leaving no rule and no read of it in the on-chain part. A denial
+//! that depends on the value hides no statement: the contract denies again.
 //!
 //! The rule refuses more than it must, never less. It follows names, as the whole derivation
-//! does, so it can refuse a statement that reads another value under the same name. And it does
-//! not follow where an exit leads: it resolves no label and no exclusive branch, so every loop
-//! and labeled block around such an exit counts, and every statement that left after such a
-//! `return` counts, also one that the exit could not skip. A name that a statement can assign
-//! counts as assigned by each dependent statement that mentions it. The owner states such an
-//! exit as a denial, moves the statement that needs the server out of the loop or before the
-//! exit, or uses another name.
+//! does, so it can refuse a statement that reads another value under the same name, such as a
+//! local value named `now` or a field `now` of another value. And it does not follow where an
+//! exit leads: it resolves no label and no exclusive branch, so every loop and labeled block
+//! around such an exit counts, and every statement that left after such a `return` counts, also
+//! one that the exit could not skip. A name that a statement can assign counts as assigned by
+//! each dependent statement that mentions it. The owner states such an exit as a denial, moves
+//! the statement that needs the server out of the loop or before the exit, or uses another
+//! name.
 //!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
 //! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
 //! writes a standard figure. No policy reads the stored day, `allowit::get_state(ctx, "day")`:
 //! a contract wallet stores no day, and it keeps its daily figures in a window of its own, so
 //! the day has no value that the chain and the server share. A policy reads the daily figures
-//! instead. A daily figure that the wallet keeps follows the rule of a daily value of the chain:
-//! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
-//! daily rule that only the server runs needs no such bound: the figure only grows inside its
-//! window, so the server judges at least the value that the execution finds. That holds for a
-//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement by itself, of
-//! `execute` or of a block of a statement that the derivation splits, whose `?` ends `execute`.
-//! Any other call of a canonical daily rule counts as one that gives a value of its figure,
-//! wherever it runs: a call whose result a larger expression uses, a call in a local function,
-//! where the caller can read the result or catch the denial, and a call inside a statement
-//! that is not split. A statement that left cannot depend on such a call either.
+//! instead.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
