@@ -208,7 +208,7 @@ a call declares the matching `Feature` skipped.
 | `update_params` | `UpdateParams` | The owner-signed params update of an active wallet, resume-safe under its request id. |
 | `verify` | `Verify` | A `Verification`: each `Comparison` of the owner's document with the ledger, and the `StateReadback` with the installed revision, params and `Counters`. |
 | `paired_export` | `PairedExport` | A `PairedExport`: the `HostPlacement` that the server evaluates and the `NativePlacement` that the wallet enforces. |
-| `native_wallet_asset` | `OwnerSetup` | The `NativeWalletAsset` (code and issuer) of a new Native wallet on the network, read and refused as `setup` reads and refuses it, before the setup asks for any signature. |
+| `native_wallet_asset` | none | The `NativeWalletAsset` (code and issuer) of a new Native wallet on the network, read and refused as `setup` reads and refuses it, before the setup asks for any signature. A rail with Native wallets implements it. |
 
 `Verification.matches` is true only when every comparison matches. `PairedExport::of` keeps evidence
 functions in the host placement for every wallet kind. A `native` or `simple` wallet enforces no rule
