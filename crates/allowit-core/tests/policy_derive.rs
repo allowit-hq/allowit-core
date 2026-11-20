@@ -2262,8 +2262,9 @@ fn a_leaving_statement_that_a_daily_value_of_the_chain_decides_is_refused() {
 /// The rule holds only for a daily value that the chain keeps. The server keeps a key whose
 /// write leaves and a key that only leaving statements read, and it holds an operation inside
 /// their window. A value that is not daily has no window. A standard daily figure follows the
-/// rule when the wallet keeps it and a statement that left reads it with `get_state`; its
-/// canonical rule needs no bound, because the figure only grows inside its window.
+/// rule when the wallet keeps it and a statement that left reads it, with `get_state` or with
+/// its canonical rule. The server gives a figure that no statement of the on-chain part reads
+/// or checks.
 #[test]
 fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_statement() {
     // The write depends on the question: the server keeps the key, and its reader leaves.
@@ -2292,25 +2293,25 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
     let error = derive(&daily_and_question(rule, read)).unwrap_err();
     assert!(
         error.contains("(line 11) depends on the daily figure \"day_spent\"")
-            && error.contains("canonical rule"),
+            && error.contains("Or keep the figure on the server"),
         "{error}"
     );
     // The wallet keeps no figure that only a statement that left reads: the server gives it.
     let derived = derive(&daily_and_question("", read)).unwrap();
     assert!(derived.figures.is_empty());
-    // The canonical rule in a branch on the question, beside the same rule on chain.
-    let ruled = daily_and_question(
-        rule,
-        "    if score < 9000 {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n",
-    );
-    let derived = derive(&ruled).unwrap();
-    assert_eq!(derived.server_only.len(), 2);
+    // The canonical rule in a branch on the question, beside the same rule on chain: also a
+    // rule that only denies takes its outcome from the figure that the wallet keeps.
+    let denies = "    if score < 9000 {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n";
+    let error = derive(&daily_and_question(rule, denies)).unwrap_err();
     assert!(
-        derived
-            .figures
-            .iter()
-            .any(|figure| figure.key == "day_spent")
+        error.contains("(line 12) depends on the daily figure \"day_spent\""),
+        "{error}"
     );
+    // The owner keeps the figure on the server instead: no rule and no read of it stays on
+    // chain, so the wallet keeps no figure and the server counts it.
+    let derived = derive(&daily_and_question("", denies)).unwrap();
+    assert!(derived.figures.is_empty());
+    assert_eq!(derived.server_only.len(), 2);
     // The amount that the kept rule leaves is a value of the figure.
     let left = daily_and_question(
         "    let left = allowit::daily_spending_limit(ctx, &ctx.params[allowit::DAILY_SPENDING_LIMIT])?;\n",
@@ -2357,22 +2358,8 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
         error.contains("depends on the daily figure \"day_spent\""),
         "{error}"
     );
-    // A rule that only denies `execute` is admitted behind an attribute too.
-    let attributed = daily_and_question(
-        rule,
-        "    if score < 9000 {\n        #[allow(unused_must_use)]\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n",
-    );
-    assert_eq!(derive(&attributed).unwrap().server_only.len(), 2);
-    // In a branch that is not split, because its value can be used, the derivation does not read
-    // the statements one by one: there the rule counts as one whose value can be used.
-    let whole = daily_and_question(
-        rule,
-        "    if score < 9000 {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    } else {\n        allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    };\n",
-    );
-    assert!(derive(&whole).is_err());
-    // A closure is no statement of `execute`: its `?` ends the closure, and the statement
-    // that calls it can catch the denial. The source gate admits no closure; the rule does not
-    // rely on that.
+    // So does a rule in a closure. The source gate admits no closure; the rule does not rely on
+    // that.
     let closure = daily_and_question(
         rule,
         "    let under = || -> allowit::Result {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n        Ok(())\n    };\n    assert!(score > 9000 || under().is_err());\n",
@@ -2381,5 +2368,108 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
     assert!(
         error.contains("depends on the daily figure \"day_spent\""),
         "{error}"
+    );
+}
+
+/// The time of the request is another value that the ledger judges at the settlement: the
+/// server runs a statement that left when it prepares the operation, and the contract reads the
+/// time of its ledger. A statement that left cannot depend on `ctx.request.now`, on the value or
+/// the outcome of `allowit::expires_at`, or on a name bound from either. A statement that stays
+/// reads the time freely: the contract runs it again.
+#[test]
+fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
+    let timed = |source: &str, line: u32| {
+        let error = derive(source).unwrap_err();
+        assert!(
+            error.contains(&format!("(line {line}) depends on the time of the request"))
+                && error.contains("Check the time in a statement that the contract runs too"),
+            "{error}"
+        );
+    };
+    let expiry = "    allowit::expires_at(ctx, &ctx.params[allowit::EXPIRES_AT])?;\n";
+    // The rule `expires_at` and a read of the time before the question stay on chain.
+    let kept = daily_and_question(
+        &format!("{expiry}    assert!(ctx.request.now > 1_700_000_000);\n"),
+        "",
+    );
+    let derived = derive(&kept).unwrap();
+    assert!(derived.kept.contains(&"expires_at".to_owned()));
+    // One time written under two keepers: the contract would keep the time of the settlement
+    // ledger, and the server the time of its evaluation.
+    let two = daily_and_question(
+        "    allowit::set_state(ctx, \"stamp\", ctx.request.now)?;\n",
+        "    if score < 9000 {\n        allowit::set_state(ctx, \"copy\", ctx.request.now)?;\n    }\n",
+    );
+    timed(&two, 12);
+    // A check of the time in one statement with the server value, and through a name. The `let`
+    // only reads, and only a statement that left reads its name, so the `let` leaves too.
+    timed(
+        &daily_and_question(
+            "",
+            "    assert!(score > 9000 || ctx.request.now % 2 == 0);\n",
+        ),
+        10,
+    );
+    timed(
+        &daily_and_question(
+            "    let at = ctx.request.now;\n",
+            "    assert!(score > 9000 || at % 2 == 0);\n",
+        ),
+        9,
+    );
+    // A pattern binds the field, under its own name or another, with no dotted read of the time
+    // and no call of the rule anywhere in the source; also in a local function. The `let` leaves
+    // with the statement that reads its name, as above.
+    timed(
+        &daily_and_question(
+            "    let AllowitRequest { now, .. } = &ctx.request;\n",
+            "    assert!(score > 9000 || *now < 1_800_000_000);\n",
+        ),
+        9,
+    );
+    timed(
+        &daily_and_question(
+            "    let AllowitRequest { now: at, .. } = &ctx.request;\n",
+            "    assert!(score > 9000 || *at < 1_800_000_000);\n",
+        ),
+        9,
+    );
+    let bound = daily_and_question("", "    assert!(score > 9000 || early(ctx));\n").replace(
+        "pub fn execute",
+        "fn early(ctx: &AllowitContext) -> bool {\n    let AllowitRequest { now, .. } = &ctx.request;\n    *now < 1_800_000_000\n}\npub fn execute",
+    );
+    timed(&bound, 14);
+    // A copy of the request, and a local function that reads the time.
+    timed(
+        &daily_and_question(
+            "    let request = ctx.request.clone();\n",
+            "    assert!(score > 9000 || request.now % 2 == 0);\n",
+        ),
+        11,
+    );
+    let function = daily_and_question("", "    assert!(score > 9000 || late(ctx));\n").replace(
+        "pub fn execute",
+        "fn late(ctx: &AllowitContext) -> bool {\n    ctx.request.now % 86_400 > 43_200\n}\npub fn execute",
+    );
+    timed(&function, 13);
+    // The rule `expires_at` that only the server runs, the time that it returns, and an approval on
+    // the time before the question.
+    timed(
+        &daily_and_question("", &format!("    if score < 9000 {{\n    {expiry}    }}\n")),
+        11,
+    );
+    timed(
+        &daily_and_question(
+            "    let left = allowit::expires_at(ctx, &ctx.params[allowit::EXPIRES_AT])?;\n    assert!(left > 0);\n",
+            "    assert!(score > 9000 || left > 60);\n",
+        ),
+        12,
+    );
+    timed(
+        &daily_and_question(
+            "    if ctx.request.now % 2 == 0 {\n        return Ok(());\n    }\n",
+            "",
+        ),
+        12,
     );
 }

@@ -272,20 +272,30 @@ contract and the server each leave an ended value out of it. `derive` refuses a 
 literal of 1 to 32 ASCII letters, digits or `_`, a write of a standard figure and a use of the stored day. The literal
 spells the key itself: a key with an escape, such as `"\x61"`, is refused.
 
-`derive` also refuses a source in which a daily value that the chain keeps reaches a statement that left. The chain
-keeps the value in a window of its own clock and does not run that statement again, so nothing holds the operation
-inside the window in which the server evaluated the statement. The value reaches a statement that left when the
-statement reads the key (also through a local function), reads a name that depends on the value, stands in a branch or
-a loop on it, stands in a loop or a labeled block that a kept statement can end or skip depending on the value, or comes
-after an approval that depends on it. A denial on the value hides nothing: the contract denies again. The rule refuses
-more than it must, never less: it follows names, and it does not follow where a `break`, a `continue` or an early
-`return` leads. The owner keeps the key on the server, by a write that depends on the server function, or moves the check
-before the server function. A daily figure that the wallet keeps follows the same rule for a read with `get_state`;
-a canonical rule that only denies (`allowit::daily_spending_limit(...)?;` as a statement by itself, of `execute` or of a
-block of a statement that the derivation splits) needs no bound, also when only the server runs it, because the figure
-only grows inside its window. Any other call of a canonical daily rule counts as one that gives a value of its figure:
-a call whose result a larger expression uses, a call in a local function, where the caller can read the result or catch
-the denial, and a call inside a statement that is not split. A statement that left cannot depend on such a call.
+`derive` also decides what a statement that only the server runs may read. Such a statement runs once, when the
+server prepares the operation; the ledger applies the operation later, and the contract runs only the on-chain part
+then.
+
+1. It may read what cannot change between the server's evaluation and the settlement: the request's fields other
+   than its time, the owner's params, constants, and a value that is not daily (a lasting state key of either keeper,
+   a total figure).
+2. It may read and write a `day_` key that the server keeps: a key whose write depends on a server function. It may
+   read or check, and no policy writes, a daily figure that the server keeps: one that no statement of the on-chain
+   part reads or checks. The server judges that window at the ledger's time and ends the operation with the window, so
+   the operation settles inside the window that the server evaluated.
+3. It may not depend on a daily value that the contract keeps: a `day_` key whose keeper is `chain`, or a daily figure
+   that the on-chain part reads or checks. The contract counts that window in ledgers and does not run the statement
+   again. Every call of a canonical daily rule on such a figure counts, also one that only denies.
+4. It may not depend on the time of the request: `ctx.request.now`, or the value or the outcome of
+   `allowit::expires_at`. The server evaluates at the preparation, and the contract at the settlement ledger. Every
+   use of the name `now` counts as the time, also one that a pattern binds.
+5. "Depends" is one reach rule for 3 and 4: the statement reads the value (also through a local function), reads a
+   name that a kept statement binds or can assign from it, stands in a branch or a loop on it or in a loop or labeled
+   block around a dependent exit, or follows a dependent approval. The rule refuses more than it must, never less: it
+   follows names, and it does not follow where a `break`, a `continue` or an early `return` leads. Each refusal says
+   what the owner does next: check the value in a statement that the contract runs too (before the server function,
+   and apart from the server's result), or keep a daily value on the server. A decision that only the server takes
+   cannot depend on the time.
 
 `daily_window_end` is the rule by which each keeper keeps the window of a daily value after an operation: a value
 that the operation left unchanged keeps its window, also an ended one, so a read renews nothing; a changed value keeps
@@ -582,7 +592,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.17.0", version = "0.17", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.18.0", version = "0.18", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

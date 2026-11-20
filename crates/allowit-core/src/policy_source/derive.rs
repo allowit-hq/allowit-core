@@ -58,51 +58,63 @@
 //! starts with `day_` lives one daily window; any other key lives until a later write replaces
 //! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
 //!
-//! The chain keeps a daily value in a window of its own clock, and it does not run a statement
-//! that left. The server holds an operation inside the window of a value that it keeps itself,
-//! and the contract checks a kept statement again when it executes. Nothing holds the operation
-//! inside the window of a daily value of the chain that a statement that left depends on: the
-//! window can end between the server's evaluation and the execution, and the contract then
-//! admits what that statement would have judged otherwise. So [`derive`] refuses a source in
-//! which such a value reaches a statement that left. The value reaches it when the statement:
+//! # What a statement that only the server runs may read
 //!
-//! - reads the key, itself or through a local function that reads it;
-//! - reads a name that depends on the value: a name that a kept statement binds or can assign
-//!   when that statement reads the value or such a name, or stands in a branch or a loop on it;
-//! - stands in a branch or a loop of a kept statement that depends on the value, or in a loop
-//!   or a labeled block that encloses a kept statement which depends on the value and holds a
-//!   `break`, a `continue` or a `return` other than `return Err(...)`;
-//! - comes, in the text of `execute`, after a kept statement that depends on the value and
-//!   holds a `return` other than `return Err(...)`.
+//! A statement that left runs once, on the server, when the server prepares the operation. The
+//! ledger applies the operation later, and the contract runs only the on-chain part then. So a
+//! statement that left reads only what the ledger cannot judge differently at the settlement:
 //!
-//! A denial that depends on the value hides no statement: the contract denies again. The owner
-//! keeps the key on the server, by a write that depends on the server function, or moves the
-//! check before the server function, where the contract runs it too.
+//! 1. It may read what cannot change between the server's evaluation and the settlement: the
+//!    request's fields other than its time, the owner's params, constants, and a value that is
+//!    not daily (a lasting state key of either keeper, a total figure).
+//! 2. It may read and write a `day_` key that the server keeps: a key whose write depends on a
+//!    server function. It may read or check, and no policy writes, a daily figure that the
+//!    server keeps: one that no statement of the on-chain part reads or checks. The server
+//!    judges that window at the ledger's time and ends the operation with the window, so the
+//!    operation settles inside the window that the server evaluated.
+//! 3. It may not depend on a daily value that the contract keeps: a `day_` key whose keeper is
+//!    the chain, or a daily figure that the on-chain part reads or checks
+//!    ([`Derived::figures`]). The contract counts that window in its own clock and does not run
+//!    the statement again. Every call of a canonical daily rule on such a figure counts, also
+//!    one that only denies: its outcome is the figure's.
+//! 4. It may not depend on the time of the request: `ctx.request.now`, read from the request
+//!    or from a copy of it or bound by a pattern, or the value or the outcome of
+//!    `allowit::expires_at`. The server evaluates at the preparation, and the contract at the
+//!    settlement ledger. Every use of the name `now` counts as the time.
+//! 5. "Depends" is one reach rule for 3 and 4. The statement:
+//!    - reads the value, itself or through a local function that reads it;
+//!    - reads a name that depends on the value: a name that a kept statement binds or can
+//!      assign when that statement reads the value or such a name, or stands in a branch or a
+//!      loop on it;
+//!    - stands in a branch or a loop of a kept statement that depends on the value, or in a
+//!      loop or a labeled block that encloses a kept statement which depends on the value and
+//!      holds a `break`, a `continue` or a `return` other than `return Err(...)`;
+//!    - comes, in the text of `execute`, after a kept statement that depends on the value and
+//!      holds a `return` other than `return Err(...)`.
+//!
+//! [`derive`] refuses a source that breaks 3 or 4, and the refusal says what the owner does
+//! next: check the value in a statement that the contract runs too, before the server function
+//! and apart from the server's result; keep a `day_` key on the server, by a write that depends
+//! on the server function; or keep a daily figure on the server, by leaving no rule and no read
+//! of it in the on-chain part. A decision that only the server takes cannot depend on the time. A denial
+//! that depends on the value hides no statement: the contract denies again.
 //!
 //! The rule refuses more than it must, never less. It follows names, as the whole derivation
-//! does, so it can refuse a statement that reads another value under the same name. And it does
-//! not follow where an exit leads: it resolves no label and no exclusive branch, so every loop
-//! and labeled block around such an exit counts, and every statement that left after such a
-//! `return` counts, also one that the exit could not skip. A name that a statement can assign
-//! counts as assigned by each dependent statement that mentions it. The owner states such an
-//! exit as a denial, moves the statement that needs the server out of the loop or before the
-//! exit, or uses another name.
+//! does, so it can refuse a statement that reads another value under the same name, such as a
+//! local value named `now` or a field `now` of another value. And it does not follow where an
+//! exit leads: it resolves no label and no exclusive branch, so every loop and labeled block
+//! around such an exit counts, and every statement that left after such a `return` counts, also
+//! one that the exit could not skip. A name that a statement can assign counts as assigned by
+//! each dependent statement that mentions it. The owner states such an exit as a denial, moves
+//! the statement that needs the server out of the loop or before the exit, or uses another
+//! name.
 //!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
 //! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
 //! writes a standard figure. No policy reads the stored day, `allowit::get_state(ctx, "day")`:
 //! a contract wallet stores no day, and it keeps its daily figures in a window of its own, so
 //! the day has no value that the chain and the server share. A policy reads the daily figures
-//! instead. A daily figure that the wallet keeps follows the rule of a daily value of the chain:
-//! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
-//! daily rule that only the server runs needs no such bound: the figure only grows inside its
-//! window, so the server judges at least the value that the execution finds. That holds for a
-//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement by itself, of
-//! `execute` or of a block of a statement that the derivation splits, whose `?` ends `execute`.
-//! Any other call of a canonical daily rule counts as one that gives a value of its figure,
-//! wherever it runs: a call whose result a larger expression uses, a call in a local function,
-//! where the caller can read the result or catch the denial, and a call inside a statement
-//! that is not split. A statement that left cannot depend on such a call either.
+//! instead.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -2355,17 +2367,20 @@ pub fn derive(source: &str) -> Result<Derived> {
         ));
     }
 
-    // A daily value that the chain keeps must not reach a statement that left: the contract
-    // counts the value's window in its own clock and does not run that statement again, so
-    // nothing holds the operation inside the window in which the server evaluated it. For
-    // each daily key that the server does not keep, find a statement that left and that the
-    // value can reach. [`finish`] refuses the source when the chain keeps that key.
+    // A statement that left runs once, on the server, when it prepares the operation. Two
+    // values can differ by the time the ledger applies the operation: a daily value that the
+    // chain keeps, whose window the contract counts in its own clock, and the time of the
+    // request, which the contract reads from the settlement ledger. Neither may reach a
+    // statement that left. For each such value, find a statement that left and that the value
+    // can reach. [`finish`] refuses the source for the time of the request, and for a daily
+    // value when the chain keeps it.
     let mut reaching: Vec<Reach> = vec![];
     if changed {
         let left = covered(&gone);
         let server_keys = p.server_keys.borrow().clone();
-        // The canonical rules that read the daily figure `key`: a call of one gives a value of
-        // the figure, as a read does, unless the statement discards that value.
+        // The canonical rules that read the daily figure `key`: every call of one gives a value
+        // of the figure, as a read does. Also a call that only denies: its outcome is the
+        // figure's.
         let rules_of = |key: &str| -> &'static [&'static str] {
             FIGURES
                 .iter()
@@ -2376,31 +2391,17 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // The rule calls that only deny `execute`: a call that is a statement by itself,
-        // `allowit::<rule>(...)?;` after its attributes, among the statements of `execute` and
-        // of the blocks of its split statements. Its `?` ends `execute` with the denial, and
-        // nothing reads what the rule returns. Every other call counts as one that can pass
-        // on the value or the outcome of the rule: a call inside a larger expression, a call
-        // in a local function, whose `?` only ends that function, and a call in a statement
-        // that is not split, where the derivation does not read the statements one by one.
-        let denying: HashSet<usize> = all
-            .iter()
-            .copied()
-            .filter(|id| in_execute(*id) && p.nodes[*id].shape == Shape::Whole)
-            .filter_map(|id| {
-                let (at, last) = (p.nodes[id].key, p.nodes[id].last);
-                p.allowit_path(at)?;
-                let paren = if p.text(at + 3) == "::" && p.text(at + 4) == "<" {
-                    p.after_generics(at + 4)?
-                } else {
-                    at + 3
-                };
-                let close = p.close(paren).filter(|_| p.text(paren) == "(")?;
-                (p.text(close + 1) == "?" && close + 2 == last && p.text(last) == ";").then_some(at)
-            })
-            .collect();
-        let discards = |i: usize| denying.contains(&i);
-        let daily: BTreeSet<&str> = uses
+        // A token that gives the time of the request: the name `now`, as a field that a
+        // statement reads from the request or from a copy of it, as a field that a pattern binds
+        // (`AllowitRequest { now, .. }`, `{ now: at, .. }`), or as a local name; and a call of
+        // the canonical rule `expires_at`, which compares the time with the owner's param.
+        let timed = |i: usize| {
+            (p.word(i) == Some("now") && p.text(i.wrapping_sub(1)) != "::")
+                || p.allowit_path(i) == Some("expires_at")
+        };
+        // The values that must not reach a statement that left: each daily key that the server
+        // does not keep, each daily figure that a rule reads, and the time of the request.
+        let values: Vec<&str> = uses
             .iter()
             .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
             .map(|state| state.key.as_str())
@@ -2408,11 +2409,12 @@ pub fn derive(source: &str) -> Result<Derived> {
             .chain(
                 FIGURES
                     .iter()
-                    .filter(|(figure, rules)| {
-                        figure.daily && (0..count).any(|i| ruled(i, rules) && !discards(i))
-                    })
+                    .filter(|(figure, rules)| figure.daily && (0..count).any(|i| ruled(i, rules)))
                     .map(|(figure, _)| figure.key),
             )
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .chain((0..count).any(&timed).then_some(REQUEST_TIME))
             .collect();
         // The local function whose own tokens hold token `i`: the innermost one.
         let function_of = |i: usize| {
@@ -2451,19 +2453,20 @@ pub fn derive(source: &str) -> Result<Derived> {
             .copied()
             .filter(|id| gone[*id] && step(*id))
             .collect();
-        for key in daily {
+        for key in values {
             // The tokens that give the value by themselves: each read of the key and, for a
-            // daily figure, each call of a canonical rule that reads it, unless that call only
-            // denies `execute`. A rule that only denies needs no bound, also when only the
-            // server runs it: the figure only grows inside its window, so the server judges at
-            // least the value that the execution finds.
+            // daily figure, each call of a canonical rule that reads it; for the time of the
+            // request, each read of it and each call of its rule.
             let rules = rules_of(key);
-            let reads: HashSet<usize> = uses
-                .iter()
-                .filter(|state| !state.writes && state.key == key)
-                .map(|state| state.at)
-                .chain((0..count).filter(|i| ruled(*i, rules) && !discards(*i)))
-                .collect();
+            let reads: HashSet<usize> = match key {
+                REQUEST_TIME => (0..count).filter(|i| timed(*i)).collect(),
+                _ => uses
+                    .iter()
+                    .filter(|state| !state.writes && state.key == key)
+                    .map(|state| state.at)
+                    .chain((0..count).filter(|i| ruled(*i, rules)))
+                    .collect(),
+            };
             // The local functions that read the key, themselves or through one that they call.
             let mut reading: HashSet<&str> =
                 reads.iter().filter_map(|at| function_of(*at)).collect();
@@ -2890,15 +2893,21 @@ pub fn derive(source: &str) -> Result<Derived> {
     )
 }
 
-/// A daily value that can reach a statement that left: its key, and the line of that statement.
+/// The name of the time of the request among the values that can reach a statement that left.
+/// No state key has this spelling.
+const REQUEST_TIME: &str = "ctx.request.now";
+
+/// A value that can reach a statement that left: the key of a daily value or [`REQUEST_TIME`],
+/// and the line of that statement.
 struct Reach {
     key: String,
     line: u32,
 }
 
 /// Check the derived policy, list the checks that it keeps and name the keeper of each state
-/// key. `uses` are the state calls of the owner's source. `reaching` are the daily values that
-/// can reach a statement that left: the source is refused when the chain keeps one of them.
+/// key. `uses` are the state calls of the owner's source. `reaching` are the values that can
+/// reach a statement that left: the source is refused for the time of the request, and for a
+/// daily value that the chain keeps.
 fn finish(
     original: &str,
     source: String,
@@ -2953,9 +2962,14 @@ fn finish(
     // it evaluated such a statement on that value.
     for reach in reaching {
         let Reach { key, line } = reach;
+        if key == REQUEST_TIME {
+            return Err(format!(
+                "A statement that only the server runs (line {line}) depends on the time of the request (`ctx.request.now`, or `allowit::expires_at`). The server runs that statement when it prepares the operation, and the wallet contract runs its part at the time of the ledger that settles it, so the two can judge differently. Check the time in a statement that the contract runs too: before the server function, and apart from the server's result. A decision that only the server takes cannot depend on the time."
+            ));
+        }
         if standard(key) && figures.iter().any(|figure| figure.key == key) {
             return Err(format!(
-                "A statement that only the server runs (line {line}) depends on the daily figure {key:?}, which the wallet contract keeps for a statement that it runs. The contract counts the figure's window in its own clock and does not run that statement again, so the server cannot hold its answer to that window. Move the statement before the server function, so that the contract runs it too, or check the figure with its canonical rule."
+                "A statement that only the server runs (line {line}) depends on the daily figure {key:?}, which the wallet contract keeps for a rule or a read in the part that it runs. The contract counts the figure's window in its own clock and does not run that statement again, so the server cannot hold its answer to that window. Move the statement before the server function, so that the contract runs it too. Or keep the figure on the server: leave no rule and no read of it in the part that the contract runs."
             ));
         }
         if !standard(key) && chain.contains(key.as_str()) {
