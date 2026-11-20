@@ -279,10 +279,10 @@ then.
 1. It may read what cannot change between the server's evaluation and the settlement: the request's fields other
    than its time, the owner's params, constants, and a value that is not daily (a lasting state key of either keeper,
    a total figure).
-2. It may read and write a daily value that the server keeps: a `day_` key whose write depends on a server function,
-   and a daily figure that no statement of the on-chain part reads or checks. The server judges that window at the
-   ledger's time and ends the operation with the window, so the operation settles inside the window that the server
-   evaluated.
+2. It may read and write a `day_` key that the server keeps: a key whose write depends on a server function. It may
+   read or check, and no policy writes, a daily figure that the server keeps: one that no statement of the on-chain
+   part reads or checks. The server judges that window at the ledger's time and ends the operation with the window, so
+   the operation settles inside the window that the server evaluated.
 3. It may not depend on a daily value that the contract keeps: a `day_` key whose keeper is `chain`, or a daily figure
    that the on-chain part reads or checks. The contract counts that window in ledgers and does not run the statement
    again. Every call of a canonical daily rule on such a figure counts, also one that only denies.
