@@ -264,11 +264,11 @@ statement reads the key (also through a local function), reads a name that depen
 a loop on it, or comes after an approval that depends on it. A denial on the value hides nothing: the contract denies
 again. The owner keeps the key on the server, by a write that depends on the server function, or moves the check
 before the server function. A daily figure that the wallet keeps follows the same rule for a read with `get_state`;
-a canonical rule that only denies (`allowit::daily_spending_limit(...)?;` as a statement of `execute` by itself) needs
+a canonical rule that only denies (`allowit::daily_spending_limit(...)?;` as a statement by itself in `execute`) needs
 no bound, also when only the server runs it, because the figure only grows inside its window. Any other call of a
-canonical daily rule gives a value of its figure: a call whose result a larger statement uses, and every call in a local
-function or a closure, where the caller can read the result or catch the denial. A statement that left cannot depend
-on such a call.
+canonical daily rule gives a value of its figure: a call whose result a larger expression uses, and every call in a
+local function, where the caller can read the result or catch the denial. A statement that left cannot depend on such a
+call.
 
 `daily_window_end` is the rule by which each keeper keeps the window of a daily value after an operation: a value
 that the operation left unchanged keeps its window, also an ended one, so a read renews nothing; a changed value keeps

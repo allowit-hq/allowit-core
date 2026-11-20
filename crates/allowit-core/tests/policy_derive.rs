@@ -2232,6 +2232,17 @@ fn a_leaving_statement_that_a_daily_value_of_the_chain_decides_is_refused() {
     reaches(&looped, "day_n", 14);
     // A denial on the counter stands before the question in the plain policy: it is admitted.
     assert!(derive(&daily_and_question("", "")).is_ok());
+    // A `break` on the counter ends its own loop only: a question in the loop around it is
+    // asked as often with any counter. A `break` to the label of that outer loop ends it.
+    let inner = format!(
+        "    'rounds: for _ in 0..2u64 {{\n        for _ in 0..3u64 {{\n            if n > 2 {{\n                break;\n            }}\n        }}\n        let known = {question};\n        assert!(known > 5000);\n    }}\n"
+    );
+    assert!(derive(&daily_and_question(&inner, "")).is_ok());
+    let outer = inner.replace(
+        "                break;\n",
+        "                break 'rounds;\n",
+    );
+    reaches(&daily_and_question(&outer, ""), "day_n", 15);
 }
 
 /// The rule holds only for a daily value that the chain keeps. The server keeps a key whose
@@ -2332,20 +2343,16 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
         error.contains("depends on the daily figure \"day_spent\""),
         "{error}"
     );
-    // So can a closure, in one statement with the server value.
-    let closure = daily_and_question(
-        rule,
-        "    let under = || -> allowit::Result {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n        Ok(())\n    };\n    assert!(score > 9000 || under().is_err());\n",
-    );
-    let error = derive(&closure).unwrap_err();
-    assert!(
-        error.contains("depends on the daily figure \"day_spent\""),
-        "{error}"
-    );
     // A rule that only denies `execute` is admitted behind an attribute too.
     let attributed = daily_and_question(
         rule,
         "    if score < 9000 {\n        #[allow(unused_must_use)]\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n",
     );
     assert_eq!(derive(&attributed).unwrap().server_only.len(), 2);
+    // And in a branch that leaves whole, because its value can be used.
+    let whole = daily_and_question(
+        rule,
+        "    if score < 9000 {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    } else {\n        allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    };\n",
+    );
+    assert_eq!(derive(&whole).unwrap().server_only.len(), 3);
 }

@@ -70,7 +70,7 @@
 //! - reads a name that depends on the value: a name that a kept statement binds or can assign
 //!   when that statement reads the value or such a name, or stands in a branch or a loop on it;
 //! - stands in a branch or a loop of a kept statement that depends on the value, or in a loop
-//!   that such a statement can end with `break`, `continue` or `return`;
+//!   that such a statement can end or skip with `break`, `continue` or `return`;
 //! - comes after a kept statement that depends on the value and holds a `return` other than
 //!   `return Err(...)`.
 //!
@@ -89,11 +89,11 @@
 //! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
 //! daily rule that only the server runs needs no such bound: the figure only grows inside its
 //! window, so the server judges at least the value that the execution finds. That holds for a
-//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement of `execute`
-//! by itself, whose `?` ends `execute`. Any other call of a canonical daily rule gives a value
-//! of its figure, wherever it runs: a call whose result a larger statement uses, and every call
-//! in a local function or a closure, where the caller can read the result or catch the denial.
-//! A statement that left cannot depend on such a call either.
+//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement by itself in
+//! `execute`, whose `?` ends `execute`. Any other call of a canonical daily rule gives a value
+//! of its figure, wherever it runs: a call whose result a larger expression uses, and every
+//! call in a local function, where the caller can read the result or catch the denial. A
+//! statement that left cannot depend on such a call either.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -1383,6 +1383,14 @@ impl<'a> Parsed<'a> {
 
     /// Whether the tokens hold a `break` or `continue` of a loop that encloses them.
     fn breaks(&self, from: usize, to: usize) -> bool {
+        !self.exits(from, to).is_empty()
+    }
+
+    /// Each `break` or `continue` in the tokens that can end or skip a statement that encloses
+    /// them, with its label: `None` for one without a label, which ends or skips the nearest
+    /// enclosing loop. One with a label counts also when its loop stands inside the tokens.
+    fn exits(&self, from: usize, to: usize) -> Vec<Option<&'a str>> {
+        let mut exits = vec![];
         let mut loops: Vec<bool> = vec![];
         // The `{` of each loop body. A block in the header of a loop, such as the iterated
         // value of `for _ in { ... } {}`, runs outside the loop: an exit there ends an
@@ -1403,16 +1411,19 @@ impl<'a> Parsed<'a> {
                     loops.pop();
                 }
                 "break" | "continue" if self.tokens[i].kind == Kind::Word => {
-                    let labeled =
-                        self.tokens.get(i + 1).map(|token| token.kind) == Some(Kind::Lifetime);
-                    if labeled || !loops.contains(&true) {
-                        return true;
+                    let label = self
+                        .tokens
+                        .get(i + 1)
+                        .filter(|token| token.kind == Kind::Lifetime)
+                        .map(|_| self.text(i + 1));
+                    if label.is_some() || !loops.contains(&true) {
+                        exits.push(label);
                     }
                 }
                 _ => {}
             }
         }
-        false
+        exits
     }
 
     /// Whether the initializer in `from..to` only reads: an owner param, a request field, a
@@ -2367,28 +2378,26 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // The rule calls that only deny `execute`: a call that is a statement of `execute` by
-        // itself, `allowit::<rule>(...)?;`, after its attributes. Its `?` ends `execute` with the
-        // denial, and nothing reads what the rule returns. Every other call can pass on the
-        // value or the outcome of the rule: a call inside a larger statement, and any call in
-        // a local function or a closure, whose `?` only ends that function.
-        let denying: HashSet<usize> = all
-            .iter()
-            .copied()
-            .filter(|id| in_execute(*id) && p.nodes[*id].shape == Shape::Whole)
-            .filter_map(|id| {
-                let (at, last) = (p.nodes[id].key, p.nodes[id].last);
-                p.allowit_path(at)?;
-                let open = if p.text(at + 3) == "::" && p.text(at + 4) == "<" {
-                    p.after_generics(at + 4)?
-                } else {
-                    at + 3
-                };
-                let close = p.close(open).filter(|_| p.text(open) == "(")?;
-                (p.text(close + 1) == "?" && close + 2 == last && p.text(last) == ";").then_some(at)
-            })
-            .collect();
-        let discards = |i: usize| denying.contains(&i);
+        // Whether the rule call at token `i` only denies `execute`: it is a statement by itself,
+        // `allowit::<rule>(...)?;` after its attributes, in `execute` and outside every local
+        // function. Its `?` ends `execute` with the denial, because the gate admits no closure,
+        // and nothing reads what the rule returns. Every other call can pass on the value or
+        // the outcome of the rule: a call inside a larger expression, and any call in a local
+        // function, whose `?` only ends that function.
+        let discards = |i: usize| {
+            let paren = if p.text(i + 3) == "::" && p.text(i + 4) == "<" {
+                p.after_generics(i + 4)
+            } else {
+                Some(i + 3)
+            };
+            (open..last).contains(&i)
+                && !in_local_fn(i)
+                && matches!(p.before_attributes(i), "{" | "}" | ";")
+                && paren
+                    .filter(|at| p.text(*at) == "(")
+                    .and_then(|at| p.close(at))
+                    .is_some_and(|close| p.text(close + 1) == "?" && p.text(close + 2) == ";")
+        };
         let daily: BTreeSet<&str> = uses
             .iter()
             .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
@@ -2494,16 +2503,47 @@ pub fn derive(source: &str) -> Result<Derived> {
                             names.extend(p.word(i).map(str::to_owned));
                         }
                     }
-                    // An exit other than a denial decides which statements of its loops run.
-                    let exits = ranges
+                    // An exit other than a denial decides which statements of the loops that it
+                    // ends or skips run: a `return` those of every enclosing loop, a `break` or
+                    // `continue` those of the nearest loop, or of each loop up to its label.
+                    let returns = ranges.iter().any(|(from, to)| p.returns(*from, *to));
+                    let exits: Vec<Option<&str>> = ranges
                         .iter()
-                        .any(|(from, to)| p.returns(*from, *to) || p.breaks(*from, *to));
+                        .flat_map(|(from, to)| p.exits(*from, *to))
+                        .collect();
+                    let mut enclosing = vec![];
                     let mut parent = p.nodes[id].parent;
-                    while let Some(at) = parent.filter(|_| exits) {
+                    while let Some(at) = parent.filter(|_| returns || !exits.is_empty()) {
                         if p.nodes[at].is_loop {
-                            depends[at] = true;
+                            enclosing.push(at);
                         }
                         parent = p.nodes[at].parent;
+                    }
+                    let label = |at: usize| {
+                        let key = p.nodes[at].key;
+                        (key >= 2
+                            && p.tokens[key - 2].kind == Kind::Lifetime
+                            && p.text(key - 1) == ":")
+                            .then(|| p.text(key - 2))
+                    };
+                    let ended = |exit: &Option<&str>| match exit {
+                        // A `break` without a label ends a loop, never a labeled block.
+                        None => enclosing.iter().position(|at| {
+                            matches!(p.text(p.nodes[*at].key), "while" | "for" | "loop")
+                        }),
+                        Some(name) => enclosing.iter().position(|at| label(*at) == Some(*name)),
+                    };
+                    let reach = match returns {
+                        true => enclosing.len(),
+                        false => exits
+                            .iter()
+                            .filter_map(ended)
+                            .map(|at| at + 1)
+                            .max()
+                            .unwrap_or(0),
+                    };
+                    for at in &enclosing[..reach] {
+                        depends[*at] = true;
                     }
                 }
                 if names.len() + depends.iter().filter(|d| **d).count() == before {
