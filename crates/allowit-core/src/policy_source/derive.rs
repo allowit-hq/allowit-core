@@ -58,12 +58,51 @@
 //! starts with `day_` lives one daily window; any other key lives until a later write replaces
 //! it ([`StateEntry::daily`]). [`Derived::state`] lists every key with its keeper.
 //!
+//! The chain keeps a daily value in a window of its own clock, and it does not run a statement
+//! that left. The server holds an operation inside the window of a value that it keeps itself,
+//! and the contract checks a kept statement again when it executes. Nothing holds the operation
+//! inside the window of a daily value of the chain that a statement that left depends on: the
+//! window can end between the server's evaluation and the execution, and the contract then
+//! admits what that statement would have judged otherwise. So [`derive`] refuses a source in
+//! which such a value reaches a statement that left. The value reaches it when the statement:
+//!
+//! - reads the key, itself or through a local function that reads it;
+//! - reads a name that depends on the value: a name that a kept statement binds or can assign
+//!   when that statement reads the value or such a name, or stands in a branch or a loop on it;
+//! - stands in a branch or a loop of a kept statement that depends on the value, or in a loop
+//!   or a labeled block that encloses a kept statement which depends on the value and holds a
+//!   `break`, a `continue` or a `return` other than `return Err(...)`;
+//! - comes, in the text of `execute`, after a kept statement that depends on the value and
+//!   holds a `return` other than `return Err(...)`.
+//!
+//! A denial that depends on the value hides no statement: the contract denies again. The owner
+//! keeps the key on the server, by a write that depends on the server function, or moves the
+//! check before the server function, where the contract runs it too.
+//!
+//! The rule refuses more than it must, never less. It follows names, as the whole derivation
+//! does, so it can refuse a statement that reads another value under the same name. And it does
+//! not follow where an exit leads: it resolves no label and no exclusive branch, so every loop
+//! and labeled block around such an exit counts, and every statement that left after such a
+//! `return` counts, also one that the exit could not skip. A name that a statement can assign
+//! counts as assigned by each dependent statement that mentions it. The owner states such an
+//! exit as a denial, moves the statement that needs the server out of the loop or before the
+//! exit, or uses another name.
+//!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
 //! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
 //! writes a standard figure. No policy reads the stored day, `allowit::get_state(ctx, "day")`:
 //! a contract wallet stores no day, and it keeps its daily figures in a window of its own, so
 //! the day has no value that the chain and the server share. A policy reads the daily figures
-//! instead.
+//! instead. A daily figure that the wallet keeps follows the rule of a daily value of the chain:
+//! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
+//! daily rule that only the server runs needs no such bound: the figure only grows inside its
+//! window, so the server judges at least the value that the execution finds. That holds for a
+//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement by itself, of
+//! `execute` or of a block of a statement that the derivation splits, whose `?` ends `execute`.
+//! Any other call of a canonical daily rule counts as one that gives a value of its figure,
+//! wherever it runs: a call whose result a larger expression uses, a call in a local function,
+//! where the caller can read the result or catch the denial, and a call inside a statement
+//! that is not split. A statement that left cannot depend on such a call either.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -2316,6 +2355,229 @@ pub fn derive(source: &str) -> Result<Derived> {
         ));
     }
 
+    // A daily value that the chain keeps must not reach a statement that left: the contract
+    // counts the value's window in its own clock and does not run that statement again, so
+    // nothing holds the operation inside the window in which the server evaluated it. For
+    // each daily key that the server does not keep, find a statement that left and that the
+    // value can reach. [`finish`] refuses the source when the chain keeps that key.
+    let mut reaching: Vec<Reach> = vec![];
+    if changed {
+        let left = covered(&gone);
+        let server_keys = p.server_keys.borrow().clone();
+        // The canonical rules that read the daily figure `key`: a call of one gives a value of
+        // the figure, as a read does, unless the statement discards that value.
+        let rules_of = |key: &str| -> &'static [&'static str] {
+            FIGURES
+                .iter()
+                .find(|(figure, _)| figure.daily && figure.key == key)
+                .map_or(&[], |(_, rules)| *rules)
+        };
+        let ruled = |i: usize, rules: &[&str]| {
+            p.allowit_path(i)
+                .is_some_and(|function| rules.contains(&function))
+        };
+        // The rule calls that only deny `execute`: a call that is a statement by itself,
+        // `allowit::<rule>(...)?;` after its attributes, among the statements of `execute` and
+        // of the blocks of its split statements. Its `?` ends `execute` with the denial, and
+        // nothing reads what the rule returns. Every other call counts as one that can pass
+        // on the value or the outcome of the rule: a call inside a larger expression, a call
+        // in a local function, whose `?` only ends that function, and a call in a statement
+        // that is not split, where the derivation does not read the statements one by one.
+        let denying: HashSet<usize> = all
+            .iter()
+            .copied()
+            .filter(|id| in_execute(*id) && p.nodes[*id].shape == Shape::Whole)
+            .filter_map(|id| {
+                let (at, last) = (p.nodes[id].key, p.nodes[id].last);
+                p.allowit_path(at)?;
+                let paren = if p.text(at + 3) == "::" && p.text(at + 4) == "<" {
+                    p.after_generics(at + 4)?
+                } else {
+                    at + 3
+                };
+                let close = p.close(paren).filter(|_| p.text(paren) == "(")?;
+                (p.text(close + 1) == "?" && close + 2 == last && p.text(last) == ";").then_some(at)
+            })
+            .collect();
+        let discards = |i: usize| denying.contains(&i);
+        let daily: BTreeSet<&str> = uses
+            .iter()
+            .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
+            .map(|state| state.key.as_str())
+            .filter(|key| !server_keys.contains(*key))
+            .chain(
+                FIGURES
+                    .iter()
+                    .filter(|(figure, rules)| {
+                        figure.daily && (0..count).any(|i| ruled(i, rules) && !discards(i))
+                    })
+                    .map(|(figure, _)| figure.key),
+            )
+            .collect();
+        // The local function whose own tokens hold token `i`: the innermost one.
+        let function_of = |i: usize| {
+            local_fns
+                .iter()
+                .filter(|f| (f.tokens.0..f.tokens.1).contains(&i))
+                .min_by_key(|f| f.tokens.1 - f.tokens.0)
+                .map(|f| f.name)
+        };
+        // The names that the patterns of a split statement bind: those of the arms of a
+        // `match`, of a `for` and of each `let` in a condition.
+        let patterns = |id: usize| -> Vec<(usize, usize)> {
+            let node = &p.nodes[id];
+            if node.shape != Shape::Split {
+                return vec![];
+            }
+            let mut found = vec![];
+            if p.text(node.key) == "match" {
+                found.extend(node.headers.iter().skip(1).copied());
+            } else if p.text(node.key) == "for"
+                && let Some((from, to)) = node.headers.first().copied()
+            {
+                found.push((from, p.find(from, to, &["in"]).unwrap_or(to)));
+            }
+            for (from, to) in &node.headers {
+                for at in (*from..*to).filter(|i| p.text(*i) == "let") {
+                    found.push((at + 1, p.find(at + 1, *to, &["="]).unwrap_or(*to)));
+                }
+            }
+            found
+        };
+        let step = |id: usize| in_execute(id) && p.nodes[id].shape != Shape::Item;
+        // The steps of `execute` that left, in source order.
+        let leaving: Vec<usize> = order
+            .iter()
+            .copied()
+            .filter(|id| gone[*id] && step(*id))
+            .collect();
+        for key in daily {
+            // The tokens that give the value by themselves: each read of the key and, for a
+            // daily figure, each call of a canonical rule that reads it, unless that call only
+            // denies `execute`. A rule that only denies needs no bound, also when only the
+            // server runs it: the figure only grows inside its window, so the server judges at
+            // least the value that the execution finds.
+            let rules = rules_of(key);
+            let reads: HashSet<usize> = uses
+                .iter()
+                .filter(|state| !state.writes && state.key == key)
+                .map(|state| state.at)
+                .chain((0..count).filter(|i| ruled(*i, rules) && !discards(*i)))
+                .collect();
+            // The local functions that read the key, themselves or through one that they call.
+            let mut reading: HashSet<&str> =
+                reads.iter().filter_map(|at| function_of(*at)).collect();
+            let mut pending: Vec<&str> = reading.iter().copied().collect();
+            while let Some(callee) = pending.pop() {
+                for caller in callers_of.get(callee).into_iter().flatten() {
+                    if reading.insert(caller) {
+                        pending.push(caller);
+                    }
+                }
+            }
+            // A token that gives the value: a read of the key, or a call of such a function.
+            let gives =
+                |i: usize| reads.contains(&i) || called_at(i).is_some_and(|f| reading.contains(f));
+            // The statements that stay and depend on the value, and the names that they bind or
+            // can assign: a statement that reads the value or such a name, every statement in
+            // a branch or a loop on it, and every statement of a loop that such a statement can
+            // end.
+            let mut names: HashSet<String> = HashSet::new();
+            let mut depends = vec![false; p.nodes.len()];
+            loop {
+                let before = names.len() + depends.iter().filter(|d| **d).count();
+                for id in order.iter().copied().filter(|id| !gone[*id] && step(*id)) {
+                    let ranges = own(id);
+                    let direct = ranges.iter().any(|(from, to)| {
+                        (*from..*to).any(&gives) || p.mentions(*from, *to, &names)
+                    });
+                    let inside = p.nodes[id].parent.is_some_and(|parent| depends[parent]);
+                    if !(direct || inside || depends[id]) {
+                        continue;
+                    }
+                    depends[id] = true;
+                    names.extend(p.nodes[id].names.iter().cloned());
+                    for (from, to) in patterns(id) {
+                        names.extend(p.bound(from, to));
+                    }
+                    for i in ranges.iter().flat_map(|(from, to)| *from..*to) {
+                        if p.names(i, &mutable) {
+                            names.extend(p.word(i).map(str::to_owned));
+                        }
+                    }
+                    // An exit other than a denial decides which statements of the enclosing
+                    // loops and labeled blocks run. The rule does not resolve which of them the
+                    // exit ends or skips: every one of them depends on the value.
+                    let exits = ranges
+                        .iter()
+                        .any(|(from, to)| p.returns(*from, *to) || p.breaks(*from, *to));
+                    let mut parent = p.nodes[id].parent;
+                    while let Some(at) = parent.filter(|_| exits) {
+                        if p.nodes[at].is_loop {
+                            depends[at] = true;
+                        }
+                        parent = p.nodes[at].parent;
+                    }
+                }
+                if names.len() + depends.iter().filter(|d| **d).count() == before {
+                    break;
+                }
+            }
+            // A statement that left reads the value, itself or through a local function that
+            // it calls, or reads a name that depends on it. A read in a local function counts
+            // where a statement calls the function, never by its declaration alone.
+            let reads_it = (open..last)
+                .find(|i| left[*i] && !in_local_fn(*i) && (gives(*i) || p.names(*i, &names)))
+                .map(|i| {
+                    // The line of the statement that holds the read.
+                    leaving
+                        .iter()
+                        .rev()
+                        .find(|id| (p.nodes[**id].first..=p.nodes[**id].last).contains(&i))
+                        .map_or(p.tokens[i].start, |id| p.tokens[p.nodes[*id].first].start)
+                });
+            // A statement that left stands in a branch or a loop that depends on the value.
+            let stands_in = || {
+                leaving.iter().copied().find(|id| {
+                    let mut parent = p.nodes[*id].parent;
+                    while let Some(at) = parent {
+                        if depends[at] {
+                            return true;
+                        }
+                        parent = p.nodes[at].parent;
+                    }
+                    false
+                })
+            };
+            // A statement that left comes after an approval or another early end of `execute`
+            // that depends on the value.
+            let follows = || {
+                let first = order
+                    .iter()
+                    .copied()
+                    .filter(|id| depends[*id])
+                    .filter(|id| own(*id).iter().any(|(from, to)| p.returns(*from, *to)))
+                    .map(|id| p.nodes[id].first)
+                    .min()?;
+                leaving
+                    .iter()
+                    .copied()
+                    .find(|id| p.nodes[*id].first > first)
+            };
+            let at = reads_it.or_else(|| {
+                stands_in()
+                    .or_else(follows)
+                    .map(|id| p.tokens[p.nodes[id].first].start)
+            });
+            if let Some(at) = at {
+                reaching.push(Reach {
+                    key: key.to_owned(),
+                    line: p.line(at),
+                });
+            }
+        }
+    }
+
     // The text: each topmost leaving statement leaves once.
     let bytes = |id: usize| {
         (
@@ -2432,6 +2694,7 @@ pub fn derive(source: &str) -> Result<Derived> {
             vec![],
             &uses,
             &HashSet::new(),
+            &[],
         );
     }
 
@@ -2616,11 +2879,26 @@ pub fn derive(source: &str) -> Result<Derived> {
     }
     server_only.sort_by_key(|check| check.line);
     let server_keys = p.server_keys.borrow().clone();
-    finish(source, derived, left, server_only, &uses, &server_keys)
+    finish(
+        source,
+        derived,
+        left,
+        server_only,
+        &uses,
+        &server_keys,
+        &reaching,
+    )
+}
+
+/// A daily value that can reach a statement that left: its key, and the line of that statement.
+struct Reach {
+    key: String,
+    line: u32,
 }
 
 /// Check the derived policy, list the checks that it keeps and name the keeper of each state
-/// key. `uses` are the state calls of the owner's source.
+/// key. `uses` are the state calls of the owner's source. `reaching` are the daily values that
+/// can reach a statement that left: the source is refused when the chain keeps one of them.
 fn finish(
     original: &str,
     source: String,
@@ -2628,6 +2906,7 @@ fn finish(
     server_only: Vec<ServerOnly>,
     uses: &[StateUse],
     server_keys: &HashSet<String>,
+    reaching: &[Reach],
 ) -> Result<Derived> {
     let defect = |what: &str| {
         format!(
@@ -2668,6 +2947,23 @@ fn finish(
             "the derived part still uses the state key {key:?}, which the server keeps"
         )));
     }
+    let figures = figures(&kept, &read);
+    // The chain keeps a daily value in a window of its own clock, and it does not run a
+    // statement that left. So the server cannot hold an operation inside the window in which
+    // it evaluated such a statement on that value.
+    for reach in reaching {
+        let Reach { key, line } = reach;
+        if standard(key) && figures.iter().any(|figure| figure.key == key) {
+            return Err(format!(
+                "A statement that only the server runs (line {line}) depends on the daily figure {key:?}, which the wallet contract keeps for a statement that it runs. The contract counts the figure's window in its own clock and does not run that statement again, so the server cannot hold its answer to that window. Move the statement before the server function, so that the contract runs it too, or check the figure with its canonical rule."
+            ));
+        }
+        if !standard(key) && chain.contains(key.as_str()) {
+            return Err(format!(
+                "A statement that only the server runs (line {line}) depends on the daily value {key:?}, which the wallet contract keeps. The contract counts the value's window in its own clock and does not run that statement again, so the server cannot hold its answer to that window. Keep {key:?} on the server: write it in a statement that depends on the server function. Or move the check before the server function, so that the contract runs it too."
+            ));
+        }
+    }
     let state = uses
         .iter()
         .map(|state| state.key.as_str())
@@ -2688,7 +2984,7 @@ fn finish(
         source,
         left,
         server_only,
-        figures: figures(&kept, &read),
+        figures,
         kept,
         state,
     })
