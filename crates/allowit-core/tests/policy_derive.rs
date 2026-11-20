@@ -2296,4 +2296,29 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
         error.contains("(line 11) depends on the daily figure \"day_spent\""),
         "{error}"
     );
+    // The same amount through a local function that a kept statement calls.
+    let helper = left
+        .replace(
+            "    let left = allowit::daily_spending_limit(ctx, &ctx.params[allowit::DAILY_SPENDING_LIMIT])?;\n",
+            "    let left: i128 = headroom(ctx)?;\n",
+        )
+        .replace(
+            "pub fn execute",
+            "fn headroom(ctx: &AllowitContext) -> Result<i128> {\n    allowit::daily_spending_limit(ctx, &ctx.params[allowit::DAILY_SPENDING_LIMIT])\n}\npub fn execute",
+        );
+    let error = derive(&helper).unwrap_err();
+    assert!(
+        error.contains("(line 14) depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
+    // A rule that only the server runs and whose value its statement uses, beside the kept rule.
+    let consumed = "    if score < 9000 {\n        let left: i128 = allowit::daily_spending_limit(ctx, &ctx.params[allowit::DAILY_SPENDING_LIMIT])?;\n        assert!(left < 100);\n    }\n";
+    let error = derive(&daily_and_question(rule, consumed)).unwrap_err();
+    assert!(
+        error.contains("(line 12) depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
+    // Without a kept rule or read the wallet keeps no figure: the server gives it.
+    let derived = derive(&daily_and_question("", consumed)).unwrap();
+    assert!(derived.figures.is_empty());
 }
