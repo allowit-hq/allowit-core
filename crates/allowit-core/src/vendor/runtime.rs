@@ -309,7 +309,12 @@ pub struct OwnerSignedInfo {
     /// signature): the key under which a caller keeps the sent step. A rail whose transaction
     /// identity is its signature knows it only once the owner signed.
     pub identity: Vec<u8>,
-    /// The step's time bound in Unix seconds: the network applies the step before it or never.
+    /// The step's send cutoff in Unix seconds: a caller sends the step only while its clock is
+    /// before it (`RuntimeProvider::validate_owner_signed`). It is no proof of a lapse. A
+    /// network decides by its own clock or height, so it can still apply a sent step at or just
+    /// after this second, and a rail whose validity ends at a height states here the second up
+    /// to which it lets a caller send. Only `RuntimeProvider::owner_step_lapsed` proves that a
+    /// sent step can no longer apply.
     pub expires_at: u64,
 }
 impl OwnerSigned {
@@ -446,7 +451,10 @@ pub struct Fee {
     pub charged_units: i128,
     /// The native units that the wallet repaid to the transaction's source for the network fee
     /// of the operation in the same transaction: the repayment of this operation, not of the
-    /// other operations that the transaction carries. Zero for a failed transaction and for a
+    /// other operations that the transaction carries. A receipt packet is the receipt of one
+    /// operation ([`Receipt::verify_operation`]): a rail whose transaction carries several
+    /// operations makes one receipt packet for each, so that [`Receipt::info`] reads that
+    /// operation's own repayment. Zero for a failed transaction and for a
     /// wallet that repays no gas. A confirmed operation moves its wallet's gas carry by this
     /// amount less the operation's own share of `native_units`, which the rail allocates (all of
     /// it when the transaction carries one operation), down to zero; [`Settlement::gas_carry`]

@@ -61,12 +61,16 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   ceiling at admission, and the operation's `Settlement::fee_units` at settlement when
   `Settlement::counted_gas` is `None`.
 - Owner steps that the caller sends, each refused by a rail that does not implement it:
-  `validate_owner_signed` says whether a signed step can still be sent (a typed refusal,
-  `OWNER_TRANSACTION_EXPIRED` or `CONTRACT_EXPIRED`, when it never can; an uncertain error when a read
-  failed), `broadcast_owner` sends it once and `owner_status` looks it up, neither with a final
-  status; only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the
-  step's own identity, `OwnerSigned::info`) ends a sent step. `prepare_close` prepares the step
-  that closes a wallet of a kind that closes, and `wallet_closed` says whether it is closed.
+  `validate_owner_signed` says whether a signed step may be sent now (a typed refusal:
+  `OWNER_TRANSACTION_EXPIRED`, final, past the step's send cutoff, or `CONTRACT_EXPIRED` for this
+  send of a step that does not call its lapsed wallet; an uncertain error when a read failed),
+  `broadcast_owner` sends it once and `owner_status` looks it up, neither with a final status;
+  only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the step's own
+  identity, `OwnerSigned::info`) ends a sent step. After an uncertain send the caller looks the
+  step up first. While the lookup stays inconclusive it may send the same signed bytes again,
+  which a rail guarantees to apply at most once; a lookup that fails sends nothing. The send
+  cutoff is no proof of a lapse. `prepare_close` prepares the step that closes a wallet of a kind
+  that closes, and `wallet_closed` says whether it is closed.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
