@@ -2175,15 +2175,15 @@ fn a_daily_value_of_the_chain_that_a_leaving_statement_reads_is_refused() {
         "    assert!(score > 9000 || !busy);\n",
     );
     reaches(&assigned, "day_n", 11);
-    // Through a local function that reads the key, also one that another function calls. A
-    // function that only a statement that left calls leaves with it: its read is the one named.
+    // Through a local function that reads the key, also one that another function calls. The
+    // refusal names the statement that calls the function.
     let function = daily_and_question("", "    assert!(score > 9000 || paid(ctx)? < 3);\n")
         .replace(
             "pub fn execute",
             "fn paid(ctx: &AllowitContext) -> Result<u64> {\n    Ok(allowit::get_state(ctx, \"day_n\")?.unwrap_or(0))\n}\npub fn execute",
         );
-    reaches(&function, "day_n", 4);
-    // A kept statement calls the function too, so it stays: the call that left is named.
+    reaches(&function, "day_n", 13);
+    // A kept statement calls the function too, so it stays.
     let shared = function.replace(
         "    allowit::set_state(ctx, \"day_n\", n + 1)?;\n",
         "    allowit::set_state(ctx, \"day_n\", paid(ctx)? + 1)?;\n",
@@ -2195,15 +2195,27 @@ fn a_daily_value_of_the_chain_that_a_leaving_statement_reads_is_refused() {
             "fn count(ctx: &AllowitContext) -> Result<u64> {\n    paid(ctx)\n}\npub fn execute",
         )
         .replace("|| paid(ctx)? < 3", "|| count(ctx)? < 3");
-    reaches(&nested, "day_n", 4);
+    reaches(&nested, "day_n", 16);
     let shared = shared
         .replace(
             "pub fn execute",
             "fn count(ctx: &AllowitContext) -> Result<u64> {\n    paid(ctx)\n}\npub fn execute",
         )
         .replace("|| paid(ctx)? < 3", "|| count(ctx)? < 3");
-    // `count` leaves with its one caller: its call of `paid` is the read that left.
-    reaches(&shared, "day_n", 7);
+    reaches(&shared, "day_n", 16);
+    // A function that no statement calls reads nothing, also when it stands in a branch that
+    // left: the kept write alone gives the chain the key.
+    let unused = daily_and_question(
+        "",
+        "    if score < 9000 {\n        fn unused(ctx: &AllowitContext) -> Result<Option<u64>> {\n            allowit::get_state(ctx, \"day_n\")\n        }\n    }\n",
+    );
+    assert!(derive(&unused).is_ok());
+    // The line is that of the statement, also when the read stands on a later line of it.
+    let spread = daily_and_question(
+        "",
+        "    assert!(\n        score > 9000\n            || allowit::get_state::<u64>(ctx, \"day_n\")?.is_some()\n    );\n",
+    );
+    reaches(&spread, "day_n", 10);
 }
 
 /// A statement that left can depend on a daily value of the chain without reading it: it

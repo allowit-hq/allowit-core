@@ -2523,13 +2523,19 @@ pub fn derive(source: &str) -> Result<Derived> {
                     break;
                 }
             }
-            // A statement that left reads the value, or a name that depends on it.
-            let reads_it = (0..count)
-                .find(|i| left[*i] && gives(*i))
-                .or_else(|| {
-                    (open..last).find(|i| left[*i] && !in_local_fn(*i) && p.names(*i, &names))
-                })
-                .map(|i| p.tokens[i].start);
+            // A statement that left reads the value, itself or through a local function that
+            // it calls, or reads a name that depends on it. A read in a local function counts
+            // where a statement calls the function, never by its declaration alone.
+            let reads_it = (open..last)
+                .find(|i| left[*i] && !in_local_fn(*i) && (gives(*i) || p.names(*i, &names)))
+                .map(|i| {
+                    // The line of the statement that holds the read.
+                    leaving
+                        .iter()
+                        .rev()
+                        .find(|id| (p.nodes[**id].first..=p.nodes[**id].last).contains(&i))
+                        .map_or(p.tokens[i].start, |id| p.tokens[p.nodes[*id].first].start)
+                });
             // A statement that left stands in a branch or a loop that depends on the value.
             let stands_in = || {
                 leaving.iter().copied().find(|id| {
