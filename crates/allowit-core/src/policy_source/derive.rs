@@ -70,15 +70,21 @@
 //! - reads a name that depends on the value: a name that a kept statement binds or can assign
 //!   when that statement reads the value or such a name, or stands in a branch or a loop on it;
 //! - stands in a branch or a loop of a kept statement that depends on the value, or in a loop
-//!   that such a statement can end or skip with `break`, `continue` or `return`;
-//! - comes after a kept statement that depends on the value and holds a `return` other than
-//!   `return Err(...)`.
+//!   or a labeled block that encloses a kept statement which depends on the value and holds a
+//!   `break`, a `continue` or a `return` other than `return Err(...)`;
+//! - comes, in the text of `execute`, after a kept statement that depends on the value and
+//!   holds a `return` other than `return Err(...)`.
 //!
 //! A denial that depends on the value hides no statement: the contract denies again. The owner
 //! keeps the key on the server, by a write that depends on the server function, or moves the
-//! check before the server function, where the contract runs it too. The rule follows names,
-//! as the whole derivation does, so it can refuse a statement that reads another value under
-//! the same name.
+//! check before the server function, where the contract runs it too.
+//!
+//! The rule refuses more than it must, never less. It follows names, as the whole derivation
+//! does, so it can refuse a statement that reads another value under the same name. And it does
+//! not follow where an exit leads: it resolves no label and no exclusive branch, so every loop
+//! and labeled block around such an exit counts, and every statement that left after such a
+//! `return` counts, also one that the exit could not skip. The owner states such an exit as a
+//! denial, or moves the statement that needs the server out of the loop or before the exit.
 //!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
 //! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
@@ -1383,14 +1389,6 @@ impl<'a> Parsed<'a> {
 
     /// Whether the tokens hold a `break` or `continue` of a loop that encloses them.
     fn breaks(&self, from: usize, to: usize) -> bool {
-        !self.exits(from, to).is_empty()
-    }
-
-    /// Each `break` or `continue` in the tokens that can end or skip a statement that encloses
-    /// them, with its label: `None` for one without a label, which ends or skips the nearest
-    /// enclosing loop. One with a label counts also when its loop stands inside the tokens.
-    fn exits(&self, from: usize, to: usize) -> Vec<Option<&'a str>> {
-        let mut exits = vec![];
         let mut loops: Vec<bool> = vec![];
         // The `{` of each loop body. A block in the header of a loop, such as the iterated
         // value of `for _ in { ... } {}`, runs outside the loop: an exit there ends an
@@ -1411,19 +1409,16 @@ impl<'a> Parsed<'a> {
                     loops.pop();
                 }
                 "break" | "continue" if self.tokens[i].kind == Kind::Word => {
-                    let label = self
-                        .tokens
-                        .get(i + 1)
-                        .filter(|token| token.kind == Kind::Lifetime)
-                        .map(|_| self.text(i + 1));
-                    if label.is_some() || !loops.contains(&true) {
-                        exits.push(label);
+                    let labeled =
+                        self.tokens.get(i + 1).map(|token| token.kind) == Some(Kind::Lifetime);
+                    if labeled || !loops.contains(&true) {
+                        return true;
                     }
                 }
                 _ => {}
             }
         }
-        exits
+        false
     }
 
     /// Whether the initializer in `from..to` only reads: an owner param, a request field, a
@@ -2503,47 +2498,18 @@ pub fn derive(source: &str) -> Result<Derived> {
                             names.extend(p.word(i).map(str::to_owned));
                         }
                     }
-                    // An exit other than a denial decides which statements of the loops that it
-                    // ends or skips run: a `return` those of every enclosing loop, a `break` or
-                    // `continue` those of the nearest loop, or of each loop up to its label.
-                    let returns = ranges.iter().any(|(from, to)| p.returns(*from, *to));
-                    let exits: Vec<Option<&str>> = ranges
+                    // An exit other than a denial decides which statements of the enclosing
+                    // loops and labeled blocks run. The rule does not resolve which of them the
+                    // exit ends or skips: every one of them depends on the value.
+                    let exits = ranges
                         .iter()
-                        .flat_map(|(from, to)| p.exits(*from, *to))
-                        .collect();
-                    let mut enclosing = vec![];
+                        .any(|(from, to)| p.returns(*from, *to) || p.breaks(*from, *to));
                     let mut parent = p.nodes[id].parent;
-                    while let Some(at) = parent.filter(|_| returns || !exits.is_empty()) {
+                    while let Some(at) = parent.filter(|_| exits) {
                         if p.nodes[at].is_loop {
-                            enclosing.push(at);
+                            depends[at] = true;
                         }
                         parent = p.nodes[at].parent;
-                    }
-                    let label = |at: usize| {
-                        let key = p.nodes[at].key;
-                        (key >= 2
-                            && p.tokens[key - 2].kind == Kind::Lifetime
-                            && p.text(key - 1) == ":")
-                            .then(|| p.text(key - 2))
-                    };
-                    let ended = |exit: &Option<&str>| match exit {
-                        // A `break` without a label ends a loop, never a labeled block.
-                        None => enclosing.iter().position(|at| {
-                            matches!(p.text(p.nodes[*at].key), "while" | "for" | "loop")
-                        }),
-                        Some(name) => enclosing.iter().position(|at| label(*at) == Some(*name)),
-                    };
-                    let reach = match returns {
-                        true => enclosing.len(),
-                        false => exits
-                            .iter()
-                            .filter_map(ended)
-                            .map(|at| at + 1)
-                            .max()
-                            .unwrap_or(0),
-                    };
-                    for at in &enclosing[..reach] {
-                        depends[*at] = true;
                     }
                 }
                 if names.len() + depends.iter().filter(|d| **d).count() == before {

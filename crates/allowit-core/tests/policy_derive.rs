@@ -2232,17 +2232,19 @@ fn a_leaving_statement_that_a_daily_value_of_the_chain_decides_is_refused() {
     reaches(&looped, "day_n", 14);
     // A denial on the counter stands before the question in the plain policy: it is admitted.
     assert!(derive(&daily_and_question("", "")).is_ok());
-    // A `break` on the counter ends its own loop only: a question in the loop around it is
-    // asked as often with any counter. A `break` to the label of that outer loop ends it.
+    // The rule resolves no label and no target of an exit: a `break` on the counter counts for
+    // every loop around it, whatever its label and however the label is spelled.
     let inner = format!(
-        "    'rounds: for _ in 0..2u64 {{\n        for _ in 0..3u64 {{\n            if n > 2 {{\n                break;\n            }}\n        }}\n        let known = {question};\n        assert!(known > 5000);\n    }}\n"
+        "    let review = 2u64;\n    'review: for _ in 0..review {{\n        for _ in 0..3u64 {{\n            if n > 2 {{\n                break;\n            }}\n        }}\n        let known = {question};\n        assert!(known > 5000);\n    }}\n"
     );
-    assert!(derive(&daily_and_question(&inner, "")).is_ok());
-    let outer = inner.replace(
-        "                break;\n",
-        "                break 'rounds;\n",
-    );
-    reaches(&daily_and_question(&outer, ""), "day_n", 15);
+    reaches(&daily_and_question(&inner, ""), "day_n", 16);
+    for exit in ["break 'review;", "break 'r#review;", "continue 'r#review;"] {
+        let labeled = inner.replace(
+            "                break;\n",
+            &format!("                {exit}\n"),
+        );
+        reaches(&daily_and_question(&labeled, ""), "day_n", 16);
+    }
 }
 
 /// The rule holds only for a daily value that the chain keeps. The server keeps a key whose

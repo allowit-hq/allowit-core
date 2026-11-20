@@ -261,8 +261,10 @@ spells the key itself: a key with an escape, such as `"\x61"`, is refused.
 keeps the value in a window of its own clock and does not run that statement again, so nothing holds the operation
 inside the window in which the server evaluated the statement. The value reaches a statement that left when the
 statement reads the key (also through a local function), reads a name that depends on the value, stands in a branch or
-a loop on it, or comes after an approval that depends on it. A denial on the value hides nothing: the contract denies
-again. The owner keeps the key on the server, by a write that depends on the server function, or moves the check
+a loop on it, stands in a loop or a labeled block that a kept statement can end or skip depending on the value, or comes
+after an approval that depends on it. A denial on the value hides nothing: the contract denies again. The rule refuses
+more than it must, never less: it follows names, and it does not follow where a `break`, a `continue` or an early
+`return` leads. The owner keeps the key on the server, by a write that depends on the server function, or moves the check
 before the server function. A daily figure that the wallet keeps follows the same rule for a read with `get_state`;
 a canonical rule that only denies (`allowit::daily_spending_limit(...)?;` as a statement by itself in `execute`) needs
 no bound, also when only the server runs it, because the figure only grows inside its window. Any other call of a
