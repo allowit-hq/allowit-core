@@ -48,6 +48,15 @@ pub struct Setup<'a> {
     /// account, in the same transaction. `None` funds the reserve and the fee float only.
     pub amount: Option<&'a str>,
 }
+/// The asset of a new Native wallet, as the server's wallet template of its network states it:
+/// the asset's code and, for an issued asset, its issuer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeWalletAsset {
+    /// The asset's code, or the code of the network's own asset.
+    pub symbol: String,
+    /// The issuer of an issued asset; `None` for the network's own asset.
+    pub issuer: Option<String>,
+}
 /// Typed edits of a draft's params through the backend's owner route. The backend checks each
 /// value against the param's type and range and refuses an invalid value.
 pub struct EditParams<'a> {

@@ -546,6 +546,19 @@ pub trait OwnerProvider {
             "This rail does not export the placements of a policy",
         ))
     }
+    /// The asset of a new Native wallet on the context's network, read as [`Self::setup`] reads
+    /// it and refused where the setup would refuse it, so a host can show it before the setup
+    /// asks for the owner's signature. The owner signs in to read it and signs nothing else. A
+    /// rail without Native wallets refuses, and so does the default.
+    fn native_wallet_asset(
+        &self,
+        cx: &super::owner::Context<'_>,
+    ) -> super::error::Result<super::owner::NativeWalletAsset> {
+        let _ = cx;
+        Err(Error::unsupported(
+            "This rail does not read the asset of a new Native wallet",
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -879,6 +892,80 @@ mod defaults {
             refused(Bare.prepare_code_renewal_until(&[1; 32], 1, validity)),
             3
         );
+    }
+    /// A rail that does not read the asset of a new Native wallet is refused, never given an
+    /// asset.
+    #[test]
+    fn a_rail_refuses_the_native_wallet_asset_that_it_does_not_read() {
+        use crate::vendor::owner::{Activate, Context, Deploy, Setup};
+        struct Owner;
+        impl OwnerProvider for Owner {
+            fn deploy(&self, _: &Context<'_>, _: Deploy<'_>) -> Result<serde_json::Value> {
+                unreachable!()
+            }
+            fn fund(
+                &self,
+                _: &Context<'_>,
+                _: &[u8],
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> Result<serde_json::Value> {
+                unreachable!()
+            }
+            fn activate(&self, _: &Context<'_>, _: Activate<'_>) -> Result<serde_json::Value> {
+                unreachable!()
+            }
+            fn export(
+                &self,
+                _: &Context<'_>,
+                _: &[u8],
+                _: &str,
+            ) -> Result<Box<serde_json::value::RawValue>> {
+                unreachable!()
+            }
+            fn setup(&self, _: &Context<'_>, _: Setup<'_>) -> Result<serde_json::Value> {
+                unreachable!()
+            }
+            fn status(
+                &self,
+                _: &crate::client::store::Store,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> Result<serde_json::Value> {
+                unreachable!()
+            }
+        }
+        struct Key;
+        impl crate::vendor::wallet::Signer for Key {
+            fn network(&self) -> &str {
+                "test:network"
+            }
+            fn address(&self) -> &str {
+                "owner"
+            }
+            fn sign_hash(&self, _: &[u8]) -> Result<Vec<u8>> {
+                unreachable!("the default signs nothing")
+            }
+        }
+        let authority = crate::vendor::config::ServerAuthority::validated(
+            "test:network",
+            "https://server.example",
+            "server",
+        )
+        .unwrap();
+        let cx = Context {
+            network: "test:network",
+            backend: "https://server.example",
+            authority: &authority,
+            origin: "https://app.example",
+            rpc_url: "https://rpc.example",
+            store: &|| unreachable!("the default opens no store"),
+            signer: &Key,
+            clock: &|| Ok(1),
+        };
+        assert_eq!(refused(Owner.native_wallet_asset(&cx)), 3);
     }
     /// A rail that does not read a receipt or bound an operation's expense is refused, never
     /// given an answer.
