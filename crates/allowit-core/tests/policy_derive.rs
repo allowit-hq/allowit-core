@@ -2351,10 +2351,23 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
         "    if score < 9000 {\n        #[allow(unused_must_use)]\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n",
     );
     assert_eq!(derive(&attributed).unwrap().server_only.len(), 2);
-    // And in a branch that leaves whole, because its value can be used.
+    // In a branch that is not split, because its value can be used, the derivation does not read
+    // the statements one by one: there the rule counts as one whose value can be used.
     let whole = daily_and_question(
         rule,
         "    if score < 9000 {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    } else {\n        allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    };\n",
     );
-    assert_eq!(derive(&whole).unwrap().server_only.len(), 3);
+    assert!(derive(&whole).is_err());
+    // A closure is no statement of `execute`: its `?` ends the closure, and the statement
+    // that calls it can catch the denial. The source gate admits no closure; the rule does not
+    // rely on that.
+    let closure = daily_and_question(
+        rule,
+        "    let under = || -> allowit::Result {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n        Ok(())\n    };\n    assert!(score > 9000 || under().is_err());\n",
+    );
+    let error = derive(&closure).unwrap_err();
+    assert!(
+        error.contains("depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
 }

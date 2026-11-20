@@ -83,8 +83,10 @@
 //! does, so it can refuse a statement that reads another value under the same name. And it does
 //! not follow where an exit leads: it resolves no label and no exclusive branch, so every loop
 //! and labeled block around such an exit counts, and every statement that left after such a
-//! `return` counts, also one that the exit could not skip. The owner states such an exit as a
-//! denial, or moves the statement that needs the server out of the loop or before the exit.
+//! `return` counts, also one that the exit could not skip. A name that a statement can assign
+//! counts as assigned by each dependent statement that mentions it. The owner states such an
+//! exit as a denial, moves the statement that needs the server out of the loop or before the
+//! exit, or uses another name.
 //!
 //! A read of a standard figure, such as `allowit::get_state(ctx, "day_spent")`, stays: the
 //! contract keeps each figure that a kept statement reads ([`Derived::figures`]). No policy
@@ -95,11 +97,12 @@
 //! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
 //! daily rule that only the server runs needs no such bound: the figure only grows inside its
 //! window, so the server judges at least the value that the execution finds. That holds for a
-//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement by itself in
-//! `execute`, whose `?` ends `execute`. Any other call of a canonical daily rule gives a value
-//! of its figure, wherever it runs: a call whose result a larger expression uses, and every
-//! call in a local function, where the caller can read the result or catch the denial. A
-//! statement that left cannot depend on such a call either.
+//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement by itself, of
+//! `execute` or of a block of a statement that the derivation splits, whose `?` ends `execute`.
+//! Any other call of a canonical daily rule counts as one that gives a value of its figure,
+//! wherever it runs: a call whose result a larger expression uses, a call in a local function,
+//! where the caller can read the result or catch the denial, and a call inside a statement
+//! that is not split. A statement that left cannot depend on such a call either.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -2373,26 +2376,30 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // Whether the rule call at token `i` only denies `execute`: it is a statement by itself,
-        // `allowit::<rule>(...)?;` after its attributes, in `execute` and outside every local
-        // function. Its `?` ends `execute` with the denial, because the gate admits no closure,
-        // and nothing reads what the rule returns. Every other call can pass on the value or
-        // the outcome of the rule: a call inside a larger expression, and any call in a local
-        // function, whose `?` only ends that function.
-        let discards = |i: usize| {
-            let paren = if p.text(i + 3) == "::" && p.text(i + 4) == "<" {
-                p.after_generics(i + 4)
-            } else {
-                Some(i + 3)
-            };
-            (open..last).contains(&i)
-                && !in_local_fn(i)
-                && matches!(p.before_attributes(i), "{" | "}" | ";")
-                && paren
-                    .filter(|at| p.text(*at) == "(")
-                    .and_then(|at| p.close(at))
-                    .is_some_and(|close| p.text(close + 1) == "?" && p.text(close + 2) == ";")
-        };
+        // The rule calls that only deny `execute`: a call that is a statement by itself,
+        // `allowit::<rule>(...)?;` after its attributes, among the statements of `execute` and
+        // of the blocks of its split statements. Its `?` ends `execute` with the denial, and
+        // nothing reads what the rule returns. Every other call counts as one that can pass
+        // on the value or the outcome of the rule: a call inside a larger expression, a call
+        // in a local function, whose `?` only ends that function, and a call in a statement
+        // that is not split, where the derivation does not read the statements one by one.
+        let denying: HashSet<usize> = all
+            .iter()
+            .copied()
+            .filter(|id| in_execute(*id) && p.nodes[*id].shape == Shape::Whole)
+            .filter_map(|id| {
+                let (at, last) = (p.nodes[id].key, p.nodes[id].last);
+                p.allowit_path(at)?;
+                let paren = if p.text(at + 3) == "::" && p.text(at + 4) == "<" {
+                    p.after_generics(at + 4)?
+                } else {
+                    at + 3
+                };
+                let close = p.close(paren).filter(|_| p.text(paren) == "(")?;
+                (p.text(close + 1) == "?" && close + 2 == last && p.text(last) == ";").then_some(at)
+            })
+            .collect();
+        let discards = |i: usize| denying.contains(&i);
         let daily: BTreeSet<&str> = uses
             .iter()
             .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
