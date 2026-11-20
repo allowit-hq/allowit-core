@@ -2286,4 +2286,14 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
             .iter()
             .any(|figure| figure.key == "day_spent")
     );
+    // The amount that the kept rule leaves is a value of the figure.
+    let left = daily_and_question(
+        "    let left = allowit::daily_spending_limit(ctx, &ctx.params[allowit::DAILY_SPENDING_LIMIT])?;\n",
+        "    assert!(score > 9000 || left > 100);\n",
+    );
+    let error = derive(&left).unwrap_err();
+    assert!(
+        error.contains("(line 11) depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
 }

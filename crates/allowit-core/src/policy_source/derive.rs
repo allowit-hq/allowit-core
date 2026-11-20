@@ -88,7 +88,9 @@
 //! instead. A daily figure that the wallet keeps follows the rule of a daily value of the chain:
 //! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
 //! daily rule that only the server runs needs no such bound: the figure only grows inside its
-//! window, so the server judges at least the value that the execution finds.
+//! window, so the server judges at least the value that the execution finds. The value that a
+//! kept canonical daily rule returns is a value of its figure: a statement that left cannot
+//! depend on it either.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -2350,11 +2352,29 @@ pub fn derive(source: &str) -> Result<Derived> {
     if changed {
         let left = covered(&gone);
         let server_keys = p.server_keys.borrow().clone();
+        // The canonical rules that read the daily figure `key`: a call of one gives a value of
+        // the figure, as a read does.
+        let rules_of = |key: &str| -> &'static [&'static str] {
+            FIGURES
+                .iter()
+                .find(|(figure, _)| figure.daily && figure.key == key)
+                .map_or(&[], |(_, rules)| *rules)
+        };
+        let ruled = |i: usize, rules: &[&str]| {
+            p.allowit_path(i)
+                .is_some_and(|function| rules.contains(&function))
+        };
         let daily: BTreeSet<&str> = uses
             .iter()
             .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
             .map(|state| state.key.as_str())
             .filter(|key| !server_keys.contains(*key))
+            .chain(
+                FIGURES
+                    .iter()
+                    .filter(|(figure, rules)| figure.daily && (0..count).any(|i| ruled(i, rules)))
+                    .map(|(figure, _)| figure.key),
+            )
             .collect();
         // The local function whose own tokens hold token `i`: the innermost one.
         let function_of = |i: usize| {
@@ -2413,6 +2433,10 @@ pub fn derive(source: &str) -> Result<Derived> {
             // A token that gives the value: a read of the key, or a call of such a function.
             let gives =
                 |i: usize| reads.contains(&i) || called_at(i).is_some_and(|f| reading.contains(f));
+            // A kept statement also takes a value of a daily figure from the canonical rule that
+            // reads it, such as the amount that the rule leaves. A rule that only the server
+            // runs needs no bound: the figure only grows inside its window.
+            let rules = rules_of(key);
             // The statements that stay and depend on the value, and the names that they bind or
             // can assign: a statement that reads the value or such a name, every statement in
             // a branch or a loop on it, and every statement of a loop that such a statement can
@@ -2424,7 +2448,8 @@ pub fn derive(source: &str) -> Result<Derived> {
                 for id in order.iter().copied().filter(|id| !gone[*id] && step(*id)) {
                     let ranges = own(id);
                     let direct = ranges.iter().any(|(from, to)| {
-                        (*from..*to).any(&gives) || p.mentions(*from, *to, &names)
+                        (*from..*to).any(|i| gives(i) || ruled(i, rules))
+                            || p.mentions(*from, *to, &names)
                     });
                     let inside = p.nodes[id].parent.is_some_and(|parent| depends[parent]);
                     if !(direct || inside || depends[id]) {
