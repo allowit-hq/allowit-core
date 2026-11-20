@@ -89,9 +89,11 @@
 //! a statement that left cannot depend on a read of it with `allowit::get_state`. A canonical
 //! daily rule that only the server runs needs no such bound: the figure only grows inside its
 //! window, so the server judges at least the value that the execution finds. That holds for a
-//! rule that only denies, `allowit::daily_spending_limit(...)?;` as a statement of its own. The
-//! value that a canonical daily rule returns is a value of its figure, wherever the rule runs
-//! and also through a local function: a statement that left cannot depend on it either.
+//! rule that only denies: `allowit::daily_spending_limit(...)?;` as a statement of `execute`
+//! by itself, whose `?` ends `execute`. Any other call of a canonical daily rule gives a value
+//! of its figure, wherever it runs: a call whose result a larger statement uses, and every call
+//! in a local function or a closure, where the caller can read the result or catch the denial.
+//! A statement that left cannot depend on such a call either.
 //!
 //! A value without a stated type can take its type from the code that uses it, and Rust gives a
 //! number `i32` when no code does. A statement that leaves can be that code, so the on-chain
@@ -2365,20 +2367,28 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // Whether the rule call at token `i` is a statement of its own that only denies:
-        // `allowit::<rule>(...)?;`. Every other form can use the value that the rule returns.
-        let discards = |i: usize| {
-            let open = if p.text(i + 3) == "::" && p.text(i + 4) == "<" {
-                p.after_generics(i + 4)
-            } else {
-                Some(i + 3)
-            };
-            (i == 0 || matches!(p.text(i - 1), "{" | "}" | ";"))
-                && open
-                    .filter(|at| p.text(*at) == "(")
-                    .and_then(|at| p.close(at))
-                    .is_some_and(|close| p.text(close + 1) == "?" && p.text(close + 2) == ";")
-        };
+        // The rule calls that only deny `execute`: a call that is a statement of `execute` by
+        // itself, `allowit::<rule>(...)?;`, after its attributes. Its `?` ends `execute` with the
+        // denial, and nothing reads what the rule returns. Every other call can pass on the
+        // value or the outcome of the rule: a call inside a larger statement, and any call in
+        // a local function or a closure, whose `?` only ends that function.
+        let denying: HashSet<usize> = all
+            .iter()
+            .copied()
+            .filter(|id| in_execute(*id) && p.nodes[*id].shape == Shape::Whole)
+            .filter_map(|id| {
+                let (at, last) = (p.nodes[id].key, p.nodes[id].last);
+                p.allowit_path(at)?;
+                let open = if p.text(at + 3) == "::" && p.text(at + 4) == "<" {
+                    p.after_generics(at + 4)?
+                } else {
+                    at + 3
+                };
+                let close = p.close(open).filter(|_| p.text(open) == "(")?;
+                (p.text(close + 1) == "?" && close + 2 == last && p.text(last) == ";").then_some(at)
+            })
+            .collect();
+        let discards = |i: usize| denying.contains(&i);
         let daily: BTreeSet<&str> = uses
             .iter()
             .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
@@ -2432,10 +2442,10 @@ pub fn derive(source: &str) -> Result<Derived> {
             .collect();
         for key in daily {
             // The tokens that give the value by themselves: each read of the key and, for a
-            // daily figure, each call of a canonical rule that reads it, unless the statement
-            // discards what the rule returns. A rule that only denies needs no bound, also when
-            // only the server runs it: the figure only grows inside its window, so the server
-            // judges at least the value that the execution finds.
+            // daily figure, each call of a canonical rule that reads it, unless that call only
+            // denies `execute`. A rule that only denies needs no bound, also when only the
+            // server runs it: the figure only grows inside its window, so the server judges at
+            // least the value that the execution finds.
             let rules = rules_of(key);
             let reads: HashSet<usize> = uses
                 .iter()

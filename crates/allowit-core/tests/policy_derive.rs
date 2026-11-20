@@ -2321,4 +2321,31 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
     // Without a kept rule or read the wallet keeps no figure: the server gives it.
     let derived = derive(&daily_and_question("", consumed)).unwrap();
     assert!(derived.figures.is_empty());
+    // A rule in a local function denies only that function: its caller can catch the denial.
+    let caught = daily_and_question(rule, "    assert!(score > 9000 || under_cap(ctx).is_err());\n")
+        .replace(
+            "pub fn execute",
+            "fn under_cap(ctx: &AllowitContext) -> allowit::Result {\n    allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\npub fn execute",
+        );
+    let error = derive(&caught).unwrap_err();
+    assert!(
+        error.contains("depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
+    // So can a closure, in one statement with the server value.
+    let closure = daily_and_question(
+        rule,
+        "    let under = || -> allowit::Result {\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n        Ok(())\n    };\n    assert!(score > 9000 || under().is_err());\n",
+    );
+    let error = derive(&closure).unwrap_err();
+    assert!(
+        error.contains("depends on the daily figure \"day_spent\""),
+        "{error}"
+    );
+    // A rule that only denies `execute` is admitted behind an attribute too.
+    let attributed = daily_and_question(
+        rule,
+        "    if score < 9000 {\n        #[allow(unused_must_use)]\n        allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    }\n",
+    );
+    assert_eq!(derive(&attributed).unwrap().server_only.len(), 2);
 }
