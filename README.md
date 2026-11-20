@@ -287,13 +287,15 @@ then.
    that the on-chain part reads or checks. The contract counts that window in ledgers and does not run the statement
    again. Every call of a canonical daily rule on such a figure counts, also one that only denies.
 4. It may not depend on the time of the request: `ctx.request.now`, or the value or the outcome of
-   `allowit::expires_at`. The server evaluates at the preparation, and the contract at the settlement ledger.
+   `allowit::expires_at`. The server evaluates at the preparation, and the contract at the settlement ledger. Every
+   use of the name `now` counts as the time, also one that a pattern binds.
 5. "Depends" is one reach rule for 3 and 4: the statement reads the value (also through a local function), reads a
    name that a kept statement binds or can assign from it, stands in a branch or a loop on it or in a loop or labeled
    block around a dependent exit, or follows a dependent approval. The rule refuses more than it must, never less: it
    follows names, and it does not follow where a `break`, a `continue` or an early `return` leads. Each refusal says
-   what the owner does next: move the check before the server function, so that the contract runs it too, or keep the
-   value on the server.
+   what the owner does next: check the value in a statement that the contract runs too (before the server function,
+   and apart from the server's result), or keep a daily value on the server. A decision that only the server takes
+   cannot depend on the time.
 
 `daily_window_end` is the rule by which each keeper keeps the window of a daily value after an operation: a value
 that the operation left unchanged keeps its window, also an ended one, so a read renews nothing; a changed value keeps

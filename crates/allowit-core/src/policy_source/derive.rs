@@ -78,8 +78,9 @@
 //!    the statement again. Every call of a canonical daily rule on such a figure counts, also
 //!    one that only denies: its outcome is the figure's.
 //! 4. It may not depend on the time of the request: `ctx.request.now`, read from the request
-//!    or from a copy of it, or the value or the outcome of `allowit::expires_at`. The server
-//!    evaluates at the preparation, and the contract at the settlement ledger.
+//!    or from a copy of it or bound by a pattern, or the value or the outcome of
+//!    `allowit::expires_at`. The server evaluates at the preparation, and the contract at the
+//!    settlement ledger. Every use of the name `now` counts as the time.
 //! 5. "Depends" is one reach rule for 3 and 4. The statement:
 //!    - reads the value, itself or through a local function that reads it;
 //!    - reads a name that depends on the value: a name that a kept statement binds or can
@@ -92,9 +93,10 @@
 //!      holds a `return` other than `return Err(...)`.
 //!
 //! [`derive`] refuses a source that breaks 3 or 4, and the refusal says what the owner does
-//! next: move the check before the server function, where the contract runs it too; keep a
-//! `day_` key on the server, by a write that depends on the server function; or keep a daily
-//! figure on the server, by leaving no rule and no read of it in the on-chain part. A denial
+//! next: check the value in a statement that the contract runs too, before the server function
+//! and apart from the server's result; keep a `day_` key on the server, by a write that depends
+//! on the server function; or keep a daily figure on the server, by leaving no rule and no read
+//! of it in the on-chain part. A decision that only the server takes cannot depend on the time. A denial
 //! that depends on the value hides no statement: the contract denies again.
 //!
 //! The rule refuses more than it must, never less. It follows names, as the whole derivation
@@ -2389,11 +2391,12 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // A token that gives the time of the request: a read of the field `now`, of the request
-        // or of a copy of it, and a call of the canonical rule that compares the time with the
-        // owner's expiry.
+        // A token that gives the time of the request: the name `now`, as a field that a
+        // statement reads from the request or from a copy of it, as a field that a pattern binds
+        // (`AllowitRequest { now, .. }`, `{ now: at, .. }`), or as a local name; and a call of
+        // the canonical rule `expires_at`, which compares the time with the owner's param.
         let timed = |i: usize| {
-            (p.word(i) == Some("now") && p.text(i.wrapping_sub(1)) == ".")
+            (p.word(i) == Some("now") && p.text(i.wrapping_sub(1)) != "::")
                 || p.allowit_path(i) == Some("expires_at")
         };
         // The values that must not reach a statement that left: each daily key that the server
@@ -2481,11 +2484,8 @@ pub fn derive(source: &str) -> Result<Derived> {
             // The statements that stay and depend on the value, and the names that they bind or
             // can assign: a statement that reads the value or such a name, every statement in
             // a branch or a loop on it, and every statement of a loop that such a statement can
-            // end. A pattern can bind the request's field `now` under its own name.
-            let mut names: HashSet<String> = match key {
-                REQUEST_TIME => HashSet::from(["now".to_owned()]),
-                _ => HashSet::new(),
-            };
+            // end.
+            let mut names: HashSet<String> = HashSet::new();
             let mut depends = vec![false; p.nodes.len()];
             loop {
                 let before = names.len() + depends.iter().filter(|d| **d).count();
@@ -2964,7 +2964,7 @@ fn finish(
         let Reach { key, line } = reach;
         if key == REQUEST_TIME {
             return Err(format!(
-                "A statement that only the server runs (line {line}) depends on the time of the request (`ctx.request.now`, or `allowit::expires_at`). The server runs that statement when it prepares the operation, and the wallet contract runs its part at the time of the ledger that settles it, so the two can judge differently. Move the statement before the server function, so that the contract runs it too."
+                "A statement that only the server runs (line {line}) depends on the time of the request (`ctx.request.now`, or `allowit::expires_at`). The server runs that statement when it prepares the operation, and the wallet contract runs its part at the time of the ledger that settles it, so the two can judge differently. Check the time in a statement that the contract runs too: before the server function, and apart from the server's result. A decision that only the server takes cannot depend on the time."
             ));
         }
         if standard(key) && figures.iter().any(|figure| figure.key == key) {

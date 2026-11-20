@@ -2381,7 +2381,7 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         let error = derive(source).unwrap_err();
         assert!(
             error.contains(&format!("(line {line}) depends on the time of the request"))
-                && error.contains("Move the statement before the server function"),
+                && error.contains("Check the time in a statement that the contract runs too"),
             "{error}"
         );
     };
@@ -2416,6 +2416,28 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         ),
         9,
     );
+    // A pattern binds the field, under its own name or another, with no dotted read of the time
+    // and no call of the rule anywhere in the source; also in a local function. The `let` leaves
+    // with the statement that reads its name, as above.
+    timed(
+        &daily_and_question(
+            "    let AllowitRequest { now, .. } = &ctx.request;\n",
+            "    assert!(score > 9000 || *now < 1_800_000_000);\n",
+        ),
+        9,
+    );
+    timed(
+        &daily_and_question(
+            "    let AllowitRequest { now: at, .. } = &ctx.request;\n",
+            "    assert!(score > 9000 || *at < 1_800_000_000);\n",
+        ),
+        9,
+    );
+    let bound = daily_and_question("", "    assert!(score > 9000 || early(ctx));\n").replace(
+        "pub fn execute",
+        "fn early(ctx: &AllowitContext) -> bool {\n    let AllowitRequest { now, .. } = &ctx.request;\n    *now < 1_800_000_000\n}\npub fn execute",
+    );
+    timed(&bound, 14);
     // A copy of the request, and a local function that reads the time.
     timed(
         &daily_and_question(
