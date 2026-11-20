@@ -61,12 +61,17 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   ceiling at admission, and the operation's `Settlement::fee_units` at settlement when
   `Settlement::counted_gas` is `None`.
 - Owner steps that the caller sends, each refused by a rail that does not implement it:
-  `validate_owner_signed` says whether a signed step can still be sent (a typed refusal,
-  `OWNER_TRANSACTION_EXPIRED` or `CONTRACT_EXPIRED`, when it never can; an uncertain error when a read
-  failed), `broadcast_owner` sends it once and `owner_status` looks it up, neither with a final
-  status; only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the
-  step's own identity, `OwnerSigned::info`) ends a sent step. `prepare_close` prepares the step
-  that closes a wallet of a kind that closes, and `wallet_closed` says whether it is closed.
+  `validate_owner_signed` says whether a signed step may be sent now (a typed refusal:
+  `OWNER_TRANSACTION_EXPIRED`, final, past the step's send cutoff, or `CONTRACT_EXPIRED` for this
+  send of a step that does not call its lapsed wallet; an uncertain error when a read failed),
+  `broadcast_owner` sends it once and `owner_status` looks it up, neither with a final status;
+  only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the step's own
+  identity, `OwnerSigned::info`) ends a possibly sent step, also past its cutoff; a step that was
+  never sent is dropped. After an uncertain send the caller looks the
+  step up first. While the lookup stays inconclusive it may send the same signed bytes again,
+  which a rail guarantees to apply at most once; a lookup that fails sends nothing. The send
+  cutoff is no proof of a lapse. `prepare_close` prepares the step that closes a wallet of a kind
+  that closes, and `wallet_closed` says whether it is closed.
 - `TestSupport`: the testnet, fixtures and skipped features that shared looped tests use.
 - `policy_functions`: vendor evidence functions that policies may call. The default is none.
 - `paid_service`: the paid-service hook. The default is none.
@@ -143,9 +148,11 @@ authority. The upload is the transaction of `RuntimeProvider::prepare_code_withi
 signs: the rail prepares it and sends nothing, and the SDK engine sends it and follows it to its receipt like
 any signed operation. The server renews code that wallets share, such as the code of a fixed tier, before it
 lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. A wallet keeps
-its own instance live on each call, and a Custom wallet its own code too. An operation or owner step on a
-wallet whose instance or code lapsed is refused with the problem code `CONTRACT_EXPIRED` (`contract_expired`)
-before anything is signed or sent. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+its own instance live on each call, and a Custom wallet its own code too. A rail refuses to prepare an operation
+or owner step on a wallet whose instance or code lapsed, with the problem code `CONTRACT_EXPIRED`
+(`contract_expired`), before anything is signed. At the send of a signed owner step it refuses, with the same
+code and for that attempt, the steps that it checks for liveness (`validate_owner_signed`); a signed step that
+calls a wallet that lapsed since fails on the network. The owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
