@@ -287,7 +287,10 @@ impl PartialEq for RequestPacket {
     }
 }
 
-/// Native owner-signing input and common immutable transaction identity.
+/// An unsigned owner step: the rail's signing input, its send cutoff, and `transaction_hash`, a
+/// 32-byte digest by which the rail names the unsigned step. A caller keeps a signed step under
+/// [`OwnerSignedInfo::identity`], in the rail's own bytes, which a rail whose identity is a
+/// signature knows only once the owner signed.
 #[derive(Clone, Debug)]
 pub struct OwnerInfo {
     pub action: String,
@@ -452,9 +455,11 @@ pub struct Fee {
     /// The native units that the wallet repaid to the transaction's source for the network fee
     /// of the operation in the same transaction: the repayment of this operation, not of the
     /// other operations that the transaction carries. A receipt packet is the receipt of one
-    /// operation ([`Receipt::verify_operation`]): a rail whose transaction carries several
-    /// operations makes one receipt packet for each, so that [`Receipt::info`] reads that
-    /// operation's own repayment. Zero for a failed transaction and for a
+    /// Allowit operation ([`Receipt::verify_operation`]): a rail whose transaction carries
+    /// several Allowit operations makes one receipt packet for each of them, so that
+    /// [`Receipt::info`] reads that operation's own repayment. The network's own parts of one
+    /// Allowit operation or owner step share its one receipt. Zero for a failed transaction and
+    /// for a
     /// wallet that repays no gas. A confirmed operation moves its wallet's gas carry by this
     /// amount less the operation's own share of `native_units`, which the rail allocates (all of
     /// it when the transaction carries one operation), down to zero; [`Settlement::gas_carry`]
@@ -738,13 +743,20 @@ pub trait Transport: Send + Sync {
 }
 
 /// The problem code of an operation or owner step on a wallet whose instance or code lapsed on
-/// its network: the rail refuses it before anything is signed or sent, and nothing restores the
-/// wallet. Its owner keeps it live, or renews or restores it outside Allowit.
+/// its network. A rail refuses to prepare such an operation or step, before anything is signed
+/// ([`Resources::require_live`]). At the send of a signed owner step, a rail refuses with this
+/// code the steps that it checks for liveness (`RuntimeProvider::validate_owner_signed`): the
+/// refusal is of that attempt, and a later check passes once the wallet is live again. A signed
+/// step that the rail does not check, because it calls the wallet, can be sent after the wallet
+/// lapsed; the network then fails it, which is the step's receipt and not this code. Nothing in
+/// Allowit restores a wallet: its owner keeps it live, or renews or restores it outside Allowit.
 pub const CONTRACT_EXPIRED: &str = "contract_expired";
 
-/// The problem code of an owner step past its time bound: the network can no longer apply it,
-/// and the rail refuses to send it. A step that was sent before ends only on its receipt or on
-/// the proof of its lapse.
+/// The problem code of an owner step at or past its send cutoff
+/// ([`OwnerSignedInfo::expires_at`]): the rail refuses to send it, for good. The code says
+/// nothing about the network. A step that was possibly sent before can still apply, and it ends
+/// only on its receipt or on the proof of its lapse (`RuntimeProvider::owner_step_lapsed`); a
+/// step that its caller knows it never sent is dropped.
 pub const OWNER_TRANSACTION_EXPIRED: &str = "owner_transaction_expired";
 
 /// The problem code of an owner step's preparation whose reads of the ledger crossed more than

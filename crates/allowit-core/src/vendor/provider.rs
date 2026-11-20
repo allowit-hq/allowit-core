@@ -368,10 +368,12 @@ pub trait RuntimeProvider {
     /// the network when the wallet lapsed, and the rail need not read the wallet for it, so `Ok`
     /// does not say that the wallet is live. A refusal is a typed error (`Error::coded`).
     /// [`crate::vendor::runtime::OWNER_TRANSACTION_EXPIRED`] is final: the caller never sends the
-    /// step again, and ends it by its receipt or its lapse. [`crate::vendor::runtime::CONTRACT_EXPIRED`]
-    /// refuses this send: the wallet was lapsed when the rail read it, and the same step passes
-    /// a later check only if its owner restored the wallet before the cutoff. A read that fails
-    /// is an uncertain error (`Error::uncertain`): the caller asks again. The default refuses.
+    /// step again. A step that was possibly sent before then ends by its receipt or its lapse,
+    /// and a step that the caller knows it never sent is dropped.
+    /// [`crate::vendor::runtime::CONTRACT_EXPIRED`] refuses this attempt: the wallet was lapsed
+    /// when the rail read it, and a later check before the cutoff passes once the wallet is live
+    /// again. A read that fails is an uncertain error (`Error::uncertain`): the caller asks
+    /// again. The default refuses.
     fn validate_owner_signed(
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
@@ -394,9 +396,12 @@ pub trait RuntimeProvider {
     /// implements this method guarantees that this is safe: its network applies one signed step
     /// at most once, however often the identical bytes arrive. A lookup that fails is no answer:
     /// the step stays pending, and the caller sends nothing until a lookup answers. A caller
-    /// never signs or sends other bytes for the step while these can still apply. Never a final
-    /// status: only the step's receipt (`observe_owner`) or its lapse
-    /// ([`Self::owner_step_lapsed`]) ends a sent step. The default refuses.
+    /// never signs or sends other bytes for the step while these can still apply. An error that
+    /// is not a refusal of the checks reports that the network rejected this send: the caller
+    /// reports it, and it decides nothing about an earlier attempt of the same step whose
+    /// outcome was uncertain, which stays pending. Never a final status: only the step's
+    /// receipt (`observe_owner`) or its lapse ([`Self::owner_step_lapsed`]) ends a possibly sent
+    /// step. The default refuses.
     fn broadcast_owner(
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
@@ -424,8 +429,8 @@ pub trait RuntimeProvider {
     /// Whether the sent owner step `p` lapsed: it never applied and can no longer apply. The
     /// server prepared it at height `since`. The rail looks the step up by its own identity
     /// ([`crate::vendor::runtime::OwnerSigned::info`]). `false` means not proven, and the step
-    /// stays pending; a read that fails is an error. A caller drops a sent step only on its
-    /// receipt or on this proof. The default refuses.
+    /// stays pending; a read that fails is an error. A caller drops a possibly sent step only on
+    /// its receipt or on this proof. The default refuses.
     fn owner_step_lapsed(
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
