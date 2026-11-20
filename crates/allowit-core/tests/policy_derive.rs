@@ -2347,10 +2347,10 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
     let derived = derive(&daily_and_question("", consumed)).unwrap();
     assert!(derived.figures.is_empty());
     // A rule in a local function denies only that function: its caller can catch the denial.
-    let caught = daily_and_question(rule, "    assert!(score > 9000 || under_cap(ctx).is_err());\n")
+    let caught = daily_and_question(rule, "    assert!(score > 9000 || within_limit(ctx).is_err());\n")
         .replace(
             "pub fn execute",
-            "fn under_cap(ctx: &AllowitContext) -> allowit::Result {\n    allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\npub fn execute",
+            "fn within_limit(ctx: &AllowitContext) -> allowit::Result {\n    allowit::daily_spending_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n    Ok(())\n}\npub fn execute",
         );
     let error = derive(&caught).unwrap_err();
     assert!(
