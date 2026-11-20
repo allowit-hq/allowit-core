@@ -2355,17 +2355,20 @@ pub fn derive(source: &str) -> Result<Derived> {
         ));
     }
 
-    // A daily value that the chain keeps must not reach a statement that left: the contract
-    // counts the value's window in its own clock and does not run that statement again, so
-    // nothing holds the operation inside the window in which the server evaluated it. For
-    // each daily key that the server does not keep, find a statement that left and that the
-    // value can reach. [`finish`] refuses the source when the chain keeps that key.
+    // A statement that left runs once, on the server, when it prepares the operation. Two
+    // values can differ by the time the ledger applies the operation: a daily value that the
+    // chain keeps, whose window the contract counts in its own clock, and the time of the
+    // request, which the contract reads from the settlement ledger. Neither may reach a
+    // statement that left. For each such value, find a statement that left and that the value
+    // can reach. [`finish`] refuses the source for the time of the request, and for a daily
+    // value when the chain keeps it.
     let mut reaching: Vec<Reach> = vec![];
     if changed {
         let left = covered(&gone);
         let server_keys = p.server_keys.borrow().clone();
-        // The canonical rules that read the daily figure `key`: a call of one gives a value of
-        // the figure, as a read does, unless the statement discards that value.
+        // The canonical rules that read the daily figure `key`: every call of one gives a value
+        // of the figure, as a read does. Also a call that only denies: its outcome is the
+        // figure's.
         let rules_of = |key: &str| -> &'static [&'static str] {
             FIGURES
                 .iter()
@@ -2376,31 +2379,16 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // The rule calls that only deny `execute`: a call that is a statement by itself,
-        // `allowit::<rule>(...)?;` after its attributes, among the statements of `execute` and
-        // of the blocks of its split statements. Its `?` ends `execute` with the denial, and
-        // nothing reads what the rule returns. Every other call counts as one that can pass
-        // on the value or the outcome of the rule: a call inside a larger expression, a call
-        // in a local function, whose `?` only ends that function, and a call in a statement
-        // that is not split, where the derivation does not read the statements one by one.
-        let denying: HashSet<usize> = all
-            .iter()
-            .copied()
-            .filter(|id| in_execute(*id) && p.nodes[*id].shape == Shape::Whole)
-            .filter_map(|id| {
-                let (at, last) = (p.nodes[id].key, p.nodes[id].last);
-                p.allowit_path(at)?;
-                let paren = if p.text(at + 3) == "::" && p.text(at + 4) == "<" {
-                    p.after_generics(at + 4)?
-                } else {
-                    at + 3
-                };
-                let close = p.close(paren).filter(|_| p.text(paren) == "(")?;
-                (p.text(close + 1) == "?" && close + 2 == last && p.text(last) == ";").then_some(at)
-            })
-            .collect();
-        let discards = |i: usize| denying.contains(&i);
-        let daily: BTreeSet<&str> = uses
+        // A token that gives the time of the request: a read of the field `now`, of the request
+        // or of a copy of it, and a call of the canonical rule that compares the time with the
+        // owner's expiry.
+        let timed = |i: usize| {
+            (p.word(i) == Some("now") && p.text(i.wrapping_sub(1)) == ".")
+                || p.allowit_path(i) == Some("expires_at")
+        };
+        // The values that must not reach a statement that left: each daily key that the server
+        // does not keep, each daily figure that a rule reads, and the time of the request.
+        let values: Vec<&str> = uses
             .iter()
             .filter(|state| !state.writes && state.key.starts_with(DAILY_PREFIX))
             .map(|state| state.key.as_str())
@@ -2408,11 +2396,12 @@ pub fn derive(source: &str) -> Result<Derived> {
             .chain(
                 FIGURES
                     .iter()
-                    .filter(|(figure, rules)| {
-                        figure.daily && (0..count).any(|i| ruled(i, rules) && !discards(i))
-                    })
+                    .filter(|(figure, rules)| figure.daily && (0..count).any(|i| ruled(i, rules)))
                     .map(|(figure, _)| figure.key),
             )
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .chain((0..count).any(&timed).then_some(REQUEST_TIME))
             .collect();
         // The local function whose own tokens hold token `i`: the innermost one.
         let function_of = |i: usize| {
@@ -2451,19 +2440,20 @@ pub fn derive(source: &str) -> Result<Derived> {
             .copied()
             .filter(|id| gone[*id] && step(*id))
             .collect();
-        for key in daily {
+        for key in values {
             // The tokens that give the value by themselves: each read of the key and, for a
-            // daily figure, each call of a canonical rule that reads it, unless that call only
-            // denies `execute`. A rule that only denies needs no bound, also when only the
-            // server runs it: the figure only grows inside its window, so the server judges at
-            // least the value that the execution finds.
+            // daily figure, each call of a canonical rule that reads it; for the time of the
+            // request, each read of it and each call of its rule.
             let rules = rules_of(key);
-            let reads: HashSet<usize> = uses
-                .iter()
-                .filter(|state| !state.writes && state.key == key)
-                .map(|state| state.at)
-                .chain((0..count).filter(|i| ruled(*i, rules) && !discards(*i)))
-                .collect();
+            let reads: HashSet<usize> = match key {
+                REQUEST_TIME => (0..count).filter(|i| timed(*i)).collect(),
+                _ => uses
+                    .iter()
+                    .filter(|state| !state.writes && state.key == key)
+                    .map(|state| state.at)
+                    .chain((0..count).filter(|i| ruled(*i, rules)))
+                    .collect(),
+            };
             // The local functions that read the key, themselves or through one that they call.
             let mut reading: HashSet<&str> =
                 reads.iter().filter_map(|at| function_of(*at)).collect();
@@ -2481,8 +2471,11 @@ pub fn derive(source: &str) -> Result<Derived> {
             // The statements that stay and depend on the value, and the names that they bind or
             // can assign: a statement that reads the value or such a name, every statement in
             // a branch or a loop on it, and every statement of a loop that such a statement can
-            // end.
-            let mut names: HashSet<String> = HashSet::new();
+            // end. A pattern can bind the request's field `now` under its own name.
+            let mut names: HashSet<String> = match key {
+                REQUEST_TIME => HashSet::from(["now".to_owned()]),
+                _ => HashSet::new(),
+            };
             let mut depends = vec![false; p.nodes.len()];
             loop {
                 let before = names.len() + depends.iter().filter(|d| **d).count();
@@ -2890,15 +2883,21 @@ pub fn derive(source: &str) -> Result<Derived> {
     )
 }
 
-/// A daily value that can reach a statement that left: its key, and the line of that statement.
+/// The name of the time of the request among the values that can reach a statement that left.
+/// No state key has this spelling.
+const REQUEST_TIME: &str = "ctx.request.now";
+
+/// A value that can reach a statement that left: the key of a daily value or [`REQUEST_TIME`],
+/// and the line of that statement.
 struct Reach {
     key: String,
     line: u32,
 }
 
 /// Check the derived policy, list the checks that it keeps and name the keeper of each state
-/// key. `uses` are the state calls of the owner's source. `reaching` are the daily values that
-/// can reach a statement that left: the source is refused when the chain keeps one of them.
+/// key. `uses` are the state calls of the owner's source. `reaching` are the values that can
+/// reach a statement that left: the source is refused for the time of the request, and for a
+/// daily value that the chain keeps.
 fn finish(
     original: &str,
     source: String,
@@ -2953,9 +2952,14 @@ fn finish(
     // it evaluated such a statement on that value.
     for reach in reaching {
         let Reach { key, line } = reach;
+        if key == REQUEST_TIME {
+            return Err(format!(
+                "A statement that only the server runs (line {line}) depends on the time of the request (`ctx.request.now`, or `allowit::expires_at`). The server runs that statement when it prepares the operation, and the wallet contract runs its part at the time of the ledger that settles it, so the two can judge differently. Move the statement before the server function, so that the contract runs it too."
+            ));
+        }
         if standard(key) && figures.iter().any(|figure| figure.key == key) {
             return Err(format!(
-                "A statement that only the server runs (line {line}) depends on the daily figure {key:?}, which the wallet contract keeps for a statement that it runs. The contract counts the figure's window in its own clock and does not run that statement again, so the server cannot hold its answer to that window. Move the statement before the server function, so that the contract runs it too, or check the figure with its canonical rule."
+                "A statement that only the server runs (line {line}) depends on the daily figure {key:?}, which the wallet contract keeps for a rule or a read in the part that it runs. The contract counts the figure's window in its own clock and does not run that statement again, so the server cannot hold its answer to that window. Move the statement before the server function, so that the contract runs it too. Or keep the figure on the server: leave no rule and no read of it in the part that the contract runs."
             ));
         }
         if !standard(key) && chain.contains(key.as_str()) {
