@@ -64,13 +64,23 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   ceiling at admission, and the operation's `Settlement::fee_units` at settlement when
   `Settlement::counted_gas` is `None`.
 - Owner steps that the caller sends, each refused by a rail that does not implement it:
-  `validate_owner_signed` says whether a signed step may be sent now (a typed refusal:
-  `OWNER_TRANSACTION_EXPIRED`, final, past the step's send cutoff, or `CONTRACT_EXPIRED` for this
-  send of a step that does not call its lapsed wallet; an uncertain error when a read failed),
-  `broadcast_owner` sends it once and `owner_status` looks it up, neither with a final status;
+  `validate_owner_signed` says whether a signed step may be sent now, for the installation that it
+  acts on (none for a step that leaves before its wallet is installed). A refusal is typed:
+  `OWNER_TRANSACTION_EXPIRED`, final, at or past the step's send cutoff, or `CONTRACT_EXPIRED` for
+  this send of a step on a wallet that lapsed. With the installation of a wallet of a kind that can
+  lapse, the rail reads the wallet's lifetime and decides by one coherent observation of it; a
+  wallet of a kind that cannot lapse is not read. The rail does not read it for the step that
+  renews or restores the wallet's lifetime: that step is never refused for a lapse. A read that fails is an uncertain
+  error, never a lapse and never a pass. A caller gives the installation of every step on an
+  installed wallet.
+  `broadcast_owner` sends the step once after the same checks and `owner_status` looks it up,
+  neither with a final status; an error of `broadcast_owner` means that nothing of that send is
+  pending;
   only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the step's own
   identity, `OwnerSigned::info`) ends a possibly sent step, also past its cutoff; a step that was
-  never sent is dropped. After an uncertain send the caller looks the
+  never sent is dropped at its cutoff, and before it a refusal for one attempt or a check without
+  an answer is checked again. `Prepared` from a send speaks for that send only. After an uncertain
+  send the caller looks the
   step up first. While the lookup stays inconclusive it may send the same signed bytes again,
   which a rail guarantees to apply at most once; a lookup that fails sends nothing. The send
   cutoff is no proof of a lapse. `prepare_close` prepares the step that closes a wallet of a kind
@@ -150,12 +160,15 @@ which uploads it from its own account and within its fee ceiling when the owner 
 authority. The upload is the transaction of `RuntimeProvider::prepare_code_within`, which a sending account
 signs: the rail prepares it and sends nothing, and the SDK engine sends it and follows it to its receipt like
 any signed operation. The server renews code that wallets share, such as the code of a fixed tier, before it
-lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. A wallet keeps
+lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing in Allowit restores code that lapsed. A wallet keeps
 its own instance live on each call, and a Custom wallet its own code too. A rail refuses to prepare an operation
 or owner step on a wallet whose instance or code lapsed, with the problem code `CONTRACT_EXPIRED`
-(`contract_expired`), before anything is signed. At the send of a signed owner step it refuses, with the same
-code and for that attempt, the steps that it checks for liveness (`validate_owner_signed`); a signed step that
-calls a wallet that lapsed since fails on the network. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+(`contract_expired`), before anything is signed. At the send of a signed owner step on an installed wallet it
+refuses, with the same code and for that attempt, every step but the one that renews or restores the wallet's
+lifetime (`validate_owner_signed`). Nothing in Allowit restores a wallet: its owner restores what lapsed of it,
+its code among that, on its network outside Allowit. The wallet then passes this check again, for every owner
+step that is still before its own send cutoff, the return of its funds among them. The
+owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
@@ -377,7 +390,7 @@ link of the code, `<app origin>/help/<code>`.
 A cause or a step in the catalogue is a claim about every sender of its code. So an entry has a cause only when the
 allow-list `causes` names its code, and a step (the owner's `next` and, for a terminal reader that does something
 else, the agent's `agent`) only when `staticSteps` names it. Each list holds one code per line, so each addition is one
-line of a review against that code's senders. Both lists are empty in this release.
+line of a review against that code's senders. Both lists name `contract_expired` in this release.
 
 `scripts/generate-presentation.mjs` checks the source and writes it to
 [`crates/allowit-core/resources/error-catalogue.json`](crates/allowit-core/resources/error-catalogue.json) and to
@@ -594,7 +607,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.18.1", version = "0.18", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.19.0", version = "0.19", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`

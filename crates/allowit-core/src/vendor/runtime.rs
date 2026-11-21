@@ -430,7 +430,10 @@ impl Resources {
     /// its instance and its code. Without either, it takes no operation or owner step, and the
     /// refusal is the typed condition [`CONTRACT_EXPIRED`], with no HTTP status
     /// (`Error::coded`): a server maps it to its own status, and the caller's workflow says what
-    /// it signed or sent. A keypair wallet has no code; its host does not ask.
+    /// it signed or sent. A keypair wallet has no code; its host does not ask. The helper is for
+    /// an installed contract wallet: a wallet that is not created yet is absent and did not
+    /// lapse, so its host does not ask either, and a rail answers [`CONTRACT_EXPIRED`] before a
+    /// creation only when it established that the code for it lapsed.
     pub fn require_live(&self) -> Result<()> {
         if self.wallet_present && self.code_present {
             return Ok(());
@@ -751,13 +754,17 @@ pub trait Transport: Send + Sync {
 }
 
 /// The problem code of an operation or owner step on a wallet whose instance or code lapsed on
-/// its network. A rail refuses to prepare such an operation or step, before anything is signed
-/// ([`Resources::require_live`]). At the send of a signed owner step, a rail refuses with this
-/// code the steps that it checks for liveness (`RuntimeProvider::validate_owner_signed`): the
-/// refusal is of that attempt, and a later check passes once the wallet is live again. A signed
-/// step that the rail does not check, because it calls the wallet, can be sent after the wallet
-/// lapsed; the network then fails it, which is the step's receipt and not this code. Nothing in
-/// Allowit restores a wallet: its owner keeps it live, or renews or restores it outside Allowit.
+/// its network, and of the creation of a wallet whose code lapsed there. A rail refuses to
+/// prepare such an operation or step, before anything is signed ([`Resources::require_live`]).
+/// At the send of a signed owner step on an installed wallet, a
+/// rail refuses with this code every step but the one that renews or restores the wallet's
+/// lifetime (`RuntimeProvider::validate_owner_signed`): the refusal is of that attempt, and a
+/// later check passes once the wallet is live again. A caller gives the installation of every
+/// step on an installed wallet; only a step that leaves before its wallet is installed has
+/// none. Nothing in Allowit restores a wallet: its owner keeps it live, or restores what lapsed
+/// of it, its code among that, on its network outside Allowit; the wallet is then live again,
+/// and an owner step on it, the return of its funds among them, passes this check while the
+/// step is before its own send cutoff.
 pub const CONTRACT_EXPIRED: &str = "contract_expired";
 
 /// The problem code of an owner step at or past its send cutoff

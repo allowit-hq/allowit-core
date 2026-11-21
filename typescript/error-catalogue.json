@@ -2,8 +2,10 @@
   "schemaVersion": 1,
   "helpPath": "/help/",
   "causes": [
+    "contract_expired"
   ],
   "staticSteps": [
+    "contract_expired"
   ],
   "entries": [
     {"code": "session_ended", "for": "owner", "title": "No valid session"},
@@ -106,7 +108,7 @@
     {"code": "update_unrecorded", "for": "owner", "title": "Update unrecorded"},
     {"code": "nothing_to_return", "for": "owner", "title": "Nothing to return"},
     {"code": "wallet_closed", "for": "owner", "title": "Wallet closed"},
-    {"code": "contract_expired", "for": "owner", "title": "Contract expired"},
+    {"code": "contract_expired", "for": "owner", "title": "Contract expired", "cause": "A wallet's contract or its code passed its lifetime on the network. For a wallet that is not created yet, it is the code that the wallet would run.", "next": "Restore what lapsed on its network with the network's own tools, outside Allowit. A lapsed wallet keeps its funds meanwhile. Restoring clears this refusal only, not an owner step's own time limit.", "agent": "Tell the wallet's owner. Only the owner restores what lapsed, on its network and outside Allowit."},
     {"code": "policy_build_identity_changed", "for": "owner", "title": "Policy build identity mismatch"},
 
     {"code": "policy_unknown", "for": "agent", "title": "Policy unknown"},
