@@ -67,10 +67,10 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   `validate_owner_signed` says whether a signed step may be sent now, for the installation that it
   acts on (none for a step that leaves before its wallet is installed). A refusal is typed:
   `OWNER_TRANSACTION_EXPIRED`, final, at or past the step's send cutoff, or `CONTRACT_EXPIRED` for
-  this send of a step on a wallet that lapsed. With an installation, a rail on whose network a
-  wallet can lapse reads the wallet's lifetime once and decides by it alone; a rail whose wallets
-  cannot lapse reads nothing. It does not read it for the step that renews or restores the wallet's
-  lifetime: that step is never refused for a lapse. A read that fails is an uncertain
+  this send of a step on a wallet that lapsed. With the installation of a wallet of a kind that can
+  lapse, the rail reads the wallet's lifetime and decides by one coherent observation of it; a
+  wallet of a kind that cannot lapse is not read. The rail does not read it for the step that
+  renews or restores the wallet's lifetime: that step is never refused for a lapse. A read that fails is an uncertain
   error, never a lapse and never a pass. A caller gives the installation of every step on an
   installed wallet.
   `broadcast_owner` sends the step once after the same checks and `owner_status` looks it up,
@@ -78,7 +78,9 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   pending;
   only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the step's own
   identity, `OwnerSigned::info`) ends a possibly sent step, also past its cutoff; a step that was
-  never sent is dropped. After an uncertain send the caller looks the
+  never sent is dropped at its cutoff, and before it a refusal for one attempt or a check without
+  an answer is checked again. `Prepared` from a send speaks for that send only. After an uncertain
+  send the caller looks the
   step up first. While the lookup stays inconclusive it may send the same signed bytes again,
   which a rail guarantees to apply at most once; a lookup that fails sends nothing. The send
   cutoff is no proof of a lapse. `prepare_close` prepares the step that closes a wallet of a kind
@@ -164,8 +166,8 @@ or owner step on a wallet whose instance or code lapsed, with the problem code `
 (`contract_expired`), before anything is signed. At the send of a signed owner step on an installed wallet it
 refuses, with the same code and for that attempt, every step but the one that renews or restores the wallet's
 lifetime (`validate_owner_signed`). Nothing in Allowit restores a wallet: its owner restores what lapsed of it,
-its code among that, on its network outside Allowit, and the wallet then takes every owner step again, the
-return of its funds among them. The
+its code among that, on its network outside Allowit. The wallet then passes this check again, for every owner
+step that is still before its own send cutoff, the return of its funds among them. The
 owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
@@ -388,7 +390,7 @@ link of the code, `<app origin>/help/<code>`.
 A cause or a step in the catalogue is a claim about every sender of its code. So an entry has a cause only when the
 allow-list `causes` names its code, and a step (the owner's `next` and, for a terminal reader that does something
 else, the agent's `agent`) only when `staticSteps` names it. Each list holds one code per line, so each addition is one
-line of a review against that code's senders. Both lists are empty in this release.
+line of a review against that code's senders. Both lists name `contract_expired` in this release.
 
 `scripts/generate-presentation.mjs` checks the source and writes it to
 [`crates/allowit-core/resources/error-catalogue.json`](crates/allowit-core/resources/error-catalogue.json) and to

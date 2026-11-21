@@ -372,12 +372,13 @@ pub trait RuntimeProvider {
     /// installation.
     ///
     /// The rail checks the step's send cutoff
-    /// ([`crate::vendor::runtime::OwnerSignedInfo::expires_at`]) first. With an installation, a
-    /// rail on whose network a wallet can lapse then reads the wallet's lifetime once, as one
-    /// answer of its network at one ledger: a network can apply a step that does not call the
-    /// wallet, as a funding, although the wallet lapsed, and a step that calls a lapsed wallet
-    /// fails on the network at its owner's cost. The rail decides by the installation: it reads
-    /// no action name. One step is never read for liveness: the step that renews or restores the
+    /// ([`crate::vendor::runtime::OwnerSignedInfo::expires_at`]) first. With the installation of
+    /// a wallet of a kind that can lapse, the rail then reads the wallet's lifetime, and one
+    /// coherent observation of its network decides: a network can apply a step that does not
+    /// call the wallet, as a funding, although the wallet lapsed, and a step that calls a lapsed
+    /// wallet fails on the network at its owner's cost. A wallet of a kind that cannot lapse is
+    /// not read, also on a network where another kind can. The rail decides by the installation:
+    /// it reads no action name. One step is never read for liveness: the step that renews or restores the
     /// wallet's own lifetime, which the rail knows by the signed transaction itself. It moves
     /// nothing, and it is how a wallet is kept or brought back.
     ///
@@ -405,9 +406,11 @@ pub trait RuntimeProvider {
     /// for the same `on` at `now`: a step that they refuse is that refusal, and nothing is sent.
     /// A check that got no answer is its uncertain error, and nothing is sent either. Each says
     /// nothing about an earlier attempt of the same step, which stays as it was.
-    /// `Submitted` once the network accepted it. `Prepared` when the network did not accept it
-    /// yet: nothing is
-    /// pending, and the caller can send the same bytes again. `SubmissionUnknown` when the
+    /// `Submitted` once the network accepted it. `Prepared` when the network did not accept
+    /// this send: nothing of this send is pending, and the caller can send the same bytes
+    /// again. `Prepared` from a send speaks for that send only: an earlier attempt of the same
+    /// step whose outcome was uncertain stays possibly sent. Only `Prepared` from
+    /// [`Self::owner_status`] says that nothing of the step is pending. `SubmissionUnknown` when the
     /// outcome is uncertain: the caller looks the step up ([`Self::observe_owner`], then
     /// [`Self::owner_status`]) before any other send. A lookup that answers decides: a receipt
     /// ends the step, `Submitted` waits for its receipt, `Prepared` sends again. When the lookup
