@@ -70,7 +70,8 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   send of a step on a wallet that lapsed. With an installation the rail reads the wallet once and
   decides by it alone; the step that renews or restores the wallet's lifetime is never refused for a
   lapse. A read that fails is an uncertain error, never a lapse and never a pass.
-  `broadcast_owner` sends the step once after the same checks and `owner_status` looks it up, neither with a final status;
+  `broadcast_owner` sends the step once after the same checks and `owner_status` looks it up,
+  neither with a final status;
   only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the step's own
   identity, `OwnerSigned::info`) ends a possibly sent step, also past its cutoff; a step that was
   never sent is dropped. After an uncertain send the caller looks the
@@ -159,7 +160,8 @@ or owner step on a wallet whose instance or code lapsed, with the problem code `
 (`contract_expired`), before anything is signed. At the send of a signed owner step on an installed wallet it
 refuses, with the same code and for that attempt, every step but the one that renews or restores the wallet's
 lifetime (`validate_owner_signed`). Nothing in Allowit restores a wallet: its owner restores it on its network
-outside Allowit, and the wallet then takes every owner step again, the return of its funds among them. The owner's one creation signature (`OwnerAction::Create`) names the code by its
+outside Allowit, and the wallet then takes every owner step again, the return of its funds among them. The
+owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
 
