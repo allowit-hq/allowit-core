@@ -2371,6 +2371,34 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
     );
 }
 
+/// A local value named `now` is another value than the time of the request when it is bound
+/// from another one: a source that binds the request's amount under that name and reads it in a
+/// statement that left is admitted, as the same source with another name is, and the two leave
+/// and keep the same parts.
+#[test]
+fn a_local_value_named_now_that_is_not_the_time_is_admitted() {
+    let named = |name: &str| {
+        daily_and_question(
+            &format!("    let {name} = ctx.request.amount;\n"),
+            &format!("    assert!(score > 9000 || {name} > 5);\n"),
+        )
+    };
+    let now = derive(&named("now")).unwrap();
+    let amount = derive(&named("amount")).unwrap();
+    assert_eq!((&now.kept, &now.left), (&amount.kept, &amount.left));
+    assert_eq!(now.source.replace("now", "amount"), amount.source);
+    // A stated type and a block that returns the value change nothing.
+    let typed = |name: &str| {
+        daily_and_question(
+            &format!("    let {name}: i128 = ctx.request.amount;\n"),
+            &format!("    assert!(score > 9000 || {{ {name} }} > 5);\n"),
+        )
+    };
+    let now = derive(&typed("now")).unwrap();
+    let amount = derive(&typed("amount")).unwrap();
+    assert_eq!((&now.kept, &now.left), (&amount.kept, &amount.left));
+}
+
 /// The time of the request is another value that the ledger judges at the settlement: the
 /// server runs a statement that left when it prepares the operation, and the contract reads the
 /// time of its ledger. A statement that left cannot depend on `ctx.request.now`, on the value or
@@ -2417,6 +2445,28 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         ),
         9,
     );
+    // The same under the name `now`: a local value that is bound from the time.
+    timed(
+        &daily_and_question(
+            "    let now = ctx.request.now;\n",
+            "    assert!(score > 9000 || now % 2 == 0);\n",
+        ),
+        9,
+    );
+    // A pattern binds the field by reference, mutably or with an attribute.
+    for (binding, read) in [
+        ("ref now", "*now"),
+        ("mut now", "now"),
+        ("#[allow(unused_variables)] now", "now"),
+    ] {
+        timed(
+            &daily_and_question(
+                &format!("    let AllowitRequest {{ {binding}, .. }} = ctx.request.clone();\n"),
+                &format!("    assert!(score > 9000 || {read} < 1_800_000_000);\n"),
+            ),
+            9,
+        );
+    }
     // A pattern binds the field, under its own name or another, with no dotted read of the time
     // and no call of the rule anywhere in the source; also in a local function. The `let` leaves
     // with the statement that reads its name, as above.
