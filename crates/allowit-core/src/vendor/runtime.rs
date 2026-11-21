@@ -430,7 +430,10 @@ impl Resources {
     /// its instance and its code. Without either, it takes no operation or owner step, and the
     /// refusal is the typed condition [`CONTRACT_EXPIRED`], with no HTTP status
     /// (`Error::coded`): a server maps it to its own status, and the caller's workflow says what
-    /// it signed or sent. A keypair wallet has no code; its host does not ask.
+    /// it signed or sent. A keypair wallet has no code; its host does not ask. The helper is for
+    /// an installed contract wallet: a wallet that is not created yet is absent and did not
+    /// lapse, so its host does not ask either, and a rail answers [`CONTRACT_EXPIRED`] before a
+    /// creation only when it established that the code for it lapsed.
     pub fn require_live(&self) -> Result<()> {
         if self.wallet_present && self.code_present {
             return Ok(());
