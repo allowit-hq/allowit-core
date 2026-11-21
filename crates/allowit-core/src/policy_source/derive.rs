@@ -80,8 +80,9 @@
 //! 4. It may not depend on the time of the request: `ctx.request.now`, read from the request
 //!    or from a copy of it or bound by a pattern, or the value or the outcome of
 //!    `allowit::expires_at`. The server evaluates at the preparation, and the contract at the
-//!    settlement ledger. Every field `now`, read after a dot or bound by a struct pattern,
-//!    counts as the time. A local value named `now` counts only when it is bound from the time.
+//!    settlement ledger. Every field `now`, read after a dot or named in the braces of a struct
+//!    pattern or expression, also after `ref`, `mut` or an attribute, counts as the time. A local
+//!    value named `now` counts only when it is bound from the time.
 //! 5. "Depends" is one reach rule for 3 and 4. The statement:
 //!    - reads the value, itself or through a local function that reads it;
 //!    - reads a name that depends on the value: a name that a kept statement binds or can
@@ -102,8 +103,9 @@
 //!
 //! The rule refuses more than it must, never less. It follows names, as the whole derivation
 //! does, so it can refuse a statement that reads another value under the same name, such as a
-//! field `now` of another value, or a local value that shares its name with one bound from the
-//! time. And it does not follow where an exit leads: it resolves no label and no exclusive
+//! field `now` of another value, a local value named `now` that a block after a name returns
+//! (`if ready { now }` reads as a struct), or a local value that shares its name with one bound
+//! from the time. And it does not follow where an exit leads: it resolves no label and no exclusive
 //! branch, so every loop and labeled block around such an exit counts, and every statement that
 //! left after such a `return` counts, also one that the exit could not skip. A name that a statement can assign counts as assigned by
 //! each dependent statement that mentions it. The owner states such an exit as a denial, moves
@@ -585,19 +587,74 @@ impl<'a> Parsed<'a> {
 
     /// Whether token `i` is a field `now`: read after a dot (`ctx.request.now`, `request.now`),
     /// or named by a struct pattern or a struct expression (`AllowitRequest { now, .. }`,
-    /// `{ now: at, .. }`). A local value named `now` is no field.
+    /// `AllowitRequest { ref now, .. }`, `S { now: at, .. }`), also after `ref`, `mut` or an
+    /// attribute. A local value named `now`, also one that a block returns (`{ now }`), is no
+    /// field.
     fn now_field(&self, i: usize) -> bool {
         if self.word(i) != Some("now") {
             return false;
         }
-        match self.text(i.wrapping_sub(1)) {
-            "." => true,
-            "{" | "," => {
-                matches!(self.text(i + 1), "," | "}" | ":")
-                    && self.enclosing(i).is_some_and(|open| self.text(open) == "{")
-            }
-            _ => false,
+        if self.text(i.wrapping_sub(1)) == "." {
+            return true;
         }
+        if !matches!(self.text(i + 1), "," | "}" | ":")
+            || !self
+                .enclosing(i)
+                .is_some_and(|open| self.struct_brace(open))
+        {
+            return false;
+        }
+        // The field stands first in the braces or after a comma, with only `ref`, `mut` and
+        // attributes before its name.
+        let mut j = i.wrapping_sub(1);
+        loop {
+            match self.text(j) {
+                "ref" | "mut" => j = j.wrapping_sub(1),
+                "]" => match self.opening(j) {
+                    Some(start) if self.text(start.wrapping_sub(1)) == "#" => {
+                        j = start.wrapping_sub(2);
+                    }
+                    _ => return false,
+                },
+                "{" | "," => return true,
+                _ => return false,
+            }
+        }
+    }
+
+    /// Whether the brace at `open` holds the fields of a struct: a path ends before it. A block
+    /// after a keyword or an operator holds statements.
+    fn struct_brace(&self, open: usize) -> bool {
+        self.text(open) == "{"
+            && match self.word(open.wrapping_sub(1)) {
+                Some(word) => !matches!(
+                    word,
+                    "else"
+                        | "loop"
+                        | "unsafe"
+                        | "async"
+                        | "move"
+                        | "const"
+                        | "try"
+                        | "in"
+                        | "return"
+                ),
+                None => self.text(open.wrapping_sub(1)) == ">",
+            }
+    }
+
+    /// The bracket that opens the one that closes at `close`.
+    fn opening(&self, close: usize) -> Option<usize> {
+        let mut depth = 0i64;
+        for j in (0..close).rev() {
+            match self.text(j) {
+                ")" | "]" | "}" => depth += 1,
+                "(" | "[" | "{" if depth == 0 => return Some(j),
+                "(" | "[" | "{" => depth -= 1,
+                _ => {}
+            }
+        }
+        None
     }
 
     /// The bracket that most closely encloses token `i`.

@@ -2387,6 +2387,16 @@ fn a_local_value_named_now_that_is_not_the_time_is_admitted() {
     let amount = derive(&named("amount")).unwrap();
     assert_eq!((&now.kept, &now.left), (&amount.kept, &amount.left));
     assert_eq!(now.source.replace("now", "amount"), amount.source);
+    // A stated type and a block that returns the value change nothing.
+    let typed = |name: &str| {
+        daily_and_question(
+            &format!("    let {name}: u64 = ctx.request.amount;\n"),
+            &format!("    assert!(score > 9000 || {{ {name} }} > 5);\n"),
+        )
+    };
+    let now = derive(&typed("now")).unwrap();
+    let amount = derive(&typed("amount")).unwrap();
+    assert_eq!((&now.kept, &now.left), (&amount.kept, &amount.left));
 }
 
 /// The time of the request is another value that the ledger judges at the settlement: the
@@ -2443,6 +2453,16 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         ),
         9,
     );
+    // A pattern binds the field by reference, mutably or with an attribute.
+    for binding in ["ref now", "mut now", "#[allow(unused_variables)] now"] {
+        timed(
+            &daily_and_question(
+                &format!("    let AllowitRequest {{ {binding}, .. }} = ctx.request.clone();\n"),
+                "    assert!(score > 9000 || now < 1_800_000_000);\n",
+            ),
+            9,
+        );
+    }
     // A pattern binds the field, under its own name or another, with no dotted read of the time
     // and no call of the rule anywhere in the source; also in a local function. The `let` leaves
     // with the statement that reads its name, as above.
