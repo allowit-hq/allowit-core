@@ -387,7 +387,8 @@ pub trait RuntimeProvider {
     /// and a step that the caller knows it never sent is dropped.
     /// [`crate::vendor::runtime::CONTRACT_EXPIRED`] refuses this attempt: the wallet was lapsed
     /// when the rail read it, and a later check before the cutoff passes once the wallet is live
-    /// again. A read that fails is an uncertain error (`Error::uncertain`), never a lapse and
+    /// again. The check is of the read and promises nothing about the moment at which the
+    /// network applies the step: a wallet that lapses after the read is not refused. A read that fails is an uncertain error (`Error::uncertain`), never a lapse and
     /// never a pass: the caller asks again. The default refuses.
     fn validate_owner_signed(
         &self,
