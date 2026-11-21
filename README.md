@@ -288,7 +288,9 @@ then.
    again. Every call of a canonical daily rule on such a figure counts, also one that only denies.
 4. It may not depend on the time of the request: `ctx.request.now`, or the value or the outcome of
    `allowit::expires_at`. The server evaluates at the preparation, and the contract at the settlement ledger. Every
-   use of the name `now` counts as the time, also one that a pattern binds.
+   field `now`, read after a dot or named in the braces of a struct pattern or expression (also after `ref`, `mut` or
+   an attribute), counts as the time. A local value named `now` counts when it is bound from the time, and when it
+   stands where a struct field can: in a block after a name, such as `if ready { now }`.
 5. "Depends" is one reach rule for 3 and 4: the statement reads the value (also through a local function), reads a
    name that a kept statement binds or can assign from it, stands in a branch or a loop on it or in a loop or labeled
    block around a dependent exit, or follows a dependent approval. The rule refuses more than it must, never less: it
@@ -592,7 +594,7 @@ The portable `String` has only the traits of a native contract string. Host code
 A host dependency names a tag and its minor version:
 
 ```toml
-allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.18.0", version = "0.18", default-features = false, features = ["client", "transport"] }
+allowit-core = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.18.1", version = "0.18", default-features = false, features = ["client", "transport"] }
 ```
 
 The crate supports its minimal `no_std` host profile. The policy evaluator requires `std`
