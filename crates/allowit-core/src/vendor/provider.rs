@@ -367,14 +367,13 @@ pub trait RuntimeProvider {
     ///
     /// The rail checks the step's send cutoff
     /// ([`crate::vendor::runtime::OwnerSignedInfo::expires_at`]) first. With an installation, a
-    /// rail on whose network a wallet can lapse then reads the wallet once
-    /// ([`Self::resources`], [`crate::vendor::runtime::Resources::require_live`]): a network can
-    /// apply a step that does not call the wallet, as a funding, although the wallet lapsed, and
-    /// a step that calls a lapsed wallet fails on the network at its owner's cost. The rail
-    /// decides by the installation: it reads no action name. One step is never read for
-    /// liveness: the step that renews or restores the wallet's own lifetime, which the rail
-    /// knows by the signed transaction itself. It moves nothing, and it is how a wallet is kept
-    /// or brought back.
+    /// rail on whose network a wallet can lapse then reads the wallet's lifetime once, as one
+    /// answer of its network at one ledger: a network can apply a step that does not call the
+    /// wallet, as a funding, although the wallet lapsed, and a step that calls a lapsed wallet
+    /// fails on the network at its owner's cost. The rail decides by the installation: it reads
+    /// no action name. One step is never read for liveness: the step that renews or restores the
+    /// wallet's own lifetime, which the rail knows by the signed transaction itself. It moves
+    /// nothing, and it is how a wallet is kept or brought back.
     ///
     /// A refusal is a typed error (`Error::coded`).
     /// [`crate::vendor::runtime::OWNER_TRANSACTION_EXPIRED`] is final: the caller never sends the
