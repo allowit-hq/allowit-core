@@ -752,12 +752,14 @@ pub trait Transport: Send + Sync {
 
 /// The problem code of an operation or owner step on a wallet whose instance or code lapsed on
 /// its network. A rail refuses to prepare such an operation or step, before anything is signed
-/// ([`Resources::require_live`]). At the send of a signed owner step, a rail refuses with this
-/// code the steps that it checks for liveness (`RuntimeProvider::validate_owner_signed`): the
-/// refusal is of that attempt, and a later check passes once the wallet is live again. A signed
-/// step that the rail does not check, because it calls the wallet, can be sent after the wallet
-/// lapsed; the network then fails it, which is the step's receipt and not this code. Nothing in
-/// Allowit restores a wallet: its owner keeps it live, or renews or restores it outside Allowit.
+/// ([`Resources::require_live`]). At the send of a signed owner step on an installed wallet, a
+/// rail refuses with this code every step but the one that renews or restores the wallet's
+/// lifetime (`RuntimeProvider::validate_owner_signed`): the refusal is of that attempt, and a
+/// later check passes once the wallet is live again. A step that the caller sends without its
+/// installation is not checked; when it calls a wallet that lapsed, the network fails it, which
+/// is the step's receipt and not this code. Nothing in Allowit restores a wallet: its owner
+/// keeps it live, or restores it on its network outside Allowit; the wallet is then live again,
+/// and every owner step on it, the return of its funds among them, passes this check.
 pub const CONTRACT_EXPIRED: &str = "contract_expired";
 
 /// The problem code of an owner step at or past its send cutoff

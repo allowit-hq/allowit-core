@@ -361,31 +361,43 @@ pub trait RuntimeProvider {
         p: &crate::vendor::runtime::OwnerSigned,
     ) -> Result<Option<crate::vendor::runtime::Receipt>>;
     /// Whether the caller may send the owner-signed step `p` at `now`, by the rail's own rules.
+    /// `on` is the installation that the step acts on, or `None` for a step that leaves before
+    /// its wallet is installed, as a creation; the caller's record of the step binds it to its
+    /// installation.
+    ///
     /// The rail checks the step's send cutoff
-    /// ([`crate::vendor::runtime::OwnerSignedInfo::expires_at`]), and the liveness of the wallet
-    /// for a step that a network would apply although the wallet lapsed: a step that does not
-    /// call the wallet, as a funding of a contract wallet. A step that calls its wallet fails on
-    /// the network when the wallet lapsed, and the rail need not read the wallet for it, so `Ok`
-    /// does not say that the wallet is live. A refusal is a typed error (`Error::coded`).
+    /// ([`crate::vendor::runtime::OwnerSignedInfo::expires_at`]) first. With an installation, a
+    /// rail on whose network a wallet can lapse then reads the wallet once
+    /// ([`Self::resources`], [`crate::vendor::runtime::Resources::require_live`]): a network can
+    /// apply a step that does not call the wallet, as a funding, although the wallet lapsed, and
+    /// a step that calls a lapsed wallet fails on the network at its owner's cost. The rail
+    /// decides by the installation: it reads no action name. One step is never read for
+    /// liveness: the step that renews or restores the wallet's own lifetime, which the rail
+    /// knows by the signed transaction itself. It moves nothing, and it is how a wallet is kept
+    /// or brought back.
+    ///
+    /// A refusal is a typed error (`Error::coded`).
     /// [`crate::vendor::runtime::OWNER_TRANSACTION_EXPIRED`] is final: the caller never sends the
     /// step again. A step that was possibly sent before then ends by its receipt or its lapse,
     /// and a step that the caller knows it never sent is dropped.
     /// [`crate::vendor::runtime::CONTRACT_EXPIRED`] refuses this attempt: the wallet was lapsed
     /// when the rail read it, and a later check before the cutoff passes once the wallet is live
-    /// again. A read that fails is an uncertain error (`Error::uncertain`): the caller asks
-    /// again. The default refuses.
+    /// again. A read that fails is an uncertain error (`Error::uncertain`), never a lapse and
+    /// never a pass: the caller asks again. The default refuses.
     fn validate_owner_signed(
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
+        on: Option<&crate::vendor::runtime::Installation>,
         now: u64,
     ) -> Result<()> {
-        let _ = (p, now);
+        let _ = (p, on, now);
         Err(Error::unsupported(
             "This rail does not check an owner step before it is sent",
         ))
     }
     /// Send the owner-signed step `p` once, after the checks of [`Self::validate_owner_signed`]
-    /// at `now`: a step that they refuse is that refusal, and nothing is sent. `Submitted` once
+    /// for the same `on` at `now`: a step that they refuse is that refusal, and nothing is sent.
+    /// `Submitted` once
     /// the network accepted it. `Prepared` when the network did not accept it yet: nothing is
     /// pending, and the caller can send the same bytes again. `SubmissionUnknown` when the
     /// outcome is uncertain: the caller looks the step up ([`Self::observe_owner`], then
@@ -405,9 +417,10 @@ pub trait RuntimeProvider {
     fn broadcast_owner(
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
+        on: Option<&crate::vendor::runtime::Installation>,
         now: u64,
     ) -> Result<crate::vendor::runtime::Status> {
-        let _ = (p, now);
+        let _ = (p, on, now);
         Err(Error::unsupported(
             "This rail does not send an owner step once",
         ))
@@ -1021,8 +1034,8 @@ mod defaults {
     fn a_rail_refuses_the_owner_steps_that_it_does_not_implement() {
         use crate::vendor::runtime::OwnerSigned;
         let step = OwnerSigned(packet());
-        assert_eq!(refused(Bare.validate_owner_signed(&step, 1)), 3);
-        assert_eq!(refused(Bare.broadcast_owner(&step, 1)), 3);
+        assert_eq!(refused(Bare.validate_owner_signed(&step, None, 1)), 3);
+        assert_eq!(refused(Bare.broadcast_owner(&step, None, 1)), 3);
         assert_eq!(refused(Bare.owner_status(&step)), 3);
         assert_eq!(refused(Bare.owner_step_lapsed(&step, 1)), 3);
         assert_eq!(refused(Bare.wallet_closed(&installation())), 3);
