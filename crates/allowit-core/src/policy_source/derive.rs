@@ -80,7 +80,8 @@
 //! 4. It may not depend on the time of the request: `ctx.request.now`, read from the request
 //!    or from a copy of it or bound by a pattern, or the value or the outcome of
 //!    `allowit::expires_at`. The server evaluates at the preparation, and the contract at the
-//!    settlement ledger. Every use of the name `now` counts as the time.
+//!    settlement ledger. Every field `now`, read after a dot or bound by a struct pattern,
+//!    counts as the time. A local value named `now` counts only when it is bound from the time.
 //! 5. "Depends" is one reach rule for 3 and 4. The statement:
 //!    - reads the value, itself or through a local function that reads it;
 //!    - reads a name that depends on the value: a name that a kept statement binds or can
@@ -101,10 +102,10 @@
 //!
 //! The rule refuses more than it must, never less. It follows names, as the whole derivation
 //! does, so it can refuse a statement that reads another value under the same name, such as a
-//! local value named `now` or a field `now` of another value. And it does not follow where an
-//! exit leads: it resolves no label and no exclusive branch, so every loop and labeled block
-//! around such an exit counts, and every statement that left after such a `return` counts, also
-//! one that the exit could not skip. A name that a statement can assign counts as assigned by
+//! field `now` of another value, or a local value that shares its name with one bound from the
+//! time. And it does not follow where an exit leads: it resolves no label and no exclusive
+//! branch, so every loop and labeled block around such an exit counts, and every statement that
+//! left after such a `return` counts, also one that the exit could not skip. A name that a statement can assign counts as assigned by
 //! each dependent statement that mentions it. The owner states such an exit as a denial, moves
 //! the statement that needs the server out of the loop or before the exit, or uses another
 //! name.
@@ -580,6 +581,37 @@ impl<'a> Parsed<'a> {
         self.tokens
             .get(i)
             .map_or("", |token| &self.source[token.start..token.end])
+    }
+
+    /// Whether token `i` is a field `now`: read after a dot (`ctx.request.now`, `request.now`),
+    /// or named by a struct pattern or a struct expression (`AllowitRequest { now, .. }`,
+    /// `{ now: at, .. }`). A local value named `now` is no field.
+    fn now_field(&self, i: usize) -> bool {
+        if self.word(i) != Some("now") {
+            return false;
+        }
+        match self.text(i.wrapping_sub(1)) {
+            "." => true,
+            "{" | "," => {
+                matches!(self.text(i + 1), "," | "}" | ":")
+                    && self.enclosing(i).is_some_and(|open| self.text(open) == "{")
+            }
+            _ => false,
+        }
+    }
+
+    /// The bracket that most closely encloses token `i`.
+    fn enclosing(&self, i: usize) -> Option<usize> {
+        let mut depth = 0i64;
+        for j in (0..i).rev() {
+            match self.text(j) {
+                ")" | "]" | "}" => depth += 1,
+                "(" | "[" | "{" if depth == 0 => return Some(j),
+                "(" | "[" | "{" => depth -= 1,
+                _ => {}
+            }
+        }
+        None
     }
 
     /// Token `i` as a name: a word, without its raw prefix.
@@ -2391,14 +2423,13 @@ pub fn derive(source: &str) -> Result<Derived> {
             p.allowit_path(i)
                 .is_some_and(|function| rules.contains(&function))
         };
-        // A token that gives the time of the request: the name `now`, as a field that a
-        // statement reads from the request or from a copy of it, as a field that a pattern binds
-        // (`AllowitRequest { now, .. }`, `{ now: at, .. }`), or as a local name; and a call of
-        // the canonical rule `expires_at`, which compares the time with the owner's param.
-        let timed = |i: usize| {
-            (p.word(i) == Some("now") && p.text(i.wrapping_sub(1)) != "::")
-                || p.allowit_path(i) == Some("expires_at")
-        };
+        // A token that gives the time of the request: the field `now`, as a statement reads it
+        // from the request or from a copy of it, or as a pattern binds it
+        // (`AllowitRequest { now, .. }`, `{ now: at, .. }`); and a call of the canonical rule
+        // `expires_at`, which compares the time with the owner's param. A local name depends on
+        // the time only when it is bound from it: the reach rule follows it, as it follows a name
+        // bound from a daily value.
+        let timed = |i: usize| p.now_field(i) || p.allowit_path(i) == Some("expires_at");
         // The values that must not reach a statement that left: each daily key that the server
         // does not keep, each daily figure that a rule reads, and the time of the request.
         let values: Vec<&str> = uses

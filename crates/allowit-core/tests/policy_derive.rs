@@ -2371,6 +2371,24 @@ fn a_daily_value_that_the_server_keeps_and_a_lasting_value_reach_a_leaving_state
     );
 }
 
+/// A local value named `now` is another value than the time of the request when it is bound
+/// from another one: a source that binds the request's amount under that name and reads it in a
+/// statement that left is admitted, as the same source with another name is, and the two leave
+/// and keep the same parts.
+#[test]
+fn a_local_value_named_now_that_is_not_the_time_is_admitted() {
+    let named = |name: &str| {
+        daily_and_question(
+            &format!("    let {name} = ctx.request.amount;\n"),
+            &format!("    assert!(score > 9000 || {name} > 5);\n"),
+        )
+    };
+    let now = derive(&named("now")).unwrap();
+    let amount = derive(&named("amount")).unwrap();
+    assert_eq!((&now.kept, &now.left), (&amount.kept, &amount.left));
+    assert_eq!(now.source.replace("now", "amount"), amount.source);
+}
+
 /// The time of the request is another value that the ledger judges at the settlement: the
 /// server runs a statement that left when it prepares the operation, and the contract reads the
 /// time of its ledger. A statement that left cannot depend on `ctx.request.now`, on the value or
@@ -2414,6 +2432,14 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         &daily_and_question(
             "    let at = ctx.request.now;\n",
             "    assert!(score > 9000 || at % 2 == 0);\n",
+        ),
+        9,
+    );
+    // The same under the name `now`: a local value that is bound from the time.
+    timed(
+        &daily_and_question(
+            "    let now = ctx.request.now;\n",
+            "    assert!(score > 9000 || now % 2 == 0);\n",
         ),
         9,
     );
