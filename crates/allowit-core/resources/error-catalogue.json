@@ -103,7 +103,7 @@
     {"code": "update_unrecorded", "for": "owner", "title": "Update unrecorded"},
     {"code": "nothing_to_return", "for": "owner", "title": "Nothing to return"},
     {"code": "wallet_closed", "for": "owner", "title": "Wallet closed"},
-    {"code": "contract_expired", "for": "owner", "title": "Contract expired", "cause": "The wallet's contract or its code passed its lifetime on the network. A lapsed wallet takes no payment and no owner step, and its funds stay in it.", "next": "Restore the wallet on its network with the network's own tools, outside Allowit. The wallet then takes every owner step, the return of its funds among them."},
+    {"code": "contract_expired", "for": "owner", "title": "Contract expired", "cause": "The wallet's contract or its code passed its lifetime on the network. Its funds stay in it until its owner restores it.", "next": "Restore the wallet on its network with the network's own tools, outside Allowit. The wallet then takes every owner step, the return of its funds among them.", "agent": "Tell the wallet's owner. Only the owner restores the wallet, on its network and outside Allowit."},
     {"code": "policy_build_identity_changed", "for": "owner", "title": "Policy build identity mismatch"},
     {"code": "policy_unknown", "for": "agent", "title": "Policy unknown"},
     {"code": "not_policy_agent", "for": "agent", "title": "Not the policy's agent"},

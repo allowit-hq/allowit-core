@@ -244,8 +244,8 @@ pub trait RuntimeProvider {
     /// sending accounts and signed by it, with the network fee bounded by `max_fee` in the rail's
     /// native units. A fee above `max_fee` is refused before anything is signed. `None` when the
     /// network has the code live: nothing is needed. The server pays the upload, and it gives no
-    /// authority: the owner's creation names the code by its hash. Nothing restores code that
-    /// lapsed.
+    /// authority: the owner's creation names the code by its hash. Nothing in Allowit restores
+    /// code that lapsed.
     ///
     /// The rail sends nothing. The caller submits the transaction as any signed operation, with
     /// `broadcast`, and follows it with `status` and `observe`. Its identity,
@@ -273,9 +273,9 @@ pub trait RuntimeProvider {
     /// `None` while the code's lifetime is above the rail's renewal threshold. The server renews
     /// the code that it uploaded and that wallets share, such as the code of a fixed tier; it pays
     /// the renewal, charges it to no request, and the renewal gives no authority. Code that lapsed
-    /// is not renewed: nothing restores it. The packet takes the path of a code upload: the
-    /// caller sends it with `broadcast` and reads its receipt with `observe`. A rail without
-    /// code renewals refuses.
+    /// is not renewed: nothing in Allowit restores it. The packet takes the path of a code
+    /// upload: the caller sends it with `broadcast` and reads its receipt with `observe`. A rail
+    /// without code renewals refuses.
     fn prepare_code_renewal(
         &self,
         code: &[u8; 32],
@@ -330,7 +330,9 @@ pub trait RuntimeProvider {
         ))
     }
     /// Prepare the owner step of a params update on an active wallet. The packet takes the
-    /// path of every owner packet: `read_owner_signed`, `submit_owner` and `observe_owner`.
+    /// path of every owner packet: `read_owner_signed`, then the check and the send of the
+    /// signed step with the installation `i` ([`Self::validate_owner_signed`],
+    /// [`Self::broadcast_owner`]), and `observe_owner`.
     /// A rail refuses an update whose expected revision is not the installed one.
     fn prepare_params_update(
         &self,
@@ -349,6 +351,10 @@ pub trait RuntimeProvider {
         p: &crate::vendor::runtime::OwnerPacket,
         signed_payload: &[u8],
     ) -> Result<crate::vendor::runtime::OwnerSigned>;
+    /// The send-and-wait loop of a rail, of the contract before the caller's own owner steps. It
+    /// takes no installation and reads no wallet: a caller sends an owner step with
+    /// [`Self::validate_owner_signed`] and [`Self::broadcast_owner`] and does not call this
+    /// method. It leaves the trait with the other superseded methods.
     fn submit_owner<'a>(
         &self,
         p: &crate::vendor::runtime::OwnerSigned,
@@ -396,8 +402,10 @@ pub trait RuntimeProvider {
     }
     /// Send the owner-signed step `p` once, after the checks of [`Self::validate_owner_signed`]
     /// for the same `on` at `now`: a step that they refuse is that refusal, and nothing is sent.
-    /// `Submitted` once
-    /// the network accepted it. `Prepared` when the network did not accept it yet: nothing is
+    /// A check that got no answer is its uncertain error, and nothing is sent either. Each says
+    /// nothing about an earlier attempt of the same step, which stays as it was.
+    /// `Submitted` once the network accepted it. `Prepared` when the network did not accept it
+    /// yet: nothing is
     /// pending, and the caller can send the same bytes again. `SubmissionUnknown` when the
     /// outcome is uncertain: the caller looks the step up ([`Self::observe_owner`], then
     /// [`Self::owner_status`]) before any other send. A lookup that answers decides: a receipt
@@ -407,10 +415,12 @@ pub trait RuntimeProvider {
     /// implements this method guarantees that this is safe: its network applies one signed step
     /// at most once, however often the identical bytes arrive. A lookup that fails is no answer:
     /// the step stays pending, and the caller sends nothing until a lookup answers. A caller
-    /// never signs or sends other bytes for the step while these can still apply. An error that
-    /// is not a refusal of the checks reports that the network rejected this send: the caller
-    /// reports it, and it decides nothing about an earlier attempt of the same step whose
-    /// outcome was uncertain, which stays pending. Never a final status: only the step's
+    /// never signs or sends other bytes for the step while these can still apply. An uncertain
+    /// outcome of the send itself is always the status `SubmissionUnknown`, never an error. So
+    /// every error means that nothing of this send is pending: the checks refused it, a check
+    /// got no answer, or the network rejected it. The caller reports it, and it decides nothing
+    /// about an earlier attempt of the same step whose outcome was uncertain, which stays
+    /// pending. Never a final status: only the step's
     /// receipt (`observe_owner`) or its lapse ([`Self::owner_step_lapsed`]) ends a possibly sent
     /// step. The default refuses.
     fn broadcast_owner(

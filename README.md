@@ -66,12 +66,15 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
 - Owner steps that the caller sends, each refused by a rail that does not implement it:
   `validate_owner_signed` says whether a signed step may be sent now, for the installation that it
   acts on (none for a step that leaves before its wallet is installed). A refusal is typed:
-  `OWNER_TRANSACTION_EXPIRED`, final, past the step's send cutoff, or `CONTRACT_EXPIRED` for this
-  send of a step on a wallet that lapsed. With an installation the rail reads the wallet once and
-  decides by it alone; the step that renews or restores the wallet's lifetime is never refused for a
-  lapse. A read that fails is an uncertain error, never a lapse and never a pass.
+  `OWNER_TRANSACTION_EXPIRED`, final, at or past the step's send cutoff, or `CONTRACT_EXPIRED` for
+  this send of a step on a wallet that lapsed. With an installation the rail reads the wallet's
+  lifetime once and decides by it alone. It does not read it for the step that renews or restores
+  the wallet's lifetime: that step is never refused for a lapse. A read that fails is an uncertain
+  error, never a lapse and never a pass. A caller gives the installation of every step on an
+  installed wallet.
   `broadcast_owner` sends the step once after the same checks and `owner_status` looks it up,
-  neither with a final status;
+  neither with a final status; an error of `broadcast_owner` means that nothing of that send is
+  pending;
   only the step's receipt (`observe_owner`) or its lapse (`owner_step_lapsed`, by the step's own
   identity, `OwnerSigned::info`) ends a possibly sent step, also past its cutoff; a step that was
   never sent is dropped. After an uncertain send the caller looks the
@@ -154,13 +157,14 @@ which uploads it from its own account and within its fee ceiling when the owner 
 authority. The upload is the transaction of `RuntimeProvider::prepare_code_within`, which a sending account
 signs: the rail prepares it and sends nothing, and the SDK engine sends it and follows it to its receipt like
 any signed operation. The server renews code that wallets share, such as the code of a fixed tier, before it
-lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing restores code that lapsed. A wallet keeps
+lapses (`RuntimeProvider::prepare_code_renewal`), on the same path. Nothing in Allowit restores code that lapsed. A wallet keeps
 its own instance live on each call, and a Custom wallet its own code too. A rail refuses to prepare an operation
 or owner step on a wallet whose instance or code lapsed, with the problem code `CONTRACT_EXPIRED`
 (`contract_expired`), before anything is signed. At the send of a signed owner step on an installed wallet it
 refuses, with the same code and for that attempt, every step but the one that renews or restores the wallet's
-lifetime (`validate_owner_signed`). Nothing in Allowit restores a wallet: its owner restores it on its network
-outside Allowit, and the wallet then takes every owner step again, the return of its funds among them. The
+lifetime (`validate_owner_signed`). Nothing in Allowit restores a wallet: its owner restores what lapsed of it,
+its code among that, on its network outside Allowit, and the wallet then takes every owner step again, the
+return of its funds among them. The
 owner's one creation signature (`OwnerAction::Create`) names the code by its
 hash, so it covers the build. A client that builds compares its own build with that hash. The build is
 reproducible, so anyone can compare the code on the network with the source.
