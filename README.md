@@ -67,9 +67,10 @@ CAIP-2 network id. Engine, CLI and app reach vendor behavior only through the SD
   `validate_owner_signed` says whether a signed step may be sent now, for the installation that it
   acts on (none for a step that leaves before its wallet is installed). A refusal is typed:
   `OWNER_TRANSACTION_EXPIRED`, final, at or past the step's send cutoff, or `CONTRACT_EXPIRED` for
-  this send of a step on a wallet that lapsed. With an installation the rail reads the wallet's
-  lifetime once and decides by it alone. It does not read it for the step that renews or restores
-  the wallet's lifetime: that step is never refused for a lapse. A read that fails is an uncertain
+  this send of a step on a wallet that lapsed. With an installation, a rail on whose network a
+  wallet can lapse reads the wallet's lifetime once and decides by it alone; a rail whose wallets
+  cannot lapse reads nothing. It does not read it for the step that renews or restores the wallet's
+  lifetime: that step is never refused for a lapse. A read that fails is an uncertain
   error, never a lapse and never a pass. A caller gives the installation of every step on an
   installed wallet.
   `broadcast_owner` sends the step once after the same checks and `owner_status` looks it up,
