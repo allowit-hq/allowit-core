@@ -2390,7 +2390,7 @@ fn a_local_value_named_now_that_is_not_the_time_is_admitted() {
     // A stated type and a block that returns the value change nothing.
     let typed = |name: &str| {
         daily_and_question(
-            &format!("    let {name}: u64 = ctx.request.amount;\n"),
+            &format!("    let {name}: i128 = ctx.request.amount;\n"),
             &format!("    assert!(score > 9000 || {{ {name} }} > 5);\n"),
         )
     };
@@ -2454,11 +2454,15 @@ fn a_leaving_statement_that_depends_on_the_time_of_the_request_is_refused() {
         9,
     );
     // A pattern binds the field by reference, mutably or with an attribute.
-    for binding in ["ref now", "mut now", "#[allow(unused_variables)] now"] {
+    for (binding, read) in [
+        ("ref now", "*now"),
+        ("mut now", "now"),
+        ("#[allow(unused_variables)] now", "now"),
+    ] {
         timed(
             &daily_and_question(
                 &format!("    let AllowitRequest {{ {binding}, .. }} = ctx.request.clone();\n"),
-                "    assert!(score > 9000 || now < 1_800_000_000);\n",
+                &format!("    assert!(score > 9000 || {read} < 1_800_000_000);\n"),
             ),
             9,
         );

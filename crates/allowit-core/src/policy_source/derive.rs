@@ -82,7 +82,8 @@
 //!    `allowit::expires_at`. The server evaluates at the preparation, and the contract at the
 //!    settlement ledger. Every field `now`, read after a dot or named in the braces of a struct
 //!    pattern or expression, also after `ref`, `mut` or an attribute, counts as the time. A local
-//!    value named `now` counts only when it is bound from the time.
+//!    value named `now` counts when it is bound from the time, and when it stands where a struct
+//!    field can: in a block after a name, such as `if ready { now }`.
 //! 5. "Depends" is one reach rule for 3 and 4. The statement:
 //!    - reads the value, itself or through a local function that reads it;
 //!    - reads a name that depends on the value: a name that a kept statement binds or can
