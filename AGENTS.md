@@ -4,6 +4,8 @@
 
 Keep code, required build/test inputs and concise API/usage documentation here. Do not commit plans, reviews, evidence or recordings in this repository or its feature branches.
 
+Before any change, check out [allowit-hq/allowit-project](https://github.com/allowit-hq/allowit-project), read its task register (`wiki/tasks/README.md`) and the plan that owns the work, log the task there first, and name it (`TASK-<number>`) in the title of the pull request or on a `Task:` line of its description.
+
 ## Dependencies and packages
 
 Core depends on no other Allowit repository. Rails depend on core. The shared SDK engine depends on core and rails. Never add a dependency on another Allowit repository or a cross-repository path dependency or `[patch]` section.
