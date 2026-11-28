@@ -592,6 +592,14 @@ pub trait OwnerProvider {
             "This rail does not export the placements of a policy",
         ))
     }
+    /// The question that the owner confirms before this rail signs `step` on `network`: what
+    /// the step does on the ledger, in the rail's own words, such as a token transfer or the
+    /// approval of an allowance. A host shows it in place of its own question. `None`, the
+    /// default, keeps the host's question. It reads nothing and signs nothing.
+    fn question(&self, network: &str, step: super::owner::Question<'_>) -> Option<String> {
+        let _ = (network, step);
+        None
+    }
     /// The asset of a new Native wallet on the context's network, read as [`Self::setup`] reads
     /// it and refused where the setup would refuse it, so a host can show it before the setup
     /// asks for the owner's signature. The owner signs in to read it and signs nothing else. A
@@ -1012,6 +1020,15 @@ mod defaults {
             clock: &|| Ok(1),
         };
         assert_eq!(refused(Owner.native_wallet_asset(&cx)), 3);
+        // A rail that states no question of its own keeps the host's.
+        use crate::vendor::owner::Question;
+        for step in [
+            Question::Setup { amount: None },
+            Question::NativeDeploy { amount: Some("1") },
+            Question::Fund { amount: "1" },
+        ] {
+            assert_eq!(Owner.question("test:network", step), None);
+        }
     }
     /// A rail that does not read a receipt or bound an operation's expense is refused, never
     /// given an answer.
