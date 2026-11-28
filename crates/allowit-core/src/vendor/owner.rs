@@ -48,6 +48,18 @@ pub struct Setup<'a> {
     /// account, in the same transaction. `None` funds the reserve and the fee float only.
     pub amount: Option<&'a str>,
 }
+/// An owner step that a host asks the owner to confirm before the rail signs it. Each names the
+/// amount that the owner typed, as decimal text in the installed asset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Question<'a> {
+    /// The setup of a Native wallet, with the amount of [`Setup::amount`].
+    Setup { amount: Option<&'a str> },
+    /// The deployment of a Native wallet that binds a reviewed policy, with its amount.
+    NativeDeploy { amount: Option<&'a str> },
+    /// A refill of an installed wallet by `amount`.
+    Fund { amount: &'a str },
+}
 /// The asset of a new Native wallet, as the server's wallet template of its network states it:
 /// the asset's code and, for an issued asset, its issuer.
 #[derive(Clone, Debug, PartialEq, Eq)]
